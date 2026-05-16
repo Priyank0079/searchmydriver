@@ -45,6 +45,7 @@ import IdentityDetailsPage from './features/driver/registration/pages/IdentityDe
 import DrivingCredentialsPage from './features/driver/registration/pages/DrivingCredentialsPage';
 import BankDetailsPage from './features/driver/registration/pages/BankDetailsPage';
 import SafetyProtocolPage from './features/driver/registration/pages/SafetyProtocolPage';
+import TrainingPage from './features/driver/registration/pages/TrainingPage';
 import ProfileUnderReviewPage from './features/driver/registration/pages/ProfileUnderReviewPage';
 
 // Driver Home & Trips
@@ -74,6 +75,7 @@ import AdminLoginPage from './features/auth/pages/AdminLoginPage';
 import AccountInactive from './features/admin/pages/AccountInactive';
 import AdminDashboard from './features/admin/pages/AdminDashboard';
 import ManageDrivers from './features/admin/pages/ManageDrivers';
+import DriverProfilePage from './features/admin/pages/DriverProfilePage';
 import ManageUsers from './features/admin/pages/ManageUsers';
 import UserProfilePage from './features/admin/pages/UserProfilePage';
 import ManageBookings from './features/admin/pages/ManageBookings';
@@ -133,6 +135,7 @@ function App() {
           <Route path="/driver/register/credentials" element={<DrivingCredentialsPage />} />
           <Route path="/driver/register/bank" element={<BankDetailsPage />} />
           <Route path="/driver/register/safety" element={<SafetyProtocolPage />} />
+          <Route path="/driver/register/training" element={<TrainingPage />} />
           <Route path="/driver/register/approval" element={<ProfileUnderReviewPage />} />
         </Route>
 
@@ -169,6 +172,7 @@ function App() {
           <Route path="/admin/users" element={<ManageUsers />} />
           <Route path="/admin/users/:userId/profile" element={<UserProfilePage />} />
           <Route path="/admin/drivers" element={<ManageDrivers />} />
+          <Route path="/admin/drivers/:driverId/profile" element={<DriverProfilePage />} />
           <Route path="/admin/bookings" element={<ManageBookings />} />
           <Route path="/admin/settings" element={<Navigate to="/admin/settings/platform" replace />} />
           <Route path="/admin/settings/platform" element={<PlatformSettings />} />

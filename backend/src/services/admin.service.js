@@ -6,6 +6,11 @@ import { ApiError } from '../utils/apiError.js';
 import { USER_ROLES, STAFF_ROLES } from '../constants/roles.js';
 import { dedupeDocumentsByType } from '../utils/driverDocuments.util.js';
 import {
+  getActiveTrainingVideos,
+  mergeTrainingProgress,
+  isDriverTrainingComplete,
+} from '../utils/driverTraining.util.js';
+import {
   generateAccessToken,
   generateRefreshToken,
   tokenPayloadFromUser,
@@ -103,6 +108,7 @@ export const getDriversService = async (query) => {
 
   const total = await Driver.countDocuments(filter);
   const data = await Driver.find(filter)
+    .populate('carTypeExperience', 'name')
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(parseInt(limit));
@@ -120,6 +126,29 @@ export const getDriversService = async (query) => {
       page: parseInt(page),
       pages: Math.ceil(total / parseInt(limit))
     }
+  };
+};
+
+export const getDriverByIdService = async (driverId) => {
+  const driver = await Driver.findById(driverId)
+    .populate('carTypeExperience', 'name image')
+    .populate('approvedBy', 'name email');
+
+  if (!driver) {
+    throw new ApiError(404, 'Driver not found');
+  }
+
+  const doc = driver.toObject();
+  doc.documents = dedupeDocumentsByType(doc.documents);
+
+  const videos = await getActiveTrainingVideos();
+  const training = mergeTrainingProgress(videos, doc.trainingProgress);
+  const trainingComplete = await isDriverTrainingComplete(driver);
+
+  return {
+    driver: doc,
+    training,
+    trainingComplete,
   };
 };
 

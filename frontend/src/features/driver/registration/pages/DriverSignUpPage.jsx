@@ -12,8 +12,12 @@ const DriverSignUpPage = () => {
     if (isAuthenticated) {
       if (driver?.approvalStatus === 'approved') {
         navigate('/driver/home');
-      } else if (driver?.onboardingStep === 5) {
+      } else if (driver?.onboardingStep >= 5) {
         navigate('/driver/register/approval');
+      } else if (driver?.onboardingStep === 4) {
+        navigate('/driver/register/training');
+      } else if (driver?.onboardingStep === 3) {
+        navigate('/driver/register/safety');
       } else if (driver?.onboardingStep >= 1) {
         navigate('/driver/register/credentials');
       }

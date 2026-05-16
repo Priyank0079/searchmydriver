@@ -8,10 +8,13 @@ const DriverGuard = () => {
     return <Navigate to="/driver/login" replace />;
   }
 
-  if (driver.onboardingStep < 4) {
-    if (driver.onboardingStep === 1) return <Navigate to="/driver/register/credentials" replace />;
-    if (driver.onboardingStep === 2) return <Navigate to="/driver/register/bank" replace />;
-    if (driver.onboardingStep === 3) return <Navigate to="/driver/register/safety" replace />;
+  const step = driver.onboardingStep || 1;
+
+  if (step < 5) {
+    if (step === 1) return <Navigate to="/driver/register/credentials" replace />;
+    if (step === 2) return <Navigate to="/driver/register/bank" replace />;
+    if (step === 3) return <Navigate to="/driver/register/safety" replace />;
+    if (step === 4) return <Navigate to="/driver/register/training" replace />;
     return <Navigate to="/driver/register/credentials" replace />;
   }
 

@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import documentSchema from './document.schema.js';
 import bankDetailsSchema from './bankDetails.schema.js';
+import trainingProgressSchema from './trainingProgress.schema.js';
 
 // ─── Enums ─────────────────────────────────────────────────────────────────────
 
@@ -110,10 +111,16 @@ const driverSchema = new mongoose.Schema(
       },
     },
 
+    // ── Step 5: Training & certification (required videos) ───────────────────
+    trainingProgress: {
+      type: [trainingProgressSchema],
+      default: [],
+    },
+
     // ── Onboarding & Approval ─────────────────────────────────────────────────
     onboardingStep: {
       type: Number,
-      default: 1, // 1=Identity, 2=Credentials, 3=Bank, 4=Safety, 5=Submitted
+      default: 1, // 1=Identity, 2=Credentials, 3=Bank, 4=Safety, 5=Training done/submitted
       min: 1,
       max: 5,
     },

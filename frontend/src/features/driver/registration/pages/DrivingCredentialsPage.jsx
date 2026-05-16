@@ -10,7 +10,7 @@ import api from '../../../../utils/api';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
 import { useDocumentsManager } from '../../../../hooks/useDocumentsManager';
 
-const steps = ['Identity', 'Credentials', 'Bank', 'Safety'];
+const steps = ['Identity', 'Credentials', 'Bank', 'Safety', 'Training'];
 const MAX_CAR_TYPES = 5;
 const CREDENTIAL_DOC_TYPES = ['driving_license', 'selfie'];
 
@@ -159,7 +159,7 @@ const DrivingCredentialsPage = () => {
       <div className="px-6 pt-2 pb-4">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-lg font-bold">Driving Credentials</h1>
-          <span className="text-xs text-text-muted bg-bg px-2 py-1 rounded-full">2/4</span>
+          <span className="text-xs text-text-muted bg-bg px-2 py-1 rounded-full">2/5</span>
         </div>
         <StepIndicator steps={steps} currentStep={2} />
         <p className="text-xs text-text-muted mt-3">License, experience & car expertise</p>

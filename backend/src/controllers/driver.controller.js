@@ -45,3 +45,13 @@ export const getProfile = asyncHandler(async (req, res) => {
   const result = await driverService.getProfileService(req.driver._id);
   return res.status(200).json(new ApiResponse(200, result, "Driver profile retrieved"));
 });
+
+export const getTraining = asyncHandler(async (req, res) => {
+  const result = await driverService.getDriverTrainingService(req.driver._id);
+  return res.status(200).json(new ApiResponse(200, result, 'Training modules fetched'));
+});
+
+export const updateTrainingProgress = asyncHandler(async (req, res) => {
+  const result = await driverService.updateTrainingProgressService(req.driver._id, req.body);
+  return res.status(200).json(new ApiResponse(200, result, 'Training progress updated'));
+});

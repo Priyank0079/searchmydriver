@@ -14,12 +14,13 @@ const DriverLoginPage = () => {
     if (isAuthenticated && driver) {
       if (driver.approvalStatus === 'approved') {
         navigate('/driver/home');
-      } else if (driver.onboardingStep < 4) {
-        switch(driver.onboardingStep) {
+      } else if (driver.onboardingStep < 5) {
+        switch (driver.onboardingStep) {
           case 0: navigate('/driver/register/identity'); break;
           case 1: navigate('/driver/register/credentials'); break;
           case 2: navigate('/driver/register/bank'); break;
           case 3: navigate('/driver/register/safety'); break;
+          case 4: navigate('/driver/register/training'); break;
           default: navigate('/driver/register/credentials');
         }
       } else {
@@ -61,12 +62,13 @@ const DriverLoginPage = () => {
       // Redirection logic
       if (driver.approvalStatus === 'approved') {
         navigate('/driver/home');
-      } else if (driver.onboardingStep < 4) {
-        switch(driver.onboardingStep) {
+      } else if (driver.onboardingStep < 5) {
+        switch (driver.onboardingStep) {
           case 0: navigate('/driver/register/identity'); break;
           case 1: navigate('/driver/register/credentials'); break;
           case 2: navigate('/driver/register/bank'); break;
           case 3: navigate('/driver/register/safety'); break;
+          case 4: navigate('/driver/register/training'); break;
           default: navigate('/driver/register/credentials');
         }
       } else {

@@ -8,6 +8,11 @@ export const uploadImage = asyncHandler(async (req, res) => {
   return res.status(200).json(new ApiResponse(200, result, 'Image uploaded successfully'));
 });
 
+export const uploadVideo = asyncHandler(async (req, res) => {
+  const result = await commonService.uploadVideoService(req.file, req.body.oldPublicId);
+  return res.status(200).json(new ApiResponse(200, result, 'Video uploaded successfully'));
+});
+
 export const refreshAccessToken = asyncHandler(async (req, res) => {
   const incomingRefreshToken = req.cookies[COOKIE_NAMES.refreshToken] || req.body.refreshToken;
   const tokens = await commonService.refreshSessionTokens(incomingRefreshToken);

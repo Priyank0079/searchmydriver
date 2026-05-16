@@ -1,7 +1,14 @@
-import { Search, Filter } from 'lucide-react';
+import { Filter, RefreshCw, Search } from 'lucide-react';
 import Select from '../../../../components/Select';
 
-const DriverFilters = ({ search, onSearchChange, statusFilter, onStatusChange }) => {
+const DriverFilters = ({
+  search,
+  onSearchChange,
+  statusFilter,
+  onStatusChange,
+  onRefresh,
+  refreshing = false,
+}) => {
   return (
     <div className="sticky top-0 z-20 bg-slate-50/90 backdrop-blur-md pb-2">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
@@ -40,6 +47,17 @@ const DriverFilters = ({ search, onSearchChange, statusFilter, onStatusChange })
               icon={Filter}
             />
           </div>
+          {onRefresh && (
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={refreshing}
+              className="h-12 px-4 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-2 shrink-0"
+            >
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          )}
         </div>
       </div>
     </div>

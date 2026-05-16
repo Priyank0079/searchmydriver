@@ -8,7 +8,7 @@ import { ArrowLeft, User, Phone, Mail, Lock } from 'lucide-react';
 import api from '../../../../utils/api';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
 
-const steps = ['Identity', 'Credentials', 'Bank', 'Safety'];
+const steps = ['Identity', 'Credentials', 'Bank', 'Safety', 'Training'];
 
 const IdentityDetailsPage = () => {
   const navigate = useNavigate();
@@ -18,8 +18,12 @@ const IdentityDetailsPage = () => {
     if (isAuthenticated) {
       if (driver?.approvalStatus === 'approved') {
         navigate('/driver/home');
-      } else if (driver?.onboardingStep === 5) {
+      } else if (driver?.onboardingStep >= 5) {
         navigate('/driver/register/approval');
+      } else if (driver?.onboardingStep === 4) {
+        navigate('/driver/register/training');
+      } else if (driver?.onboardingStep === 3) {
+        navigate('/driver/register/safety');
       } else if (driver?.onboardingStep >= 1) {
         navigate('/driver/register/credentials');
       }
@@ -90,7 +94,7 @@ const IdentityDetailsPage = () => {
       <div className="px-6 pt-2 pb-4">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-lg font-bold">Identity Legal</h1>
-          <span className="text-xs text-text-muted bg-bg px-2 py-1 rounded-full">1/4</span>
+          <span className="text-xs text-text-muted bg-bg px-2 py-1 rounded-full">1/5</span>
         </div>
         <StepIndicator steps={steps} currentStep={1} />
         <p className="text-xs text-text-muted mt-3">Secure account creation</p>

@@ -18,7 +18,9 @@ const AdminLayout = () => {
   const pageTitle =
     location.pathname.includes('/admin/users/') && location.pathname.endsWith('/profile')
       ? 'User Profile'
-      : routeTitles[location.pathname] || 'Admin';
+      : location.pathname.includes('/admin/drivers/') && location.pathname.endsWith('/profile')
+        ? 'Driver Profile'
+        : routeTitles[location.pathname] || 'Admin';
 
   return (
     <div className="w-full flex h-screen bg-bg overflow-hidden">

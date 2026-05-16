@@ -9,6 +9,14 @@ import {
   tokenPayloadFromDriver,
 } from '../utils/jwt.util.js';
 import { mergeDocumentsByType, dedupeDocumentsByType } from '../utils/driverDocuments.util.js';
+import TrainingVideo from '../models/trainingVideo.model.js';
+import {
+  getActiveTrainingVideos,
+  mergeTrainingProgress,
+  isDriverTrainingComplete,
+  isWatchComplete,
+  getWatchThresholdSeconds,
+} from '../utils/driverTraining.util.js';
 
 export const sendOtpService = async (phone) => {
   if (!phone || phone.length !== 10) {
@@ -145,6 +153,82 @@ export const updateOnboardingStepService = async (driverId, data) => {
   return driver;
 };
 
+export const getDriverTrainingService = async (driverId) => {
+  const driver = await Driver.findById(driverId);
+  if (!driver) throw new ApiError(404, 'Driver not found');
+
+  const videos = await getActiveTrainingVideos();
+  const items = mergeTrainingProgress(videos, driver.trainingProgress);
+  const requiredVideos = items.filter((v) => v.isRequired);
+  const allRequiredComplete = requiredVideos.length
+    ? requiredVideos.every((v) => v.completed)
+    : true;
+
+  return {
+    videos: items,
+    allRequiredComplete,
+    canSubmit: driver.onboardingStep >= 4 && allRequiredComplete,
+  };
+};
+
+export const updateTrainingProgressService = async (driverId, data) => {
+  const { trainingVideoId, watchedSeconds, completed } = data;
+
+  if (!trainingVideoId) {
+    throw new ApiError(400, 'Training video ID is required');
+  }
+
+  const driver = await Driver.findById(driverId);
+  if (!driver) throw new ApiError(404, 'Driver not found');
+
+  if (driver.onboardingStep < 4) {
+    throw new ApiError(400, 'Complete safety documents before training');
+  }
+
+  if (driver.onboardingStep >= 5) {
+    throw new ApiError(400, 'Application already submitted');
+  }
+
+  const video = await TrainingVideo.findOne({ _id: trainingVideoId, isActive: true });
+  if (!video) throw new ApiError(404, 'Training video not found');
+
+  const safeWatched = Math.max(0, Math.min(Number(watchedSeconds) || 0, video.durationSeconds || Number.MAX_SAFE_INTEGER));
+  const markComplete = Boolean(completed);
+
+  if (markComplete && !isWatchComplete(safeWatched, video.durationSeconds)) {
+    throw new ApiError(
+      400,
+      `Please watch at least ${getWatchThresholdSeconds(video.durationSeconds)} seconds before completing this video`,
+    );
+  }
+
+  const progressIndex = driver.trainingProgress.findIndex(
+    (p) => String(p.trainingVideoId) === String(trainingVideoId),
+  );
+
+  const entry = {
+    trainingVideoId: video._id,
+    watchedSeconds: safeWatched,
+    completed: markComplete,
+    completedAt: markComplete ? new Date() : null,
+  };
+
+  if (progressIndex >= 0) {
+    if (driver.trainingProgress[progressIndex].completed) {
+      entry.completed = true;
+      entry.completedAt = driver.trainingProgress[progressIndex].completedAt || new Date();
+    }
+    driver.trainingProgress[progressIndex] = entry;
+  } else {
+    driver.trainingProgress.push(entry);
+  }
+
+  await driver.save();
+
+  const merged = mergeTrainingProgress([video.toObject()], driver.trainingProgress)[0];
+  return merged;
+};
+
 export const submitApplicationService = async (driverId) => {
   const driver = await Driver.findById(driverId);
   if (!driver) {
@@ -152,7 +236,16 @@ export const submitApplicationService = async (driverId) => {
   }
 
   if (driver.onboardingStep < 4) {
-    throw new ApiError(400, 'Please complete all steps before submitting');
+    throw new ApiError(400, 'Please complete all onboarding steps before submitting');
+  }
+
+  if (!driver.safetyDeclaration?.agreed) {
+    throw new ApiError(400, 'Please complete the safety declaration first');
+  }
+
+  const trainingComplete = await isDriverTrainingComplete(driver);
+  if (!trainingComplete) {
+    throw new ApiError(400, 'Please complete all required training videos before submitting');
   }
 
   driver.approvalStatus = 'under_review';

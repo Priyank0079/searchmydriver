@@ -2,7 +2,8 @@ import express from 'express';
 import { 
   loginAdmin,
   getCustomers,
-  getDrivers, 
+  getDrivers,
+  getDriverById,
   updateDriverStatus, 
   addAdminMember, 
   getAdminTeam,
@@ -15,9 +16,13 @@ import {
   createCarType, 
   updateCarType, 
   deleteCarType, 
-  createCondition, 
-  updateCondition, 
-  deleteCondition 
+  createCondition,
+  updateCondition,
+  deleteCondition,
+  createTrainingVideo,
+  getTrainingVideos,
+  updateTrainingVideo,
+  deleteTrainingVideo,
 } from '../controllers/platform.controller.js';
 
 const router = express.Router();
@@ -26,6 +31,7 @@ router.post('/auth/login', loginAdmin);
 
 router.get('/users', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), getCustomers);
 router.get('/drivers', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), getDrivers);
+router.get('/drivers/:id', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), getDriverById);
 router.put('/drivers/:id/status', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), updateDriverStatus);
 
 router.post('/team', protectStaff, restrictTo(USER_ROLES.ADMIN), addAdminMember);
@@ -41,5 +47,10 @@ router.delete('/settings/car-types/:id', protectStaff, restrictTo(USER_ROLES.ADM
 router.post('/settings/conditions', protectStaff, restrictTo(USER_ROLES.ADMIN), createCondition);
 router.put('/settings/conditions/:id', protectStaff, restrictTo(USER_ROLES.ADMIN), updateCondition);
 router.delete('/settings/conditions/:id', protectStaff, restrictTo(USER_ROLES.ADMIN), deleteCondition);
+
+router.post('/settings/training-videos', protectStaff, restrictTo(USER_ROLES.ADMIN), createTrainingVideo);
+router.get('/settings/training-videos', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), getTrainingVideos);
+router.put('/settings/training-videos/:id', protectStaff, restrictTo(USER_ROLES.ADMIN), updateTrainingVideo);
+router.delete('/settings/training-videos/:id', protectStaff, restrictTo(USER_ROLES.ADMIN), deleteTrainingVideo);
 
 export default router;

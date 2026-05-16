@@ -45,3 +45,25 @@ export const deleteCondition = asyncHandler(async (req, res) => {
   await platformService.deleteConditionService(req.params.id);
   return res.status(200).json(new ApiResponse(200, null, 'Condition deleted successfully'));
 });
+
+// ─── Training videos ───────────────────────────────────────────────────────────
+
+export const createTrainingVideo = asyncHandler(async (req, res) => {
+  const video = await platformService.createTrainingVideoService(req.body);
+  return res.status(201).json(new ApiResponse(201, video, 'Training video created successfully'));
+});
+
+export const getTrainingVideos = asyncHandler(async (req, res) => {
+  const videos = await platformService.getAllTrainingVideosService(req.query.active === 'true');
+  return res.status(200).json(new ApiResponse(200, videos, 'Training videos fetched successfully'));
+});
+
+export const updateTrainingVideo = asyncHandler(async (req, res) => {
+  const video = await platformService.updateTrainingVideoService(req.params.id, req.body);
+  return res.status(200).json(new ApiResponse(200, video, 'Training video updated successfully'));
+});
+
+export const deleteTrainingVideo = asyncHandler(async (req, res) => {
+  await platformService.deleteTrainingVideoService(req.params.id);
+  return res.status(200).json(new ApiResponse(200, null, 'Training video deleted successfully'));
+});

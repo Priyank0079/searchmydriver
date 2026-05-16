@@ -7,7 +7,7 @@ import { ArrowLeft, User, Hash, Building2, CreditCard } from 'lucide-react';
 import api from '../../../../utils/api';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
 
-const steps = ['Identity', 'Credentials', 'Bank', 'Safety'];
+const steps = ['Identity', 'Credentials', 'Bank', 'Safety', 'Training'];
 
 const BankDetailsPage = () => {
   const navigate = useNavigate();
@@ -77,7 +77,7 @@ const BankDetailsPage = () => {
       <div className="px-6 pt-2 pb-4">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-lg font-bold">Bank Details</h1>
-          <span className="text-xs text-text-muted bg-bg px-2 py-1 rounded-full">3/4</span>
+          <span className="text-xs text-text-muted bg-bg px-2 py-1 rounded-full">3/5</span>
         </div>
         <StepIndicator steps={steps} currentStep={3} />
         <p className="text-xs text-text-muted mt-3">Payout routing setup</p>

@@ -8,7 +8,7 @@ import api from '../../../../utils/api';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
 import { useDocumentsManager } from '../../../../hooks/useDocumentsManager';
 
-const steps = ['Identity', 'Credentials', 'Bank', 'Safety'];
+const steps = ['Identity', 'Credentials', 'Bank', 'Safety', 'Training'];
 const SAFETY_DOC_TYPES = ['aadhaar_front', 'aadhaar_back', 'police_verification'];
 
 const SafetyProtocolPage = () => {
@@ -57,9 +57,8 @@ const SafetyProtocolPage = () => {
         },
       });
 
-      await api.post('/driver/onboarding/submit');
-      updateDriver({ onboardingStep: 4, approvalStatus: 'under_review' });
-      navigate('/driver/register/approval');
+      updateDriver({ onboardingStep: 4 });
+      navigate('/driver/register/training', { replace: true });
     } catch (error) {
       console.error('Failed to submit application', error);
       alert(error.response?.data?.message || 'Failed to submit application. Please try again.');
@@ -127,7 +126,7 @@ const SafetyProtocolPage = () => {
             onClick={handleSubmit}
             className="rounded-full py-4 text-base font-bold shadow-lg shadow-primary/20"
           >
-            {isAnyUploading ? 'UPLOADING...' : 'SUBMIT APPLICATION'}
+            {isAnyUploading ? 'UPLOADING...' : 'CONTINUE TO TRAINING'}
           </Button>
         </div>
       </div>
@@ -140,7 +139,7 @@ function PageHeader({ steps, currentStep, title }) {
   <>
     <div className="flex items-center justify-between mb-4">
       <h1 className="text-lg font-bold">{title}</h1>
-      <span className="text-xs text-text-muted bg-bg px-2 py-1 rounded-full">{currentStep}/4</span>
+      <span className="text-xs text-text-muted bg-bg px-2 py-1 rounded-full">{currentStep}/5</span>
     </div>
     <StepIndicator steps={steps} currentStep={currentStep} />
     <p className="text-xs text-text-muted mt-3">Upload required documents (one file per type)</p>

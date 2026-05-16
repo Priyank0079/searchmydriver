@@ -29,6 +29,26 @@ export const uploadImageService = async (file, oldPublicId) => {
   };
 };
 
+export const uploadVideoService = async (file, oldPublicId) => {
+  if (!file) {
+    throw new ApiError(400, 'No file provided');
+  }
+
+  const result = await uploadToCloudinary(file.buffer, 'sparedriver/training', {
+    resourceType: 'video',
+  });
+
+  if (oldPublicId) {
+    await deleteFromCloudinary(oldPublicId, 'video');
+  }
+
+  return {
+    url: result.secure_url,
+    publicId: result.public_id,
+    durationSeconds: Math.round(result.duration || 0),
+  };
+};
+
 /**
  * Validates refresh token, loads principal, returns new token pair payload.
  * @param {string} incomingRefreshToken

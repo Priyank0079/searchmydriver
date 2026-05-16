@@ -1,8 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import { 
-  Monitor, Car, CheckSquare, Plus, Save, Edit2, Trash2, 
-  Settings as SettingsIcon, AlertCircle, Loader2, Camera, MapPin 
+import {
+  Car,
+  CheckSquare,
+  Plus,
+  Edit2,
+  Trash2,
+  Loader2,
+  Video,
 } from 'lucide-react';
+import TrainingVideosTab from '../components/PlatformSettings/TrainingVideosTab';
 import Card from '../../../components/Card';
 import Button from '../../../components/Button';
 import Input from '../../../components/Input';
@@ -19,6 +25,7 @@ const PlatformSettings = () => {
 
   const [carTypes, setCarTypes] = useState([]);
   const [conditions, setConditions] = useState([]);
+  const [trainingVideos, setTrainingVideos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('vehicles');
 
@@ -35,12 +42,14 @@ const PlatformSettings = () => {
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const [carsRes, condRes] = await Promise.all([
+      const [carsRes, condRes, trainingRes] = await Promise.all([
         api.get('/common/car-types'),
-        api.get('/common/conditions')
+        api.get('/common/conditions'),
+        api.get('/admin/settings/training-videos'),
       ]);
       setCarTypes(carsRes.data.data);
       setConditions(condRes.data.data);
+      setTrainingVideos(trainingRes.data.data);
     } catch (err) {
       console.error('Failed to fetch platform data', err);
     } finally {
@@ -130,6 +139,7 @@ const PlatformSettings = () => {
           {[
             { id: 'vehicles', label: 'Vehicle Types', icon: Car },
             { id: 'conditions', label: 'Registration Checklist', icon: CheckSquare },
+            { id: 'training', label: 'Driver Training', icon: Video },
           ].map(tab => (
             <button
               key={tab.id}
@@ -212,6 +222,20 @@ const PlatformSettings = () => {
                 ))}
               </div>
             </div>
+          )}
+
+          {activeTab === 'training' && (
+            <TrainingVideosTab
+              videos={trainingVideos}
+              onRefresh={fetchData}
+              onCreate={(payload) => api.post('/admin/settings/training-videos', payload)}
+              onUpdate={(id, payload) => api.put(`/admin/settings/training-videos/${id}`, payload)}
+              onDelete={async (id) => {
+                if (!window.confirm('Delete this training video?')) return;
+                await api.delete(`/admin/settings/training-videos/${id}`);
+                fetchData();
+              }}
+            />
           )}
 
           {/* Checklist Tab */}
