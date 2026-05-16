@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Car, CheckCircle2, Circle, Loader2, Mail, Phone } from 'lucide-react';
+import { ArrowLeft, Car, CheckCircle2, Circle, Loader2, Mail, Phone, RefreshCw } from 'lucide-react';
 import Avatar from '../../../components/Avatar';
-import api from '../../../utils/api';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { buildCacheKey } from '../../../store/lib/buildCacheKey';
+import { useAdminUserProfileStore } from '../../../store/admin/useAdminUserProfileStore';
 import { SectionCard, InfoGrid } from '../components/DetailBlocks';
 
 const formatDate = (date) => {
@@ -12,34 +14,18 @@ const formatDate = (date) => {
 
 const UserProfilePage = () => {
   const { userId } = useParams();
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
 
-  useEffect(() => {
-    let cancelled = false;
+  const queryParams = useMemo(() => ({ userId }), [userId]);
+  const cacheKey = buildCacheKey('user-profile', queryParams);
 
-    const load = async () => {
-      setLoading(true);
-      setError('');
-      try {
-        const res = await api.get(`/auth/users/${userId}/profile`);
-        if (!cancelled) setProfile(res.data.data);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err.response?.data?.message || 'Failed to load user profile');
-          setProfile(null);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
+  const { data: profile, loading, error, refetch } = useCachedQuery(
+    useAdminUserProfileStore,
+    cacheKey,
+    queryParams,
+    { enabled: Boolean(userId) },
+  );
 
-    if (userId) load();
-    return () => { cancelled = true; };
-  }, [userId]);
-
-  if (loading) {
+  if (loading && !profile) {
     return (
       <div className="flex flex-col items-center justify-center py-24 gap-3">
         <Loader2 className="w-10 h-10 text-primary animate-spin" />
@@ -61,7 +47,18 @@ const UserProfilePage = () => {
 
   return (
     <div className="space-y-6 animate-fade-in-up pb-8">
-      <BackLink />
+      <div className="flex items-center justify-between gap-4">
+        <BackLink />
+        <button
+          type="button"
+          onClick={() => refetch()}
+          disabled={loading}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
+      </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center gap-5">

@@ -1,49 +1,40 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Avatar from '../../../components/Avatar';
-import api from '../../../utils/api';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { buildCacheKey } from '../../../store/lib/buildCacheKey';
+import { useAdminUsersStore } from '../../../store/admin/useAdminUsersStore';
 import ServerPaginatedTable from '../components/ServerPaginatedTable';
 import UserFilters from '../components/ManageUsers/UserFilters';
 import UserStats from '../components/ManageUsers/UserStats';
 
 const ManageUsers = () => {
   const navigate = useNavigate();
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
   const [search, setSearch] = useState('');
-  const [pagination, setPagination] = useState({ total: 0, pages: 1 });
-
-  const fetchUsers = async () => {
-    try {
-      setLoading(true);
-      const params = new URLSearchParams({ page, limit });
-      if (search) params.append('search', search);
-
-      const res = await api.get(`/admin/users?${params.toString()}`);
-      const payload = res.data?.data;
-
-      if (payload?.data) {
-        setUsers(payload.data);
-        setPagination(payload.pagination || { total: payload.data.length, pages: 1 });
-      } else {
-        setUsers([]);
-        setPagination({ total: 0, pages: 1 });
-      }
-    } catch (error) {
-      console.error('Failed to fetch users', error);
-      setUsers([]);
-      setPagination({ total: 0, pages: 1 });
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [debouncedSearch, setDebouncedSearch] = useState('');
 
   useEffect(() => {
-    const timer = setTimeout(fetchUsers, 300);
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(timer);
-  }, [page, search]);
+  }, [search]);
+
+  const queryParams = useMemo(
+    () => ({ page, limit, search: debouncedSearch }),
+    [page, limit, debouncedSearch],
+  );
+
+  const cacheKey = buildCacheKey('admin-users', queryParams);
+
+  const { data, loading, error, refetch } = useCachedQuery(
+    useAdminUsersStore,
+    cacheKey,
+    queryParams,
+  );
+
+  const users = data?.users ?? [];
+  const pagination = data?.pagination ?? { total: 0, pages: 1 };
 
   const columns = useMemo(
     () => [
@@ -118,8 +109,22 @@ const ManageUsers = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 space-y-6 animate-fade-in-up">
-      <UserFilters search={search} onSearchChange={(val) => { setSearch(val); setPage(1); }} />
+      <UserFilters
+        search={search}
+        onSearchChange={(val) => {
+          setSearch(val);
+          setPage(1);
+        }}
+        onRefresh={refetch}
+        refreshing={loading}
+      />
       <UserStats {...stats} />
+
+      {error && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </div>
+      )}
 
       <ServerPaginatedTable
         columns={columns}
