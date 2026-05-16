@@ -1,0 +1,53 @@
+import { Bell, Menu, Search } from 'lucide-react';
+import Avatar from '../../../components/Avatar';
+
+const AdminHeader = ({ onMenuToggle, title = 'Dashboard' }) => {
+  return (
+    <header className="sticky top-0 z-30 bg-white border-b border-gray-100 px-4 lg:px-6">
+      <div className="flex items-center justify-between h-16">
+        {/* Left: Hamburger + Title */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onMenuToggle}
+            className="lg:hidden p-2 rounded-xl hover:bg-gray-100 text-text-secondary transition-colors"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          <div>
+            <h1 className="text-lg font-bold text-text">{title}</h1>
+          </div>
+        </div>
+
+        {/* Right: Search + Notifications + Profile */}
+        <div className="flex items-center gap-2">
+          {/* Search — desktop only */}
+          <div className="hidden md:block relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+            <input
+              type="text"
+              placeholder="Search..."
+              className="h-10 w-56 bg-gray-50 rounded-xl pl-10 pr-4 text-sm text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/20 border border-transparent focus:border-primary/30 transition-all"
+            />
+          </div>
+
+          {/* Notifications */}
+          <button className="relative p-2.5 rounded-xl hover:bg-gray-100 text-text-secondary transition-colors">
+            <Bell className="w-5 h-5" />
+            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-danger rounded-full ring-2 ring-white" />
+          </button>
+
+          {/* Profile */}
+          <div className="flex items-center gap-2.5 ml-1 pl-3 border-l border-gray-100">
+            <Avatar name="Admin" size="sm" />
+            <div className="hidden sm:block">
+              <p className="text-sm font-semibold text-text leading-tight">Admin</p>
+              <p className="text-[10px] text-text-muted">Super Admin</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+  );
+};
+
+export default AdminHeader;
