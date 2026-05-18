@@ -177,10 +177,59 @@ export const updateDriverStatusService = async (adminId, driverId, data) => {
     driver.approvedBy = adminId;
   } else if (approvalStatus === 'rejected') {
     driver.approvedAt = null;
-    driver.approvedBy = adminId; // Track who rejected it too
+    driver.approvedBy = adminId;
+  } else if (approvalStatus === 'suspended') {
+    driver.isOnline = false;
+    driver.isOnTrip = false;
   } else {
     driver.approvedAt = null;
     driver.approvedBy = null;
+  }
+
+  await driver.save();
+  return driver;
+};
+
+export const suspendDriverService = async (adminId, driverId, data = {}) => {
+  const driver = await Driver.findById(driverId);
+  if (!driver) {
+    throw new ApiError(404, 'Driver not found');
+  }
+
+  if (driver.approvalStatus === 'suspended') {
+    throw new ApiError(400, 'Driver is already suspended');
+  }
+
+  if (driver.approvalStatus !== 'approved') {
+    throw new ApiError(400, 'Only approved drivers can be suspended');
+  }
+
+  const note = (data.note || data.approvalNote || '').trim();
+  driver.approvalStatus = 'suspended';
+  if (note) driver.approvalNote = note;
+  driver.isOnline = false;
+  driver.isOnTrip = false;
+
+  await driver.save();
+  return driver;
+};
+
+export const unsuspendDriverService = async (adminId, driverId) => {
+  const driver = await Driver.findById(driverId);
+  if (!driver) {
+    throw new ApiError(404, 'Driver not found');
+  }
+
+  if (driver.approvalStatus !== 'suspended') {
+    throw new ApiError(400, 'Driver is not suspended');
+  }
+
+  driver.approvalStatus = 'approved';
+  if (!driver.approvedAt) {
+    driver.approvedAt = new Date();
+  }
+  if (!driver.approvedBy) {
+    driver.approvedBy = adminId;
   }
 
   await driver.save();

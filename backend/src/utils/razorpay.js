@@ -1,0 +1,55 @@
+import Razorpay from 'razorpay';
+import crypto from 'crypto';
+import { ApiError } from './apiError.js';
+
+let razorpayInstance = null;
+
+function getRazorpay() {
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+  if (!keyId || !keySecret) {
+    throw new ApiError(503, 'Payment gateway is not configured. Contact support.');
+  }
+
+  if (!razorpayInstance) {
+    razorpayInstance = new Razorpay({ key_id: keyId, key_secret: keySecret });
+  }
+
+  return razorpayInstance;
+}
+
+export function getRazorpayKeyId() {
+  return process.env.RAZORPAY_KEY_ID || '';
+}
+
+export async function createRazorpayOrder({ amountPaise, currency = 'INR', receipt, notes = {} }) {
+  const razorpay = getRazorpay();
+  return razorpay.orders.create({
+    amount: amountPaise,
+    currency,
+    receipt,
+    notes,
+  });
+}
+
+export function verifyRazorpayPaymentSignature({ orderId, paymentId, signature }) {
+  const secret = process.env.RAZORPAY_KEY_SECRET;
+  if (!secret) return false;
+
+  const body = `${orderId}|${paymentId}`;
+  const expected = crypto.createHmac('sha256', secret).update(body).digest('hex');
+  return expected === signature;
+}
+
+export function verifyRazorpayWebhookSignature(rawBody, signature) {
+  const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+  if (!secret || !signature) return false;
+
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(rawBody)
+    .digest('hex');
+
+  return expected === signature;
+}

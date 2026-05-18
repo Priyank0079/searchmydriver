@@ -4,7 +4,9 @@ import {
   getCustomers,
   getDrivers,
   getDriverById,
-  updateDriverStatus, 
+  updateDriverStatus,
+  suspendDriver,
+  unsuspendDriver,
   addAdminMember, 
   getAdminTeam,
   updateAdminMember,
@@ -24,6 +26,21 @@ import {
   updateTrainingVideo,
   deleteTrainingVideo,
 } from '../controllers/platform.controller.js';
+import {
+  createKit,
+  getKits,
+  getKitById,
+  updateKit,
+  deleteKit,
+} from '../controllers/kit.controller.js';
+import {
+  getAdminKitOrders,
+  getAdminKitOrderById,
+  approveKitOrder,
+  rejectKitOrder,
+  dispatchKitOrder,
+  deliverKitOrder,
+} from '../controllers/kitOrder.controller.js';
 
 const router = express.Router();
 
@@ -33,6 +50,8 @@ router.get('/users', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_
 router.get('/drivers', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), getDrivers);
 router.get('/drivers/:id', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), getDriverById);
 router.put('/drivers/:id/status', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), updateDriverStatus);
+router.patch('/drivers/:id/suspend', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), suspendDriver);
+router.patch('/drivers/:id/unsuspend', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), unsuspendDriver);
 
 router.post('/team', protectStaff, restrictTo(USER_ROLES.ADMIN), addAdminMember);
 router.get('/team', protectStaff, restrictTo(USER_ROLES.ADMIN), getAdminTeam);
@@ -52,5 +71,19 @@ router.post('/settings/training-videos', protectStaff, restrictTo(USER_ROLES.ADM
 router.get('/settings/training-videos', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), getTrainingVideos);
 router.put('/settings/training-videos/:id', protectStaff, restrictTo(USER_ROLES.ADMIN), updateTrainingVideo);
 router.delete('/settings/training-videos/:id', protectStaff, restrictTo(USER_ROLES.ADMIN), deleteTrainingVideo);
+
+// Driver kits
+router.post('/kits', protectStaff, restrictTo(USER_ROLES.ADMIN), createKit);
+router.get('/kits', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), getKits);
+router.get('/kits/:id', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), getKitById);
+router.put('/kits/:id', protectStaff, restrictTo(USER_ROLES.ADMIN), updateKit);
+router.delete('/kits/:id', protectStaff, restrictTo(USER_ROLES.ADMIN), deleteKit);
+
+router.get('/kit-orders', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), getAdminKitOrders);
+router.get('/kit-orders/:id', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), getAdminKitOrderById);
+router.patch('/kit-orders/:id/approve', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), approveKitOrder);
+router.patch('/kit-orders/:id/reject', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), rejectKitOrder);
+router.patch('/kit-orders/:id/dispatch', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), dispatchKitOrder);
+router.patch('/kit-orders/:id/deliver', protectStaff, restrictTo(USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER), deliverKitOrder);
 
 export default router;

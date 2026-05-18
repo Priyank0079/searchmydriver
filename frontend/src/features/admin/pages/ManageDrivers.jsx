@@ -8,6 +8,7 @@ import StatusBadge from '../components/StatusBadge';
 import ServerPaginatedTable from '../components/ServerPaginatedTable';
 import DriverStats from '../components/ManageDrivers/DriverStats';
 import DriverFilters from '../components/ManageDrivers/DriverFilters';
+import DriverSuspendActions from '../components/ManageDrivers/DriverSuspendActions';
 import { getCarTypeLabel } from '../components/ManageDrivers/driverProfileUtils';
 
 const ManageDrivers = () => {
@@ -111,7 +112,7 @@ const ManageDrivers = () => {
       {
         key: 'createdAt',
         label: 'Joined',
-        width: '12%',
+        width: '10%',
         className: 'hidden lg:table-cell',
         render: (val) => (
           <span className="text-xs text-slate-500">
@@ -119,8 +120,16 @@ const ManageDrivers = () => {
           </span>
         ),
       },
+      {
+        key: 'actions',
+        label: 'Actions',
+        width: '14%',
+        render: (_val, row) => (
+          <DriverSuspendActions driver={row} onSuccess={refetch} compact />
+        ),
+      },
     ],
-    [],
+    [refetch],
   );
 
   const stats = useMemo(
@@ -131,6 +140,7 @@ const ManageDrivers = () => {
       ).length,
       approved: drivers.filter((d) => d.approvalStatus === 'approved').length,
       rejected: drivers.filter((d) => d.approvalStatus === 'rejected').length,
+      suspended: drivers.filter((d) => d.approvalStatus === 'suspended').length,
     }),
     [drivers, pagination.total],
   );

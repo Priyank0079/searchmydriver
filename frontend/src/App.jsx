@@ -62,6 +62,9 @@ import MyTripsPage from './features/driver/trips/pages/MyTripsPage';
 // Driver Dashboard
 import EarningsPage from './features/driver/earnings/pages/EarningsPage';
 import DriverAccountPage from './features/driver/account/pages/DriverAccountPage';
+import DriverOrdersPage from './features/driver/account/pages/DriverOrdersPage';
+import DriverOrderDetailPage from './features/driver/account/pages/DriverOrderDetailPage';
+import DriverPaymentHistoryPage from './features/driver/account/pages/DriverPaymentHistoryPage';
 
 // Admin Layout & Guard
 import AdminGuard from './guards/AdminGuard';
@@ -82,6 +85,11 @@ import ManageBookings from './features/admin/pages/ManageBookings';
 import PlatformSettings from './features/admin/pages/PlatformSettings';
 import PaymentSettings from './features/admin/pages/PaymentSettings';
 import ManageTeam from './features/admin/pages/ManageTeam';
+import ManageKits from './features/admin/pages/ManageKits';
+import ManageKitOrders from './features/admin/pages/ManageKitOrders';
+import KitOrderDetailPage from './features/admin/pages/KitOrderDetailPage';
+import DriverKitPage from './features/driver/kit/pages/DriverKitPage';
+import KitPurchaseHistoryPage from './features/driver/kit/pages/KitPurchaseHistoryPage';
 
 function App() {
   return (
@@ -149,6 +157,12 @@ function App() {
             <Route path="/driver/account" element={<DriverAccountPage />} />
           </Route>
 
+          <Route path="/driver/kit" element={<DriverKitPage />} />
+          <Route path="/driver/kit/history" element={<KitPurchaseHistoryPage />} />
+          <Route path="/driver/orders" element={<DriverOrdersPage />} />
+          <Route path="/driver/orders/:orderId" element={<DriverOrderDetailPage />} />
+          <Route path="/driver/payments" element={<DriverPaymentHistoryPage />} />
+
           {/* ========== Driver Trip Flow ========== */}
           <Route path="/driver/trip/new-request" element={<NewBookingRequestPage />} />
           <Route path="/driver/trip/navigate" element={<NavigateToCustomerPage />} />
@@ -173,6 +187,9 @@ function App() {
           <Route path="/admin/users/:userId/profile" element={<UserProfilePage />} />
           <Route path="/admin/drivers" element={<ManageDrivers />} />
           <Route path="/admin/drivers/:driverId/profile" element={<DriverProfilePage />} />
+          <Route path="/admin/kits" element={<ManageKits />} />
+          <Route path="/admin/kit-orders" element={<ManageKitOrders />} />
+          <Route path="/admin/kit-orders/:orderId" element={<KitOrderDetailPage />} />
           <Route path="/admin/bookings" element={<ManageBookings />} />
           <Route path="/admin/settings" element={<Navigate to="/admin/settings/platform" replace />} />
           <Route path="/admin/settings/platform" element={<PlatformSettings />} />

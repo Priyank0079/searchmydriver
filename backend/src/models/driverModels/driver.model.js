@@ -260,6 +260,21 @@ const driverSchema = new mongoose.Schema(
       default: null,
     },
 
+    // ── Driver kit (mandatory before going online) ───────────────────────────
+    activeKitOrderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'KitOrder',
+      default: null,
+    },
+    canGoOnline: {
+      type: Boolean,
+      default: false,
+    },
+    kitEligibilityCheckedAt: {
+      type: Date,
+      default: null,
+    },
+
     // ── Soft Delete ───────────────────────────────────────────────────────────
     isDeleted: {
       type: Boolean,

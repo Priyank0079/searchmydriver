@@ -17,6 +17,7 @@ import {
   isWatchComplete,
   getWatchThresholdSeconds,
 } from '../utils/driverTraining.util.js';
+import { syncDriverKitEligibility } from '../utils/kitEligibility.util.js';
 
 export const sendOtpService = async (phone) => {
   if (!phone || phone.length !== 10) {
@@ -260,5 +261,14 @@ export const getProfileService = async (driverId) => {
     throw new ApiError(404, 'Driver not found');
   }
   driver.documents = dedupeDocumentsByType(driver.documents);
-  return driver;
+
+  const eligibility = await syncDriverKitEligibility(driverId);
+
+  const doc = driver.toObject();
+  doc.kitEligibility = {
+    canGoOnline: eligibility.allowed,
+    reasons: eligibility.reasons,
+    code: eligibility.code,
+  };
+  return doc;
 };

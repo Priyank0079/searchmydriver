@@ -10,6 +10,21 @@ import {
   updateTrainingProgress,
 } from '../controllers/driver.controller.js';
 import { protectDriver } from '../middlewares/authMiddleware.js';
+import { getMandatoryKit, getAvailableKits } from '../controllers/kit.controller.js';
+import {
+  createKitOrder,
+  getMyKitOrders,
+  getMyActiveKitOrder,
+  retryKitOrderPayment,
+  markKitOrderPaymentFailed,
+} from '../controllers/kitOrder.controller.js';
+import { verifyKitPayment } from '../controllers/payment.controller.js';
+import { getOnlineStatus, setOnlineStatus } from '../controllers/driverOnline.controller.js';
+import {
+  getMyOrders,
+  getMyOrderById,
+  getMyPaymentHistory,
+} from '../controllers/driverHistory.controller.js';
 
 const router = express.Router();
 
@@ -22,5 +37,20 @@ router.get('/training', protectDriver, getTraining);
 router.put('/training/progress', protectDriver, updateTrainingProgress);
 router.post('/onboarding/submit', protectDriver, submitApplication);
 router.get('/profile', protectDriver, getProfile);
+
+router.get('/kits', protectDriver, getAvailableKits);
+router.get('/kits/mandatory', protectDriver, getMandatoryKit);
+router.get('/kit-orders', protectDriver, getMyKitOrders);
+router.get('/kit-orders/active', protectDriver, getMyActiveKitOrder);
+router.post('/kit-orders', protectDriver, createKitOrder);
+router.post('/kit-orders/:id/pay', protectDriver, retryKitOrderPayment);
+router.post('/kit-orders/:id/payment-failed', protectDriver, markKitOrderPaymentFailed);
+router.get('/orders', protectDriver, getMyOrders);
+router.get('/orders/:id', protectDriver, getMyOrderById);
+router.get('/payments/history', protectDriver, getMyPaymentHistory);
+router.post('/payments/verify', protectDriver, verifyKitPayment);
+
+router.get('/online/status', protectDriver, getOnlineStatus);
+router.put('/online', protectDriver, setOnlineStatus);
 
 export default router;

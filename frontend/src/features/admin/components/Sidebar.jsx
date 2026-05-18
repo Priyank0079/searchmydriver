@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Car, CalendarCheck, DollarSign, Settings,
-  LogOut, X, ChevronRight, ChevronDown, ShieldCheck, CreditCard, Monitor
+  LogOut, X, ChevronRight, ChevronDown, ShieldCheck, CreditCard, Monitor, Package,
 } from 'lucide-react';
 import { APP_NAME } from '../../../utils/constants';
 import useAdminAuthStore from '../../../store/useAdminAuthStore';
@@ -11,6 +11,8 @@ const navItems = [
   { path: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true, roles: ['admin'] },
   { path: '/admin/users', label: 'Users', icon: Users },
   { path: '/admin/drivers', label: 'Drivers', icon: Car },
+  { path: '/admin/kits', label: 'Driver Kits', icon: Package, roles: ['admin'] },
+  { path: '/admin/kit-orders', label: 'Kit Orders', icon: Package },
   { path: '/admin/bookings', label: 'Bookings', icon: CalendarCheck },
   { path: '/admin/revenue', label: 'Revenue', icon: DollarSign },
   {

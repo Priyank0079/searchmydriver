@@ -7,6 +7,8 @@ const routeTitles = {
   '/admin': 'Dashboard',
   '/admin/users': 'Manage Users',
   '/admin/drivers': 'Manage Drivers',
+  '/admin/kits': 'Driver Kits',
+  '/admin/kit-orders': 'Kit Orders',
   '/admin/bookings': 'Manage Bookings',
   '/admin/revenue': 'Revenue Reports',
   '/admin/settings': 'Settings',
@@ -20,7 +22,9 @@ const AdminLayout = () => {
       ? 'User Profile'
       : location.pathname.includes('/admin/drivers/') && location.pathname.endsWith('/profile')
         ? 'Driver Profile'
-        : routeTitles[location.pathname] || 'Admin';
+        : location.pathname.match(/^\/admin\/kit-orders\/[^/]+$/)
+          ? 'Kit Order Detail'
+          : routeTitles[location.pathname] || 'Admin';
 
   return (
     <div className="w-full flex h-screen bg-bg overflow-hidden">

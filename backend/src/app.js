@@ -7,6 +7,7 @@ import commonRoutes from './routes/common.route.js';
 import driverRoutes from './routes/driver.route.js';
 import adminRoutes from './routes/admin.route.js';
 import authRoutes from './routes/user.routes.js';
+import webhookRoutes from './routes/webhook.route.js';
 
 const app = express();
 
@@ -17,6 +18,7 @@ app.use(
   }),
 );
 app.use(cookieParser());
+app.use('/api/v1/webhooks', webhookRoutes);
 app.use(express.json({ limit: '16kb' }));
 app.use(express.urlencoded({ extended: true, limit: '16kb' }));
 
@@ -40,6 +42,7 @@ app.use((err, req, res, _next) => {
   res.status(statusCode).json({
     status: statusCode,
     message,
+    ...(err.data != null ? { data: err.data } : {}),
   });
 });
 
