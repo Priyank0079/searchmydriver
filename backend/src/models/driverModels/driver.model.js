@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import documentSchema from './document.schema.js';
 import bankDetailsSchema from './bankDetails.schema.js';
 import trainingProgressSchema from './trainingProgress.schema.js';
+import vehicleExperienceSchema from './vehicleExperience.schema.js';
 
 // ─── Enums ─────────────────────────────────────────────────────────────────────
 
@@ -74,7 +75,17 @@ const driverSchema = new mongoose.Schema(
       default: '',
     },
 
-    // Car types the driver has experience with (max 5)
+    /** Detailed vehicles (category, brand, model, fuel) — max 5 */
+    vehicleExperience: {
+      type: [vehicleExperienceSchema],
+      validate: {
+        validator: (arr) => arr.length <= 5,
+        message: 'You can add a maximum of 5 vehicles',
+      },
+      default: [],
+    },
+
+    /** Derived unique categories from vehicleExperience (for matching) */
     carTypeExperience: {
       type: [
         {

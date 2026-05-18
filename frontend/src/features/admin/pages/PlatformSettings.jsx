@@ -9,14 +9,18 @@ import {
   Video,
 } from 'lucide-react';
 import TrainingVideosTab from '../components/PlatformSettings/TrainingVideosTab';
+import VehicleCatalogSettings from '../components/PlatformSettings/VehicleCatalogSettings';
 import Card from '../../../components/Card';
 import Button from '../../../components/Button';
 import Input from '../../../components/Input';
 import Toggle from '../../../components/Toggle';
 import Modal from '../../../components/Modal';
 import api from '../../../utils/api';
+import useAdminAuthStore from '../../../store/useAdminAuthStore';
+import { canManagePlatformSettings } from '../../../constants/staffRoles';
 
 const PlatformSettings = () => {
+  const { admin } = useAdminAuthStore();
   const [systemConfig, setSystemConfig] = useState({
     allowNewRegistrations: true,
     autoAssignDrivers: false,
@@ -39,12 +43,12 @@ const PlatformSettings = () => {
   const [carForm, setCarForm] = useState({ name: '', description: '', image: '', isActive: true });
   const [conditionForm, setConditionForm] = useState({ question: '', key: '', isRequired: false, isActive: true });
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const [carsRes, condRes, trainingRes] = await Promise.all([
-        api.get('/common/car-types'),
-        api.get('/common/conditions'),
+        api.get('/admin/settings/car-types'),
+        api.get('/admin/settings/conditions'),
         api.get('/admin/settings/training-videos'),
       ]);
       setCarTypes(carsRes.data.data);
@@ -52,8 +56,11 @@ const PlatformSettings = () => {
       setTrainingVideos(trainingRes.data.data);
     } catch (err) {
       console.error('Failed to fetch platform data', err);
+      if (!silent) {
+        alert(err.response?.data?.message || 'Failed to load platform settings. Please log in again if your role was recently changed.');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -74,7 +81,7 @@ const PlatformSettings = () => {
       } else {
         await api.post('/admin/settings/car-types', carForm);
       }
-      fetchData();
+      await fetchData({ silent: true });
       setShowCarModal(false);
       setEditingItem(null);
     } catch (err) {
@@ -93,7 +100,7 @@ const PlatformSettings = () => {
       } else {
         await api.post('/admin/settings/conditions', conditionForm);
       }
-      fetchData();
+      await fetchData({ silent: true });
       setShowConditionModal(false);
       setEditingItem(null);
     } catch (err) {
@@ -107,7 +114,7 @@ const PlatformSettings = () => {
     if (!window.confirm('Delete this car type?')) return;
     try {
       await api.delete(`/admin/settings/car-types/${id}`);
-      fetchData();
+      await fetchData({ silent: true });
     } catch (err) {
       alert('Delete failed');
     }
@@ -117,11 +124,19 @@ const PlatformSettings = () => {
     if (!window.confirm('Delete this condition?')) return;
     try {
       await api.delete(`/admin/settings/conditions/${id}`);
-      fetchData();
+      await fetchData({ silent: true });
     } catch (err) {
       alert('Delete failed');
     }
   };
+
+  if (!canManagePlatformSettings(admin?.role)) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        You do not have permission to manage platform settings.
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-6xl space-y-8 animate-fade-in-up pb-10 px-2 sm:px-0">
@@ -137,7 +152,7 @@ const PlatformSettings = () => {
       <div className="overflow-x-auto pb-1 no-scrollbar">
         <div className="flex items-center gap-1.5 p-1.5 bg-slate-100 rounded-2xl w-fit">
           {[
-            { id: 'vehicles', label: 'Vehicle Types', icon: Car },
+            { id: 'vehicles', label: 'Vehicle Catalog', icon: Car },
             { id: 'conditions', label: 'Registration Checklist', icon: CheckSquare },
             { id: 'training', label: 'Driver Training', icon: Video },
           ].map(tab => (
@@ -164,76 +179,41 @@ const PlatformSettings = () => {
         </div>
       ) : (
         <div className="space-y-8">
-          {/* Vehicle Types Tab */}
           {activeTab === 'vehicles' && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xl font-bold text-slate-800">Manage Vehicle Categories</h3>
-                <Button 
-                  onClick={() => {
-                    setEditingItem(null);
-                    setCarForm({ name: '', description: '', image: '', isActive: true });
-                    setShowCarModal(true);
-                  }}
-                  className="flex items-center gap-2"
-                >
-                  <Plus className="w-4 h-4" /> Add Car Type
-                </Button>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {carTypes.map(car => (
-                  <Card key={car._id} className="group hover:border-primary/30 transition-all duration-300">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400 group-hover:bg-primary/10 group-hover:text-primary transition-all">
-                          <Car className="w-6 h-6" />
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-slate-900">{car.name}</h4>
-                          <p className="text-xs text-slate-500 mt-0.5">{car.isActive ? 'Active Category' : 'Hidden'}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button 
-                          onClick={() => {
-                            setEditingItem(car);
-                            setCarForm({ name: car.name, description: car.description, image: car.image, isActive: car.isActive });
-                            setShowCarModal(true);
-                          }}
-                          className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-all"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button 
-                          onClick={() => deleteCarType(car._id)}
-                          className="p-2 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-600 transition-all"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                    {car.description && (
-                      <p className="text-xs text-slate-600 mt-4 leading-relaxed line-clamp-2 italic">
-                        "{car.description}"
-                      </p>
-                    )}
-                  </Card>
-                ))}
-              </div>
-            </div>
+            <VehicleCatalogSettings
+              carTypes={carTypes}
+              onRefresh={() => fetchData({ silent: true })}
+              categoryModal={{
+                openCreate: () => {
+                  setEditingItem(null);
+                  setCarForm({ name: '', description: '', image: '', isActive: true });
+                  setShowCarModal(true);
+                },
+                openEdit: (car) => {
+                  setEditingItem(car);
+                  setCarForm({
+                    name: car.name,
+                    description: car.description,
+                    image: car.image,
+                    isActive: car.isActive,
+                  });
+                  setShowCarModal(true);
+                },
+                deleteCarType,
+              }}
+            />
           )}
 
           {activeTab === 'training' && (
             <TrainingVideosTab
               videos={trainingVideos}
-              onRefresh={fetchData}
+              onRefresh={() => fetchData({ silent: true })}
               onCreate={(payload) => api.post('/admin/settings/training-videos', payload)}
               onUpdate={(id, payload) => api.put(`/admin/settings/training-videos/${id}`, payload)}
               onDelete={async (id) => {
                 if (!window.confirm('Delete this training video?')) return;
                 await api.delete(`/admin/settings/training-videos/${id}`);
-                fetchData();
+                await fetchData({ silent: true });
               }}
             />
           )}
@@ -309,7 +289,7 @@ const PlatformSettings = () => {
       <Modal
         isOpen={showCarModal}
         onClose={() => setShowCarModal(false)}
-        title={editingItem ? 'Edit Car Type' : 'New Car Type'}
+        title={editingItem ? 'Edit car category' : 'New car category'}
       >
         <form onSubmit={handleCarSubmit} className="space-y-4 p-2">
           <Input 

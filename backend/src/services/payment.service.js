@@ -80,6 +80,9 @@ export const verifyKitPaymentService = async (driverId, body) => {
   });
   await kitOrder.save();
 
+  const { upsertKitOrderReviewTask } = await import('./adminTask.service.js');
+  await upsertKitOrderReviewTask(kitOrder);
+
   const eligibility = await syncDriverKitEligibility(driverId);
 
   return { order: kitOrder, payment, eligibility, alreadyPaid: false };
@@ -105,6 +108,8 @@ export const handleRazorpayWebhookService = async (event, payload) => {
       note: 'Webhook: payment captured',
     });
     await kitOrder.save();
+    const { upsertKitOrderReviewTask } = await import('./adminTask.service.js');
+    await upsertKitOrderReviewTask(kitOrder);
     await syncDriverKitEligibility(kitOrder.driverId);
     return { handled: true };
   }

@@ -131,10 +131,25 @@ export const updateOnboardingStepService = async (driverId, data) => {
   }
 
   if (stepNumber === 2) {
+    const {
+      normalizeDriverVehicleExperience,
+      syncCarTypeExperienceFromVehicles,
+    } = await import('../utils/driverVehicleExperience.util.js');
+
     driver.drivingLicense = stepData.drivingLicense;
     driver.experienceYears = stepData.experienceYears;
     driver.availability = stepData.availability;
-    driver.carTypeExperience = stepData.carTypeExperience;
+
+    if (stepData.vehicleExperience?.length) {
+      const vehicles = await normalizeDriverVehicleExperience(stepData.vehicleExperience);
+      driver.vehicleExperience = vehicles;
+      driver.carTypeExperience = syncCarTypeExperienceFromVehicles(vehicles);
+    } else if (stepData.carTypeExperience?.length) {
+      driver.carTypeExperience = stepData.carTypeExperience;
+    } else {
+      throw new ApiError(400, 'Add at least one vehicle you have experience driving');
+    }
+
     if (stepData.documents) mergeDocumentsByType(driver.documents, stepData.documents);
     if (driver.onboardingStep < 2) driver.onboardingStep = 2;
   } else if (stepNumber === 3) {
@@ -252,11 +267,23 @@ export const submitApplicationService = async (driverId) => {
   driver.approvalStatus = 'under_review';
   driver.onboardingStep = 5;
   await driver.save();
+
+  const { upsertDriverReviewTask } = await import('./adminTask.service.js');
+  await upsertDriverReviewTask(driver);
+
   return driver;
 };
 
+const vehicleExperiencePopulate = [
+  { path: 'vehicleExperience.carTypeId', select: 'name' },
+  { path: 'vehicleExperience.brandId', select: 'name' },
+  { path: 'vehicleExperience.modelId', select: 'name' },
+  { path: 'vehicleExperience.fuelTypeId', select: 'name' },
+  { path: 'carTypeExperience', select: 'name' },
+];
+
 export const getProfileService = async (driverId) => {
-  const driver = await Driver.findById(driverId);
+  const driver = await Driver.findById(driverId).populate(vehicleExperiencePopulate);
   if (!driver) {
     throw new ApiError(404, 'Driver not found');
   }

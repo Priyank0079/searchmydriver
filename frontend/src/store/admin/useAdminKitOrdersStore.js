@@ -1,7 +1,7 @@
 import api from '../../utils/api';
 import { createQueryStore } from '../lib/createQueryStore';
 
-export const useAdminKitOrdersStore = createQueryStore(async ({ page, limit, search, status, paymentStatus, adminStatus }) => {
+export const useAdminKitOrdersStore = createQueryStore(async ({ page, limit, search, status, paymentStatus, adminStatus, assigneeId }) => {
   const params = new URLSearchParams({
     page: String(page),
     limit: String(limit),
@@ -10,6 +10,7 @@ export const useAdminKitOrdersStore = createQueryStore(async ({ page, limit, sea
   if (status) params.append('status', status);
   if (paymentStatus) params.append('paymentStatus', paymentStatus);
   if (adminStatus) params.append('adminStatus', adminStatus);
+  if (assigneeId) params.append('assigneeId', assigneeId);
 
   const res = await api.get(`/admin/kit-orders?${params.toString()}`);
   const payload = res.data?.data;

@@ -3,7 +3,8 @@ import User from '../models/user.model.js';
 import Car from '../models/user/car.model.js';
 import bcrypt from 'bcrypt';
 import { ApiError } from '../utils/apiError.js';
-import { USER_ROLES, STAFF_ROLES } from '../constants/roles.js';
+import { USER_ROLES } from '../constants/roles.js';
+import { STAFF_ROLES } from '../constants/staffPermissions.js';
 import { dedupeDocumentsByType } from '../utils/driverDocuments.util.js';
 import {
   getActiveTrainingVideos,
@@ -15,6 +16,16 @@ import {
   generateRefreshToken,
   tokenPayloadFromUser,
 } from '../utils/jwt.util.js';
+import {
+  attachReviewTasks,
+  assertStaffCanActOnResource,
+  assertStaffCanAccessResource,
+  completeTaskForResource,
+  upsertDriverReviewTask,
+  getResourceIdScopeForStaff,
+} from './adminTask.service.js';
+import { TASK_TYPE } from '../constants/adminTask.js';
+import AdminTask from '../models/adminTask.model.js';
 
 export const loginStaffService = async (email, password) => {
   if (!email || !password) {
@@ -44,6 +55,14 @@ export const loginStaffService = async (email, password) => {
     refreshToken: generateRefreshToken(payload),
     admin: staff,
   };
+};
+
+export const getStaffProfileService = async (staffId) => {
+  const staff = await User.findById(staffId).select('-password');
+  if (!staff || staff.isDeleted || !STAFF_ROLES.includes(staff.role)) {
+    throw new ApiError(404, 'Profile not found');
+  }
+  return staff;
 };
 
 export const getCustomersService = async (query) => {
@@ -92,16 +111,30 @@ export const getCustomersService = async (query) => {
   };
 };
 
-export const getDriversService = async (query) => {
-  const { status, search, page = 1, limit = 10 } = query;
+export const getDriversService = async (staff, query) => {
+  const { status, search, assigneeId, page = 1, limit = 10 } = query;
+
+  const scope = await getResourceIdScopeForStaff(
+    staff,
+    TASK_TYPE.DRIVER_REVIEW,
+    assigneeId,
+    page,
+    limit,
+  );
+  if (scope?.empty) {
+    return { data: [], pagination: scope.pagination };
+  }
 
   const filter = {};
   if (status) filter.approvalStatus = status;
   if (search) {
     filter.$or = [
       { name: { $regex: search, $options: 'i' } },
-      { phone: { $regex: search, $options: 'i' } }
+      { phone: { $regex: search, $options: 'i' } },
     ];
+  }
+  if (scope?.resourceIds) {
+    filter._id = { $in: scope.resourceIds };
   }
 
   const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -119,19 +152,27 @@ export const getDriversService = async (query) => {
     return doc;
   });
 
+  const withTasks = await attachReviewTasks(staff, normalized, TASK_TYPE.DRIVER_REVIEW);
+
   return {
-    data: normalized,
+    data: withTasks,
     pagination: {
       total,
       page: parseInt(page),
-      pages: Math.ceil(total / parseInt(limit))
-    }
+      pages: Math.ceil(total / parseInt(limit)),
+    },
   };
 };
 
-export const getDriverByIdService = async (driverId) => {
+export const getDriverByIdService = async (staff, driverId) => {
+  await assertStaffCanAccessResource(staff, AdminTask, TASK_TYPE.DRIVER_REVIEW, driverId);
+
   const driver = await Driver.findById(driverId)
     .populate('carTypeExperience', 'name image')
+    .populate('vehicleExperience.carTypeId', 'name')
+    .populate('vehicleExperience.brandId', 'name')
+    .populate('vehicleExperience.modelId', 'name')
+    .populate('vehicleExperience.fuelTypeId', 'name')
     .populate('approvedBy', 'name email');
 
   if (!driver) {
@@ -152,7 +193,7 @@ export const getDriverByIdService = async (driverId) => {
   };
 };
 
-export const updateDriverStatusService = async (adminId, driverId, data) => {
+export const updateDriverStatusService = async (staff, driverId, data) => {
   const { approvalStatus, approvalNote } = data;
 
   if (!['approved', 'rejected', 'suspended'].includes(approvalStatus)) {
@@ -162,6 +203,10 @@ export const updateDriverStatusService = async (adminId, driverId, data) => {
   const note = (approvalNote || '').trim();
   if (['approved', 'rejected'].includes(approvalStatus) && note.length < 10) {
     throw new ApiError(400, 'Approval note is required (minimum 10 characters) for approve or reject actions');
+  }
+
+  if (['approved', 'rejected'].includes(approvalStatus)) {
+    await assertStaffCanActOnResource(staff, TASK_TYPE.DRIVER_REVIEW, driverId);
   }
 
   const driver = await Driver.findById(driverId);
@@ -174,10 +219,10 @@ export const updateDriverStatusService = async (adminId, driverId, data) => {
 
   if (approvalStatus === 'approved') {
     driver.approvedAt = new Date();
-    driver.approvedBy = adminId;
+    driver.approvedBy = staff._id;
   } else if (approvalStatus === 'rejected') {
     driver.approvedAt = null;
-    driver.approvedBy = adminId;
+    driver.approvedBy = staff._id;
   } else if (approvalStatus === 'suspended') {
     driver.isOnline = false;
     driver.isOnTrip = false;
@@ -187,6 +232,16 @@ export const updateDriverStatusService = async (adminId, driverId, data) => {
   }
 
   await driver.save();
+
+  if (['approved', 'rejected'].includes(approvalStatus)) {
+    await completeTaskForResource(staff, TASK_TYPE.DRIVER_REVIEW, driverId, {
+      action: approvalStatus,
+      note,
+    });
+  } else if (approvalStatus === 'suspended') {
+    await upsertDriverReviewTask(driver);
+  }
+
   return driver;
 };
 
@@ -236,12 +291,31 @@ export const unsuspendDriverService = async (adminId, driverId) => {
   return driver;
 };
 
+async function assertSingleSuperAdmin(role, excludeUserId = null) {
+  if (role !== USER_ROLES.ADMIN) return;
+
+  const filter = { role: USER_ROLES.ADMIN, isDeleted: false };
+  if (excludeUserId) filter._id = { $ne: excludeUserId };
+
+  const count = await User.countDocuments(filter);
+  if (count >= 1) {
+    throw new ApiError(400, 'Only one super admin is allowed in the application');
+  }
+}
+
 export const addAdminMemberService = async (data) => {
-  const { name, email, phone_no, password } = data;
+  const { name, email, phone_no, password, role: requestedRole } = data;
 
   if (!name || !email || !phone_no || !password) {
     throw new ApiError(400, 'Missing required fields');
   }
+
+  const role =
+    requestedRole && [USER_ROLES.SUB_ADMIN, USER_ROLES.TEAM_MEMBER].includes(requestedRole)
+      ? requestedRole
+      : USER_ROLES.TEAM_MEMBER;
+
+  await assertSingleSuperAdmin(role);
 
   const adminExists = await User.findOne({ email });
   if (adminExists) {
@@ -256,7 +330,7 @@ export const addAdminMemberService = async (data) => {
     email,
     phone_no,
     password: hashedPassword,
-    role: USER_ROLES.TEAM_MEMBER,
+    role,
   });
 
   await newAdmin.save();
@@ -268,7 +342,7 @@ export const getAdminTeamService = async (query) => {
   const { search, page = 1, limit = 10 } = query;
   
   const filter = {
-    role: { $in: [USER_ROLES.ADMIN, USER_ROLES.TEAM_MEMBER] }
+    role: { $in: [USER_ROLES.ADMIN, USER_ROLES.SUB_ADMIN, USER_ROLES.TEAM_MEMBER] },
   };
 
   if (search) {
@@ -308,7 +382,15 @@ export const updateAdminMemberService = async (id, data) => {
   if (name) staff.name = name;
   if (email) staff.email = email;
   if (phone_no) staff.phone_no = phone_no;
-  if (role && STAFF_ROLES.includes(role)) staff.role = role;
+  if (role && STAFF_ROLES.includes(role)) {
+    if (role === USER_ROLES.ADMIN) {
+      await assertSingleSuperAdmin(role, staff._id);
+    }
+    if (staff.role === USER_ROLES.ADMIN && role !== USER_ROLES.ADMIN) {
+      throw new ApiError(400, 'The super admin role cannot be changed');
+    }
+    staff.role = role;
+  }
   if (isActive !== undefined) staff.isActive = isActive;
 
   await staff.save();
@@ -322,7 +404,10 @@ export const deleteAdminMemberService = async (id) => {
     throw new ApiError(404, 'Staff member not found');
   }
 
-  // Hard delete as per user request
+  if (staff.role === USER_ROLES.ADMIN) {
+    throw new ApiError(400, 'The super admin account cannot be deleted');
+  }
+
   await User.findByIdAndDelete(id);
   return { id };
 };

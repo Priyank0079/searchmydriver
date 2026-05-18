@@ -98,6 +98,7 @@ export const loginUserService = async (phone, password) => {
 
 import Car from '../models/user/car.model.js';
 import PlatformCondition from '../models/platformCondition.model.js';
+import { validateCarCatalogRefs } from './vehicleCatalog.service.js';
 
 // ... (existing sanitize, etc.)
 
@@ -126,6 +127,9 @@ export const getUserProfileService = async (userId) => {
 
   const cars = await Car.find({ userId, isActive: true })
     .populate('carTypeId', 'name')
+    .populate('brandId', 'name')
+    .populate('modelId', 'name')
+    .populate('fuelTypeId', 'name')
     .sort({ createdAt: -1 });
 
   const activeConditions = await PlatformCondition.find({ isActive: true }).lean();
@@ -205,11 +209,14 @@ export const updateUserOnboardingStepService = async (userId, data) => {
 };
 
 export const addCarService = async (userId, carData) => {
-  const { carTypeId, brand, model, vehicleNumber, fuelType, transmission, image } = carData;
+  const { carTypeId, brandId, modelId, fuelTypeId, vehicleNumber, transmission, image } =
+    carData;
 
-  if (!carTypeId || !brand || !model || !vehicleNumber || !fuelType || !transmission) {
+  if (!carTypeId || !brandId || !modelId || !fuelTypeId || !vehicleNumber || !transmission) {
     throw new ApiError(400, 'All vehicle details are required');
   }
+
+  await validateCarCatalogRefs({ carTypeId, brandId, modelId, fuelTypeId });
 
   const existingCount = await Car.countDocuments({ userId, isActive: true });
   if (existingCount >= 5) {
@@ -224,20 +231,31 @@ export const addCarService = async (userId, carData) => {
   const car = await Car.create({
     userId,
     carTypeId,
-    brand,
-    model,
+    brandId,
+    modelId,
+    fuelTypeId,
     vehicleNumber: vehicleNumber.toUpperCase(),
-    fuelType,
-    transmission,
-    image,
+    transmission: String(transmission).toLowerCase(),
+    image: image || '',
   });
 
+  const populated = await Car.findById(car._id)
+    .populate('carTypeId', 'name')
+    .populate('brandId', 'name')
+    .populate('modelId', 'name')
+    .populate('fuelTypeId', 'name');
+
   const carCount = await Car.countDocuments({ userId, isActive: true });
-  return { car, carCount };
+  return { car: populated, carCount };
 };
 
 export const getUserCarsService = async (userId) => {
-  return await Car.find({ userId, isActive: true }).populate('carTypeId', 'name');
+  return Car.find({ userId, isActive: true })
+    .populate('carTypeId', 'name')
+    .populate('brandId', 'name')
+    .populate('modelId', 'name')
+    .populate('fuelTypeId', 'name')
+    .sort({ createdAt: -1 });
 };
 
 export const deleteUserCarService = async (userId, carId) => {

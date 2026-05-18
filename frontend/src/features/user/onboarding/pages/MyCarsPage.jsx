@@ -5,6 +5,12 @@ import Card from '../../../../components/Card';
 import { ArrowLeft, Plus, Car, Fuel, Settings, Trash2, ChevronRight } from 'lucide-react';
 import api from '../../../../utils/api';
 import { MAX_USER_CARS } from '../../../../utils/constants';
+import {
+  getCarBrandName,
+  getCarModelName,
+  getCarFuelName,
+  getCarCategoryName,
+} from '../../../../utils/vehicleCatalog';
 
 const MyCarsPage = () => {
   const navigate = useNavigate();
@@ -84,9 +90,9 @@ const MyCarsPage = () => {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <h3 className="font-bold text-slate-900 text-base">{car.brand}</h3>
+                      <h3 className="font-bold text-slate-900 text-base">{getCarBrandName(car)}</h3>
                       <span className="px-2 py-0.5 rounded-md bg-slate-100 text-[10px] font-bold text-slate-600 uppercase">
-                        {car.model}
+                        {getCarModelName(car)}
                       </span>
                     </div>
                     <p className="text-xs font-bold font-mono text-slate-800 bg-slate-100 inline-block px-2 py-1 rounded-lg uppercase tracking-wide">
@@ -94,7 +100,7 @@ const MyCarsPage = () => {
                     </p>
                     <div className="flex items-center gap-4 mt-2 text-[10px] font-semibold text-slate-500 uppercase">
                       <span className="inline-flex items-center gap-1">
-                        <Fuel className="w-3.5 h-3.5" /> {car.fuelType}
+                        <Fuel className="w-3.5 h-3.5" /> {getCarFuelName(car)}
                       </span>
                       <span className="inline-flex items-center gap-1">
                         <Settings className="w-3.5 h-3.5" /> {car.transmission}

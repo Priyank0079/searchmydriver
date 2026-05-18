@@ -9,6 +9,7 @@ import ServerPaginatedTable from '../components/ServerPaginatedTable';
 import DriverStats from '../components/ManageDrivers/DriverStats';
 import DriverFilters from '../components/ManageDrivers/DriverFilters';
 import DriverSuspendActions from '../components/ManageDrivers/DriverSuspendActions';
+import TaskAssigneeBadge from '../components/ManageTasks/TaskAssigneeBadge';
 import { getCarTypeLabel } from '../components/ManageDrivers/driverProfileUtils';
 
 const ManageDrivers = () => {
@@ -18,6 +19,7 @@ const ManageDrivers = () => {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [assigneeFilter, setAssigneeFilter] = useState('');
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 300);
@@ -25,8 +27,14 @@ const ManageDrivers = () => {
   }, [search]);
 
   const queryParams = useMemo(
-    () => ({ page, limit, search: debouncedSearch, status: statusFilter }),
-    [page, limit, debouncedSearch, statusFilter],
+    () => ({
+      page,
+      limit,
+      search: debouncedSearch,
+      status: statusFilter,
+      assigneeId: assigneeFilter || undefined,
+    }),
+    [page, limit, debouncedSearch, statusFilter, assigneeFilter],
   );
 
   const cacheKey = buildCacheKey('admin-drivers', queryParams);
@@ -62,8 +70,15 @@ const ManageDrivers = () => {
       {
         key: 'approvalStatus',
         label: 'Status',
-        width: '14%',
+        width: '12%',
         render: (val) => <StatusBadge status={val} />,
+      },
+      {
+        key: 'reviewTask',
+        label: 'Assigned to',
+        width: '14%',
+        className: 'hidden md:table-cell',
+        render: (_val, row) => <TaskAssigneeBadge task={row.reviewTask} compact />,
       },
       {
         key: 'experienceYears',
@@ -156,6 +171,11 @@ const ManageDrivers = () => {
         statusFilter={statusFilter}
         onStatusChange={(val) => {
           setStatusFilter(val);
+          setPage(1);
+        }}
+        assigneeFilter={assigneeFilter}
+        onAssigneeChange={(val) => {
+          setAssigneeFilter(val);
           setPage(1);
         }}
         onRefresh={refetch}

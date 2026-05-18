@@ -76,7 +76,7 @@ import AdminLayout from './layouts/AdminLayout';
 // Admin Pages
 import AdminLoginPage from './features/auth/pages/AdminLoginPage';
 import AccountInactive from './features/admin/pages/AccountInactive';
-import AdminDashboard from './features/admin/pages/AdminDashboard';
+import AdminHomeRedirect from './features/admin/pages/AdminHomeRedirect';
 import ManageDrivers from './features/admin/pages/ManageDrivers';
 import DriverProfilePage from './features/admin/pages/DriverProfilePage';
 import ManageUsers from './features/admin/pages/ManageUsers';
@@ -88,6 +88,10 @@ import ManageTeam from './features/admin/pages/ManageTeam';
 import ManageKits from './features/admin/pages/ManageKits';
 import ManageKitOrders from './features/admin/pages/ManageKitOrders';
 import KitOrderDetailPage from './features/admin/pages/KitOrderDetailPage';
+import ManageTasks from './features/admin/pages/ManageTasks';
+import TaskActivityLogPage from './features/admin/pages/TaskActivityLogPage';
+import StaffProfilePage from './features/admin/pages/StaffProfilePage';
+import SuperAdminOnlyGuard from './guards/SuperAdminOnlyGuard';
 import DriverKitPage from './features/driver/kit/pages/DriverKitPage';
 import KitPurchaseHistoryPage from './features/driver/kit/pages/KitPurchaseHistoryPage';
 
@@ -182,19 +186,25 @@ function App() {
       <Route path="/admin/inactive" element={<AccountInactive />} />
       <Route element={<AdminGuard />}>
         <Route element={<AdminLayout />}>
-          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/admin" element={<AdminHomeRedirect />} />
           <Route path="/admin/users" element={<ManageUsers />} />
           <Route path="/admin/users/:userId/profile" element={<UserProfilePage />} />
+          <Route path="/admin/profile" element={<StaffProfilePage />} />
+          <Route path="/admin/tasks" element={<ManageTasks />} />
+          <Route element={<SuperAdminOnlyGuard />}>
+            <Route path="/admin/tasks/activity" element={<TaskActivityLogPage />} />
+            <Route path="/admin/settings/team" element={<ManageTeam />} />
+            <Route path="/admin/settings/payment" element={<PaymentSettings />} />
+          </Route>
           <Route path="/admin/drivers" element={<ManageDrivers />} />
           <Route path="/admin/drivers/:driverId/profile" element={<DriverProfilePage />} />
-          <Route path="/admin/kits" element={<ManageKits />} />
+          <Route path="/admin/kits" element={<Navigate to="/admin/settings/kits" replace />} />
           <Route path="/admin/kit-orders" element={<ManageKitOrders />} />
           <Route path="/admin/kit-orders/:orderId" element={<KitOrderDetailPage />} />
           <Route path="/admin/bookings" element={<ManageBookings />} />
           <Route path="/admin/settings" element={<Navigate to="/admin/settings/platform" replace />} />
           <Route path="/admin/settings/platform" element={<PlatformSettings />} />
-          <Route path="/admin/settings/team" element={<ManageTeam />} />
-          <Route path="/admin/settings/payment" element={<PaymentSettings />} />
+          <Route path="/admin/settings/kits" element={<ManageKits />} />
           {/* Note: Revenue page is mapped to Dashboard for now to save scope, or can be a separate page later */}
           <Route path="/admin/revenue" element={<Navigate to="/admin" replace />} />
         </Route>

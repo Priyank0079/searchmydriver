@@ -1,13 +1,14 @@
 import api from '../../utils/api';
 import { createQueryStore } from '../lib/createQueryStore';
 
-export const useAdminDriversStore = createQueryStore(async ({ page, limit, search, status }) => {
+export const useAdminDriversStore = createQueryStore(async ({ page, limit, search, status, assigneeId }) => {
   const params = new URLSearchParams({
     page: String(page),
     limit: String(limit),
   });
   if (search) params.append('search', search);
   if (status) params.append('status', status);
+  if (assigneeId) params.append('assigneeId', assigneeId);
 
   const res = await api.get(`/admin/drivers?${params.toString()}`);
   const payload = res.data?.data;

@@ -1,11 +1,14 @@
 import { Filter, RefreshCw, Search } from 'lucide-react';
 import Select from '../../../../components/Select';
+import AssigneeFilterSelect from '../ManageTasks/AssigneeFilterSelect';
 
 const DriverFilters = ({
   search,
   onSearchChange,
   statusFilter,
   onStatusChange,
+  assigneeFilter,
+  onAssigneeChange,
   onRefresh,
   refreshing = false,
 }) => {
@@ -47,6 +50,14 @@ const DriverFilters = ({
               icon={Filter}
             />
           </div>
+          {onAssigneeChange && (
+            <div className="w-full sm:w-56">
+              <AssigneeFilterSelect
+                value={assigneeFilter}
+                onChange={onAssigneeChange}
+              />
+            </div>
+          )}
           {onRefresh && (
             <button
               type="button"

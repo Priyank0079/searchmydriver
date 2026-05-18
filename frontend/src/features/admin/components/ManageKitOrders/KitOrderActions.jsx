@@ -1,10 +1,12 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Button from '../../../../components/Button';
 import Input from '../../../../components/Input';
 import api from '../../../../utils/api';
 import toast from 'react-hot-toast';
 
-const KitOrderActions = ({ order, onSuccess }) => {
+const KitOrderActions = ({ order, onSuccess, onReviewComplete }) => {
+  const navigate = useNavigate();
   const [note, setNote] = useState('');
   const [carrier, setCarrier] = useState('');
   const [trackingId, setTrackingId] = useState('');
@@ -25,10 +27,18 @@ const KitOrderActions = ({ order, onSuccess }) => {
       if (action === 'approve') {
         await api.patch(`/admin/kit-orders/${order._id}/approve`, { note });
         toast.success('Order approved');
-      } else if (action === 'reject') {
+        onReviewComplete?.('approved');
+        navigate('/admin/kit-orders', { replace: true });
+        return;
+      }
+      if (action === 'reject') {
         await api.patch(`/admin/kit-orders/${order._id}/reject`, { note });
         toast.success('Order rejected');
-      } else if (action === 'dispatch') {
+        onReviewComplete?.('rejected');
+        navigate('/admin/kit-orders', { replace: true });
+        return;
+      }
+      if (action === 'dispatch') {
         await api.patch(`/admin/kit-orders/${order._id}/dispatch`, {
           carrier,
           trackingId,

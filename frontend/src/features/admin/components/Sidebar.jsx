@@ -1,31 +1,72 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Car, CalendarCheck, DollarSign, Settings,
   LogOut, X, ChevronRight, ChevronDown, ShieldCheck, CreditCard, Monitor, Package,
+  CheckSquare,
 } from 'lucide-react';
 import { APP_NAME } from '../../../utils/constants';
 import useAdminAuthStore from '../../../store/useAdminAuthStore';
+import { roleCanAccess } from '../../../constants/staffRoles';
 
 const navItems = [
-  { path: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true, roles: ['admin'] },
-  { path: '/admin/users', label: 'Users', icon: Users },
+  {
+    path: '/admin',
+    label: 'Dashboard',
+    icon: LayoutDashboard,
+    end: true,
+    roles: ['admin'],
+  },
+  { path: '/admin/users', label: 'Users', icon: Users, roles: ['admin', 'sub_admin'] },
+  { path: '/admin/tasks', label: 'Team Tasks', icon: CheckSquare },
   { path: '/admin/drivers', label: 'Drivers', icon: Car },
-  { path: '/admin/kits', label: 'Driver Kits', icon: Package, roles: ['admin'] },
   { path: '/admin/kit-orders', label: 'Kit Orders', icon: Package },
-  { path: '/admin/bookings', label: 'Bookings', icon: CalendarCheck },
-  { path: '/admin/revenue', label: 'Revenue', icon: DollarSign },
+  { path: '/admin/bookings', label: 'Bookings', icon: CalendarCheck, roles: ['admin'] },
+  { path: '/admin/revenue', label: 'Revenue', icon: DollarSign, roles: ['admin'] },
   {
     label: 'Settings',
     icon: Settings,
-    roles: ['admin'],
+    roles: ['admin', 'sub_admin'],
     children: [
-      { path: '/admin/settings/platform', label: 'Platform Settings', icon: Monitor },
-      { path: '/admin/settings/team', label: 'Team Management', icon: ShieldCheck },
-      { path: '/admin/settings/payment', label: 'Pricing & Commission', icon: CreditCard },
-    ]
+      {
+        path: '/admin/settings/platform',
+        label: 'Platform Settings',
+        icon: Monitor,
+        roles: ['admin', 'sub_admin'],
+      },
+      {
+        path: '/admin/settings/kits',
+        label: 'Driver Kits',
+        icon: Package,
+        roles: ['admin', 'sub_admin'],
+      },
+      {
+        path: '/admin/settings/team',
+        label: 'Team Management',
+        icon: ShieldCheck,
+        roles: ['admin'],
+      },
+      {
+        path: '/admin/settings/payment',
+        label: 'Pricing & Commission',
+        icon: CreditCard,
+        roles: ['admin'],
+      },
+    ],
   },
 ];
+
+function filterNavByRole(items, userRole) {
+  return items
+    .filter((item) => roleCanAccess(item.roles, userRole))
+    .map((item) => {
+      if (!item.children) return item;
+      const children = item.children.filter((child) => roleCanAccess(child.roles, userRole));
+      if (!children.length) return null;
+      return { ...item, children };
+    })
+    .filter(Boolean);
+}
 
 const Sidebar = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
@@ -33,10 +74,7 @@ const Sidebar = ({ isOpen, onClose }) => {
   const { admin, logout } = useAdminAuthStore();
   const [expandedItems, setExpandedItems] = useState(['Settings']);
 
-  const filteredNavItems = navItems.filter(item => {
-    if (!item.roles) return true;
-    return item.roles.includes(admin?.role);
-  });
+  const filteredNavItems = filterNavByRole(navItems, admin?.role);
 
   const handleLogout = () => {
     logout();
@@ -44,14 +82,13 @@ const Sidebar = ({ isOpen, onClose }) => {
   };
 
   const toggleExpand = (label) => {
-    setExpandedItems(prev =>
-      prev.includes(label) ? prev.filter(i => i !== label) : [...prev, label]
+    setExpandedItems((prev) =>
+      prev.includes(label) ? prev.filter((i) => i !== label) : [...prev, label],
     );
   };
 
   return (
     <>
-      {/* Mobile backdrop */}
       {isOpen && (
         <div
           className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 lg:hidden"
@@ -59,14 +96,12 @@ const Sidebar = ({ isOpen, onClose }) => {
         />
       )}
 
-      {/* Sidebar */}
       <aside
         className={`fixed top-0 left-0 z-50 h-screen w-[260px] bg-dark flex flex-col transition-transform duration-300 ease-in-out
           lg:translate-x-0 lg:static lg:z-auto
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
         `}
       >
-        {/* Logo / Brand */}
         <div className="flex items-center justify-between px-5 h-16 shrink-0 border-b border-white/10">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
@@ -85,62 +120,68 @@ const Sidebar = ({ isOpen, onClose }) => {
           </button>
         </div>
 
-        {/* Nav items — scrollable */}
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1 custom-scrollbar">
-          <p className="px-3 mb-2 text-[10px] font-semibold text-white/30 uppercase tracking-wider">Main Menu</p>
+          <p className="px-3 mb-2 text-[10px] font-semibold text-white/30 uppercase tracking-wider">
+            Main Menu
+          </p>
 
           {filteredNavItems.map((item) => {
-            const hasChildren = item.children && item.children.length > 0;
+            const hasChildren = item.children?.length > 0;
             const isExpanded = expandedItems.includes(item.label);
-            const isActive = item.path ? pathname === item.path : item.children.some(c => pathname === c.path);
+            const isActive = item.path
+              ? pathname === item.path
+              : item.children.some((c) => pathname === c.path);
 
             return (
               <div key={item.label} className="space-y-1">
                 {hasChildren ? (
                   <button
+                    type="button"
                     onClick={() => toggleExpand(item.label)}
                     className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group
                       ${isActive ? 'text-white' : 'text-white/60 hover:bg-white/5 hover:text-white/90'}
                     `}
                   >
-                    <item.icon className={`w-[18px] h-[18px] shrink-0 ${isActive ? 'text-primary' : ''}`} />
+                    <item.icon
+                      className={`w-[18px] h-[18px] shrink-0 ${isActive ? 'text-primary' : ''}`}
+                    />
                     <span className="flex-1 text-left">{item.label}</span>
-                    <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                    <ChevronDown
+                      className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+                    />
                   </button>
                 ) : (
                   <NavLink
                     to={item.path}
                     end={item.end}
                     onClick={onClose}
-                    className={({ isActive }) =>
+                    className={({ isActive: active }) =>
                       `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group
-                      ${isActive
-                        ? 'bg-primary/15 text-primary'
-                        : 'text-white/60 hover:bg-white/5 hover:text-white/90'
-                      }`
+                      ${active ? 'bg-primary/15 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white/90'}`
                     }
                   >
-                    {({ isActive }) => (
+                    {({ isActive: active }) => (
                       <>
-                        <item.icon className={`w-[18px] h-[18px] shrink-0 ${isActive ? 'text-primary' : ''}`} />
+                        <item.icon
+                          className={`w-[18px] h-[18px] shrink-0 ${active ? 'text-primary' : ''}`}
+                        />
                         <span className="flex-1">{item.label}</span>
-                        {isActive && <ChevronRight className="w-4 h-4 opacity-60" />}
+                        {active && <ChevronRight className="w-4 h-4 opacity-60" />}
                       </>
                     )}
                   </NavLink>
                 )}
 
-                {/* Sub-menu items */}
                 {hasChildren && isExpanded && (
-                  <div className="ml-9 space-y-1 animate-in slide-in-from-top-1 duration-200">
+                  <div className="ml-9 space-y-1">
                     {item.children.map((child) => (
                       <NavLink
                         key={child.path}
                         to={child.path}
                         onClick={onClose}
-                        className={({ isActive }) =>
+                        className={({ isActive: active }) =>
                           `flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200
-                          ${isActive ? 'text-primary bg-primary/5' : 'text-white/40 hover:text-white/80 hover:bg-white/5'}`
+                          ${active ? 'text-primary bg-primary/5' : 'text-white/40 hover:text-white/80 hover:bg-white/5'}`
                         }
                       >
                         {child.icon && <child.icon className="w-3.5 h-3.5" />}
@@ -154,9 +195,9 @@ const Sidebar = ({ isOpen, onClose }) => {
           })}
         </nav>
 
-        {/* Footer / Logout */}
         <div className="p-3 border-t border-white/10 shrink-0">
           <button
+            type="button"
             onClick={handleLogout}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-white/50 hover:bg-danger/15 hover:text-danger transition-all duration-200"
           >

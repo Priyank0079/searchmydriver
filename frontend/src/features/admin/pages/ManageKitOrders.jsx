@@ -5,6 +5,7 @@ import { buildCacheKey } from '../../../store/lib/buildCacheKey';
 import { useAdminKitOrdersStore } from '../../../store/admin/useAdminKitOrdersStore';
 import ServerPaginatedTable from '../components/ServerPaginatedTable';
 import KitOrderFilters from '../components/ManageKitOrders/KitOrderFilters';
+import TaskAssigneeBadge from '../components/ManageTasks/TaskAssigneeBadge';
 import {
   PAYMENT_STATUS_LABELS,
   ADMIN_STATUS_LABELS,
@@ -18,6 +19,7 @@ const ManageKitOrders = () => {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [assigneeFilter, setAssigneeFilter] = useState('');
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 300);
@@ -25,8 +27,14 @@ const ManageKitOrders = () => {
   }, [search]);
 
   const queryParams = useMemo(
-    () => ({ page, limit, search: debouncedSearch, status: statusFilter }),
-    [page, limit, debouncedSearch, statusFilter],
+    () => ({
+      page,
+      limit,
+      search: debouncedSearch,
+      status: statusFilter,
+      assigneeId: assigneeFilter || undefined,
+    }),
+    [page, limit, debouncedSearch, statusFilter, assigneeFilter],
   );
   const cacheKey = buildCacheKey('admin-kit-orders', queryParams);
 
@@ -94,12 +102,19 @@ const ManageKitOrders = () => {
       {
         key: 'adminStatus',
         label: 'Approval',
-        width: '14%',
+        width: '12%',
         render: (val) => (
           <span className="text-xs font-semibold text-slate-600">
             {ADMIN_STATUS_LABELS[val] || val}
           </span>
         ),
+      },
+      {
+        key: 'reviewTask',
+        label: 'Assigned to',
+        width: '14%',
+        className: 'hidden md:table-cell',
+        render: (_val, row) => <TaskAssigneeBadge task={row.reviewTask} compact />,
       },
       {
         key: 'fulfillmentStatus',
@@ -127,6 +142,11 @@ const ManageKitOrders = () => {
         statusFilter={statusFilter}
         onStatusChange={(v) => {
           setStatusFilter(v);
+          setPage(1);
+        }}
+        assigneeFilter={assigneeFilter}
+        onAssigneeChange={(v) => {
+          setAssigneeFilter(v);
           setPage(1);
         }}
         onRefresh={refetch}

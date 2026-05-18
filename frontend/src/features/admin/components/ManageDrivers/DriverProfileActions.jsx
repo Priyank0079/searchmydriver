@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import Button from '../../../../components/Button';
 import ApprovalNoteForm, { isApprovalNoteValid } from '../ApprovalNoteForm';
 import DriverSuspendActions from './DriverSuspendActions';
@@ -6,7 +8,8 @@ import api from '../../../../utils/api';
 
 const REVIEWABLE = ['pending', 'under_review'];
 
-const DriverProfileActions = ({ driver, onSuccess }) => {
+const DriverProfileActions = ({ driver, onSuccess, onReviewComplete }) => {
+  const navigate = useNavigate();
   const [approvalNote, setApprovalNote] = useState(driver?.approvalNote || '');
   const [noteError, setNoteError] = useState('');
   const [actionError, setActionError] = useState('');
@@ -34,6 +37,16 @@ const DriverProfileActions = ({ driver, onSuccess }) => {
         approvalStatus,
         approvalNote: approvalNote.trim(),
       });
+
+      if (['approved', 'rejected'].includes(approvalStatus)) {
+        toast.success(
+          approvalStatus === 'approved' ? 'Driver approved' : 'Driver rejected',
+        );
+        onReviewComplete?.(approvalStatus);
+        navigate('/admin/drivers', { replace: true });
+        return;
+      }
+
       onSuccess?.();
     } catch (err) {
       setActionError(err.response?.data?.message || 'Failed to update driver status');

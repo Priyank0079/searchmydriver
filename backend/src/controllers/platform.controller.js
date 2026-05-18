@@ -10,7 +10,14 @@ export const createCarType = asyncHandler(async (req, res) => {
 });
 
 export const getCarTypes = asyncHandler(async (req, res) => {
-  const carTypes = await platformService.getAllCarTypesService(req.query.active === 'true');
+  const onlyActive = req.query.active === 'true';
+  const carTypes = await platformService.getAllCarTypesService(onlyActive);
+  return res.status(200).json(new ApiResponse(200, carTypes, 'Car types fetched successfully'));
+});
+
+/** Admin panel — all car types including inactive */
+export const getAdminCarTypes = asyncHandler(async (_req, res) => {
+  const carTypes = await platformService.getAllCarTypesService(false);
   return res.status(200).json(new ApiResponse(200, carTypes, 'Car types fetched successfully'));
 });
 
@@ -32,7 +39,14 @@ export const createCondition = asyncHandler(async (req, res) => {
 });
 
 export const getConditions = asyncHandler(async (req, res) => {
-  const conditions = await platformService.getAllConditionsService(req.query.active === 'true');
+  const onlyActive = req.query.active === 'true';
+  const conditions = await platformService.getAllConditionsService(onlyActive);
+  return res.status(200).json(new ApiResponse(200, conditions, 'Conditions fetched successfully'));
+});
+
+/** Admin panel — all checklist items including inactive */
+export const getAdminConditions = asyncHandler(async (_req, res) => {
+  const conditions = await platformService.getAllConditionsService(false);
   return res.status(200).json(new ApiResponse(200, conditions, 'Conditions fetched successfully'));
 });
 
@@ -54,7 +68,14 @@ export const createTrainingVideo = asyncHandler(async (req, res) => {
 });
 
 export const getTrainingVideos = asyncHandler(async (req, res) => {
-  const videos = await platformService.getAllTrainingVideosService(req.query.active === 'true');
+  const onlyActive = req.query.active === 'true';
+  const videos = await platformService.getAllTrainingVideosService(onlyActive);
+  return res.status(200).json(new ApiResponse(200, videos, 'Training videos fetched successfully'));
+});
+
+/** Admin panel — all training videos including inactive */
+export const getAdminTrainingVideos = asyncHandler(async (_req, res) => {
+  const videos = await platformService.getAllTrainingVideosService(false);
   return res.status(200).json(new ApiResponse(200, videos, 'Training videos fetched successfully'));
 });
 

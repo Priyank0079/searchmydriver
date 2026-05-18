@@ -15,23 +15,28 @@ export const loginAdmin = asyncHandler(async (req, res) => {
   return res.status(200).json(new ApiResponse(200, { admin: result.admin }, 'Staff login successful'));
 });
 
+export const getStaffMe = asyncHandler(async (req, res) => {
+  const admin = await adminService.getStaffProfileService(req.staff._id);
+  return res.status(200).json(new ApiResponse(200, { admin }, 'Profile fetched successfully'));
+});
+
 export const getCustomers = asyncHandler(async (req, res) => {
   const result = await adminService.getCustomersService(req.query);
   return res.status(200).json(new ApiResponse(200, result, 'Users fetched successfully'));
 });
 
 export const getDrivers = asyncHandler(async (req, res) => {
-  const result = await adminService.getDriversService(req.query);
+  const result = await adminService.getDriversService(req.staff, req.query);
   return res.status(200).json(new ApiResponse(200, result, "Drivers fetched successfully"));
 });
 
 export const getDriverById = asyncHandler(async (req, res) => {
-  const result = await adminService.getDriverByIdService(req.params.id);
+  const result = await adminService.getDriverByIdService(req.staff, req.params.id);
   return res.status(200).json(new ApiResponse(200, result, 'Driver profile fetched successfully'));
 });
 
 export const updateDriverStatus = asyncHandler(async (req, res) => {
-  const result = await adminService.updateDriverStatusService(req.staff._id, req.params.id, req.body);
+  const result = await adminService.updateDriverStatusService(req.staff, req.params.id, req.body);
   return res.status(200).json(new ApiResponse(200, result, `Driver status updated successfully`));
 });
 

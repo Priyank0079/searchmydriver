@@ -1,11 +1,17 @@
 import { useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Car, CheckCircle2, Circle, Loader2, Mail, Phone, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Car, Loader2, Mail, Phone, RefreshCw } from 'lucide-react';
 import Avatar from '../../../components/Avatar';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { buildCacheKey } from '../../../store/lib/buildCacheKey';
 import { useAdminUserProfileStore } from '../../../store/admin/useAdminUserProfileStore';
 import { SectionCard, InfoGrid } from '../components/DetailBlocks';
+import {
+  getCarBrandName,
+  getCarModelName,
+  getCarFuelName,
+  getCarCategoryName,
+} from '../../../utils/vehicleCatalog';
 
 const formatDate = (date) => {
   if (!date) return '—';
@@ -98,20 +104,27 @@ const UserProfilePage = () => {
           ) : (
             <ul className="space-y-3">
               {checklist.map((item) => {
-                const accepted = item.value === true;
+                const answerLabel =
+                  item.value === true ? 'Yes' : item.value === false ? 'No' : 'Unanswered';
+                const answerClass =
+                  item.value === true
+                    ? 'text-emerald-700 bg-emerald-50'
+                    : item.value === false
+                      ? 'text-slate-700 bg-slate-100'
+                      : 'text-amber-700 bg-amber-50';
                 return (
-                  <li key={item._id} className="flex items-start gap-3 text-sm">
-                    {accepted ? (
-                      <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-                    ) : (
-                      <Circle className="w-5 h-5 text-slate-300 shrink-0 mt-0.5" />
-                    )}
+                  <li key={item._id} className="flex items-start justify-between gap-3 text-sm">
                     <div>
                       <p className="font-medium text-slate-800">{item.question}</p>
                       {item.isRequired && (
                         <span className="text-[10px] font-bold uppercase text-rose-600">Required</span>
                       )}
                     </div>
+                    <span
+                      className={`text-xs font-bold uppercase tracking-wide px-2.5 py-1 rounded-full shrink-0 ${answerClass}`}
+                    >
+                      {answerLabel}
+                    </span>
                   </li>
                 );
               })}
@@ -137,13 +150,19 @@ const UserProfilePage = () => {
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="font-bold text-slate-900">{car.brand} {car.model}</p>
+                  <p className="font-bold text-slate-900">
+                    {getCarBrandName(car)} {getCarModelName(car)}
+                  </p>
                   <p className="text-xs font-mono font-semibold text-slate-700 mt-1 uppercase">{car.vehicleNumber}</p>
                   <InfoGrid
                     columns={1}
                     items={[
-                      { label: 'Category', value: car.carTypeId?.name },
-                      { label: 'Fuel / Transmission', value: `${car.fuelType} · ${car.transmission}`, capitalize: true },
+                      { label: 'Category', value: getCarCategoryName(car) },
+                      {
+                        label: 'Fuel / Transmission',
+                        value: `${getCarFuelName(car)} · ${car.transmission}`,
+                        capitalize: true,
+                      },
                     ]}
                   />
                 </div>

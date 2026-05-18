@@ -150,28 +150,35 @@ const DataTable = ({
                 paginated.map((row, idx) => (
                   <tr
                     key={row.id || row._id || idx}
-                    onClick={() => onRowClick?.(row)}
+                    onClick={(e) => {
+                      if (e.target.closest('[data-row-action]')) return;
+                      onRowClick?.(row);
+                    }}
                     className={`
                       border-b border-slate-50 last:border-b-0 transition-colors
                       ${onRowClick ? 'cursor-pointer hover:bg-slate-50' : ''}
                     `}
                   >
-                    {columns.map((col) => (
-                      <td
-                        key={col.key}
-                        className={`px-4 py-3 text-sm text-slate-700 align-top max-w-0 ${col.className || ''}`}
-                      >
-                        <CellContent>
-                          {col.render ? (
-                            col.render(row[col.key], row)
-                          ) : (
-                            <span className="block whitespace-nowrap">
-                              {row[col.key] !== undefined && row[col.key] !== null ? row[col.key] : '—'}
-                            </span>
-                          )}
-                        </CellContent>
-                      </td>
-                    ))}
+                    {columns.map((col) => {
+                      const cell = col.render ? (
+                        col.render(row[col.key], row)
+                      ) : (
+                        <span className="block whitespace-nowrap">
+                          {row[col.key] !== undefined && row[col.key] !== null ? row[col.key] : '—'}
+                        </span>
+                      );
+
+                      return (
+                        <td
+                          key={col.key}
+                          className={`px-4 py-3 text-sm text-slate-700 align-top max-w-0 ${
+                            col.unclamp ? 'overflow-visible' : ''
+                          } ${col.className || ''}`}
+                        >
+                          {col.unclamp ? cell : <CellContent>{cell}</CellContent>}
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))
               )}

@@ -1,5 +1,5 @@
 import { Bell, Menu, Search } from 'lucide-react';
-import Avatar from '../../../components/Avatar';
+import AdminUserMenu from './AdminUserMenu';
 
 const AdminHeader = ({ onMenuToggle, title = 'Dashboard' }) => {
   return (
@@ -36,14 +36,7 @@ const AdminHeader = ({ onMenuToggle, title = 'Dashboard' }) => {
             <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-danger rounded-full ring-2 ring-white" />
           </button>
 
-          {/* Profile */}
-          <div className="flex items-center gap-2.5 ml-1 pl-3 border-l border-gray-100">
-            <Avatar name="Admin" size="sm" />
-            <div className="hidden sm:block">
-              <p className="text-sm font-semibold text-text leading-tight">Admin</p>
-              <p className="text-[10px] text-text-muted">Super Admin</p>
-            </div>
-          </div>
+          <AdminUserMenu />
         </div>
       </div>
     </header>

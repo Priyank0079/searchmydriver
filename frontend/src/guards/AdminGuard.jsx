@@ -1,7 +1,7 @@
 import { Outlet, Navigate } from 'react-router-dom';
 import useAdminAuthStore from '../store/useAdminAuthStore';
 
-const STAFF_ROLES = ['admin', 'team_member'];
+const STAFF_ROLES = ['admin', 'sub_admin', 'team_member'];
 
 const AdminGuard = () => {
   const { isAuthenticated, admin } = useAdminAuthStore();

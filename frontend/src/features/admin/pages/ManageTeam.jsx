@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { MoreVertical, User, Mail, Phone, Lock, Loader2, Edit2, Trash2 } from 'lucide-react';
+import { User, Mail, Phone, Lock, Loader2, Edit2, Trash2 } from 'lucide-react';
+import RowActionsMenu from '../components/RowActionsMenu';
 import Card from '../../../components/Card';
 import Button from '../../../components/Button';
 import Input from '../../../components/Input';
@@ -9,6 +10,9 @@ import Badge from '../../../components/Badge';
 import api from '../../../utils/api';
 import TeamStats from '../components/ManageTeam/TeamStats';
 import TeamFilters from '../components/ManageTeam/TeamFilters';
+import { STAFF_ROLE_LABELS } from '../../../constants/staffRoles';
+
+const ASSIGNABLE_ROLES = ['team_member', 'sub_admin'];
 
 const ManageTeam = () => {
   const [showAddModal, setShowAddModal] = useState(false);
@@ -151,8 +155,8 @@ const ManageTeam = () => {
       width: '15%',
       render: (val) => (
         <Badge
-          variant={val === 'admin' ? 'warning' : 'info'}
-          text={val === 'admin' ? 'Super Admin' : 'Staff'}
+          variant={val === 'admin' ? 'warning' : val === 'sub_admin' ? 'success' : 'info'}
+          text={STAFF_ROLE_LABELS[val] || val}
         />
       ),
     },
@@ -179,8 +183,25 @@ const ManageTeam = () => {
       key: 'actions',
       label: 'Action',
       sortable: false,
+      unclamp: true,
       width: '15%',
-      render: (_, row) => <ActionMenu member={row} onEdit={handleEdit} onDelete={confirmDelete} />,
+      render: (_, row) => (
+        <RowActionsMenu
+          items={[
+            {
+              label: 'Update',
+              icon: Edit2,
+              onClick: () => handleEdit(row),
+            },
+            {
+              label: 'Delete',
+              icon: Trash2,
+              variant: 'danger',
+              onClick: () => confirmDelete(row),
+            },
+          ]}
+        />
+      ),
     },
   ], []);
 
@@ -271,19 +292,26 @@ const ManageTeam = () => {
             <div>
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">Assign Role</label>
               <div className="grid grid-cols-2 gap-3">
-                {['team_member', 'admin'].map(role => (
-                  <button
-                    key={role}
-                    type="button"
-                    onClick={() => setFormData({ ...formData, role })}
-                    className={`p-3 rounded-xl border text-sm font-medium transition-all ${formData.role === role
-                      ? 'border-primary bg-primary/5 text-primary'
-                      : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                {selectedMember?.role === 'admin' ? (
+                  <p className="text-sm text-slate-600 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    Super Admin — role cannot be changed
+                  </p>
+                ) : (
+                  ASSIGNABLE_ROLES.map((role) => (
+                    <button
+                      key={role}
+                      type="button"
+                      onClick={() => setFormData({ ...formData, role })}
+                      className={`p-3 rounded-xl border text-sm font-medium transition-all ${
+                        formData.role === role
+                          ? 'border-primary bg-primary/5 text-primary'
+                          : 'border-slate-200 text-slate-500 hover:border-slate-300'
                       }`}
-                  >
-                    {role === 'admin' ? 'Super Admin' : 'Staff'}
-                  </button>
-                ))}
+                    >
+                      {STAFF_ROLE_LABELS[role]}
+                    </button>
+                  ))
+                )}
               </div>
             </div>
 
@@ -351,43 +379,6 @@ const ManageTeam = () => {
           </div>
         </div>
       </Modal>
-    </div>
-  );
-};
-
-const ActionMenu = ({ member, onEdit, onDelete }) => {
-  const [isOpen, setIsOpen] = useState(false);
-
-  return (
-    <div className="relative">
-      <button
-        onClick={(e) => { e.stopPropagation(); setIsOpen(!isOpen); }}
-        className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-      >
-        <MoreVertical className="w-5 h-5" />
-      </button>
-
-      {isOpen && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setIsOpen(false); }} />
-          <div className="absolute right-0 mt-2 w-36 bg-white rounded-xl shadow-xl border border-slate-100 z-50 py-1 overflow-hidden animate-in fade-in zoom-in duration-100">
-            <button
-              onClick={(e) => { e.stopPropagation(); onEdit(member); setIsOpen(false); }}
-              className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2 transition-colors"
-            >
-              <Edit2 className="w-4 h-4 text-slate-400" />
-              <span>Update</span>
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); onDelete(member); setIsOpen(false); }}
-              className="w-full px-4 py-2 text-left text-sm text-rose-600 hover:bg-rose-50 flex items-center gap-2 transition-colors"
-            >
-              <Trash2 className="w-4 h-4 text-rose-400" />
-              <span>Delete</span>
-            </button>
-          </div>
-        </>
-      )}
     </div>
   );
 };

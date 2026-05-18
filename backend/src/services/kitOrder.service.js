@@ -15,6 +15,16 @@ import { createRazorpayOrder, getRazorpayKeyId } from '../utils/razorpay.js';
 import { appendKitOrderHistory } from '../utils/kitOrderHistory.util.js';
 import { syncDriverKitEligibility, getDriverKitEligibility } from '../utils/kitEligibility.util.js';
 import { validateAndBuildItemSelections } from '../utils/kitItems.util.js';
+import {
+  attachReviewTasks,
+  assertStaffCanActOnResource,
+  assertStaffCanAccessResource,
+  completeTaskForResource,
+  getResourceIdScopeForStaff,
+  upsertKitOrderReviewTask,
+} from './adminTask.service.js';
+import { TASK_TYPE } from '../constants/adminTask.js';
+import AdminTask from '../models/adminTask.model.js';
 
 function buildRazorpayCheckoutPayload(kitOrder, kit) {
   const amountPaise = Math.round(kitOrder.amount * 100);
@@ -282,8 +292,28 @@ export const getDriverActiveKitOrderService = async (driverId) => {
   return { eligibility, orders };
 };
 
-export const getAdminKitOrdersService = async (query) => {
-  const { status, paymentStatus, adminStatus, search, page = 1, limit = 10 } = query;
+export const getAdminKitOrdersService = async (staff, query) => {
+  const {
+    status,
+    paymentStatus,
+    adminStatus,
+    search,
+    assigneeId,
+    page = 1,
+    limit = 10,
+  } = query;
+
+  const scope = await getResourceIdScopeForStaff(
+    staff,
+    TASK_TYPE.KIT_ORDER_REVIEW,
+    assigneeId,
+    page,
+    limit,
+  );
+  if (scope?.empty) {
+    return { data: [], pagination: scope.pagination };
+  }
+
   const filter = {};
 
   if (paymentStatus) filter.paymentStatus = paymentStatus;
@@ -291,6 +321,10 @@ export const getAdminKitOrdersService = async (query) => {
   if (status === 'pending_approval') {
     filter.paymentStatus = PAYMENT_STATUS.PAID;
     filter.adminStatus = KIT_ADMIN_STATUS.PENDING;
+  }
+
+  if (scope?.resourceIds) {
+    filter._id = { $in: scope.resourceIds };
   }
 
   const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
@@ -316,8 +350,10 @@ export const getAdminKitOrdersService = async (query) => {
     .limit(parseInt(limit, 10))
     .lean();
 
+  const withTasks = await attachReviewTasks(staff, data, TASK_TYPE.KIT_ORDER_REVIEW);
+
   return {
-    data,
+    data: withTasks,
     pagination: {
       total,
       page: parseInt(page, 10),
@@ -326,7 +362,9 @@ export const getAdminKitOrdersService = async (query) => {
   };
 };
 
-export const getAdminKitOrderByIdService = async (orderId) => {
+export const getAdminKitOrderByIdService = async (staff, orderId) => {
+  await assertStaffCanAccessResource(staff, AdminTask, TASK_TYPE.KIT_ORDER_REVIEW, orderId);
+
   const order = await KitOrder.findById(orderId)
     .populate('driverId', 'name phone email approvalStatus documents')
     .populate('kitId')
@@ -375,7 +413,9 @@ export const getAdminKitOrderByIdService = async (orderId) => {
   };
 };
 
-export const approveKitOrderService = async (staffId, orderId, note = '') => {
+export const approveKitOrderService = async (staff, orderId, note = '') => {
+  await assertStaffCanActOnResource(staff, TASK_TYPE.KIT_ORDER_REVIEW, orderId);
+
   const order = await KitOrder.findById(orderId);
   if (!order) throw new ApiError(404, 'Order not found');
 
@@ -386,25 +426,31 @@ export const approveKitOrderService = async (staffId, orderId, note = '') => {
   const prev = order.adminStatus;
   order.adminStatus = KIT_ADMIN_STATUS.APPROVED;
   order.adminNote = note || order.adminNote;
-  order.reviewedBy = staffId;
+  order.reviewedBy = staff._id;
   order.reviewedAt = new Date();
   appendKitOrderHistory(order, {
     field: 'adminStatus',
     from: prev,
     to: KIT_ADMIN_STATUS.APPROVED,
     note: note || 'Approved',
-    by: staffId,
+    by: staff._id,
   });
   await order.save();
   await syncDriverKitEligibility(order.driverId);
+  await completeTaskForResource(staff, TASK_TYPE.KIT_ORDER_REVIEW, orderId, {
+    action: 'approved',
+    note: note || 'Approved',
+  });
   return order;
 };
 
-export const rejectKitOrderService = async (staffId, orderId, note) => {
+export const rejectKitOrderService = async (staff, orderId, note) => {
   const trimmed = (note || '').trim();
   if (trimmed.length < 10) {
     throw new ApiError(400, 'Rejection note is required (minimum 10 characters)');
   }
+
+  await assertStaffCanActOnResource(staff, TASK_TYPE.KIT_ORDER_REVIEW, orderId);
 
   const order = await KitOrder.findById(orderId);
   if (!order) throw new ApiError(404, 'Order not found');
@@ -412,17 +458,21 @@ export const rejectKitOrderService = async (staffId, orderId, note) => {
   const prev = order.adminStatus;
   order.adminStatus = KIT_ADMIN_STATUS.REJECTED;
   order.adminNote = trimmed;
-  order.reviewedBy = staffId;
+  order.reviewedBy = staff._id;
   order.reviewedAt = new Date();
   appendKitOrderHistory(order, {
     field: 'adminStatus',
     from: prev,
     to: KIT_ADMIN_STATUS.REJECTED,
     note: trimmed,
-    by: staffId,
+    by: staff._id,
   });
   await order.save();
   await syncDriverKitEligibility(order.driverId);
+  await completeTaskForResource(staff, TASK_TYPE.KIT_ORDER_REVIEW, orderId, {
+    action: 'rejected',
+    note: trimmed,
+  });
   return order;
 };
 

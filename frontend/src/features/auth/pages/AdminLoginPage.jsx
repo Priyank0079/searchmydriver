@@ -37,7 +37,8 @@ const AdminLoginPage = () => {
       const { admin } = res.data.data;
       
       setAuth(admin);
-      navigate('/admin');
+      if (admin.role === 'admin') navigate('/admin');
+      else navigate('/admin/tasks');
     } catch (error) {
       console.error('Admin login failed', error);
       setErrors({ email: error.response?.data?.message || 'Login failed' });

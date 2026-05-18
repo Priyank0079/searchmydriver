@@ -31,8 +31,12 @@ const KitOrderDetailPage = () => {
     { enabled: Boolean(orderId) },
   );
 
-  const handleSuccess = () => {
+  const invalidateAfterReview = () => {
     useAdminKitOrdersStore.getState().invalidate('admin-kit-orders');
+  };
+
+  const handleSuccess = () => {
+    invalidateAfterReview();
     refetch();
   };
 
@@ -77,7 +81,11 @@ const KitOrderDetailPage = () => {
 
       <PaymentDetailsCard order={order} />
 
-      <KitOrderActions order={order} onSuccess={handleSuccess} />
+      <KitOrderActions
+        order={order}
+        onSuccess={handleSuccess}
+        onReviewComplete={invalidateAfterReview}
+      />
 
       <SectionCard title="Ordered items">
         <KitOrderItemsList

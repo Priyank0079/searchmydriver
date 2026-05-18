@@ -1,7 +1,8 @@
 import { Driver } from '../models/driverModels/driver.model.js';
 import User from '../models/user.model.js';
 import { verifyAccessToken, inferAccountType } from '../utils/jwt.util.js';
-import { ACCOUNT_DRIVER, ACCOUNT_USER, USER_ROLES, STAFF_ROLES } from '../constants/roles.js';
+import { ACCOUNT_DRIVER, ACCOUNT_USER, USER_ROLES } from '../constants/roles.js';
+import { STAFF_ROLES } from '../constants/staffPermissions.js';
 import { COOKIE_NAMES } from '../utils/cookie.util.js';
 
 function readAccessToken(req) {
@@ -108,14 +109,13 @@ export const protectStaff = async (req, res, next) => {
     const decoded = verifyAccessToken(token);
     const decodedAccountType = inferAccountType(decoded);
 
-    // Staff accounts are stored in the User collection with ACCOUNT_USER type
-    if (decodedAccountType !== ACCOUNT_USER || !STAFF_ROLES.includes(decoded.role)) {
+    if (decodedAccountType !== ACCOUNT_USER) {
       return res.status(403).json({ status: 403, message: 'Not authorized for staff area' });
     }
 
     const staff = await User.findById(decoded.id);
     if (!staff || staff.isDeleted || !STAFF_ROLES.includes(staff.role)) {
-      return res.status(401).json({ status: 401, message: 'Staff account not found' });
+      return res.status(401).json({ status: 401, message: 'Staff account not found or unauthorized' });
     }
 
     if (!staff.isActive) {

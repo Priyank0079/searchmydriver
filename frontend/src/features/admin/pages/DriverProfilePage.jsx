@@ -15,6 +15,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { buildCacheKey } from '../../../store/lib/buildCacheKey';
 import { useAdminDriverProfileStore } from '../../../store/admin/useAdminDriverProfileStore';
 import { useAdminDriversStore } from '../../../store/admin/useAdminDriversStore';
+import { useAdminTasksListStore } from '../../../store/admin/useAdminTasksStore';
 import StatusBadge from '../components/StatusBadge';
 import DocumentGallery from '../components/DocumentGallery';
 import { SectionCard, InfoGrid } from '../components/DetailBlocks';
@@ -25,6 +26,7 @@ import {
   getCarTypeLabel,
   ONBOARDING_STEP_LABELS,
 } from '../components/ManageDrivers/driverProfileUtils';
+import { formatVehicleExperienceLabel } from '../../../utils/vehicleCatalog';
 
 const DriverProfilePage = () => {
   const { driverId } = useParams();
@@ -39,9 +41,14 @@ const DriverProfilePage = () => {
     { enabled: Boolean(driverId) },
   );
 
-  const handleStatusUpdated = () => {
+  const invalidateAfterReview = () => {
     useAdminDriversStore.getState().invalidate('admin-drivers');
     useAdminDriverProfileStore.getState().invalidate((key) => key.startsWith('driver-profile'));
+    useAdminTasksListStore.getState().invalidate('admin-tasks');
+  };
+
+  const handleStatusUpdated = () => {
+    invalidateAfterReview();
     refetch();
   };
 
@@ -68,6 +75,7 @@ const DriverProfilePage = () => {
   const { driver, training, trainingComplete } = profile;
   const selfie = driver.documents?.find((d) => d.type === 'selfie')?.fileUrl;
   const carLabels = (driver.carTypeExperience || []).map(getCarTypeLabel).filter(Boolean);
+  const vehicleExperience = driver.vehicleExperience || [];
 
   return (
     <div className="space-y-6 animate-fade-in-up pb-8">
@@ -118,7 +126,11 @@ const DriverProfilePage = () => {
         </div>
       </div>
 
-      <DriverProfileActions driver={driver} onSuccess={handleStatusUpdated} />
+      <DriverProfileActions
+        driver={driver}
+        onSuccess={handleStatusUpdated}
+        onReviewComplete={invalidateAfterReview}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <SectionCard title="Driver information">
@@ -142,21 +154,34 @@ const DriverProfilePage = () => {
               },
             ]}
           />
-          {carLabels.length > 0 && (
+          {(vehicleExperience.length > 0 || carLabels.length > 0) && (
             <div className="mt-5 pt-4 border-t border-slate-100">
               <p className="text-xs text-slate-400 mb-3 font-medium uppercase tracking-wider">
-                Vehicle experience
+                Vehicle experience ({vehicleExperience.length || carLabels.length})
               </p>
-              <div className="flex flex-wrap gap-2">
-                {carLabels.map((label) => (
-                  <span
-                    key={label}
-                    className="inline-flex px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-100 text-xs text-slate-700 capitalize"
-                  >
-                    {label}
-                  </span>
-                ))}
-              </div>
+              {vehicleExperience.length > 0 ? (
+                <ul className="space-y-2">
+                  {vehicleExperience.map((entry) => (
+                    <li
+                      key={entry._id}
+                      className="text-sm text-slate-700 px-3 py-2 rounded-lg bg-slate-50 border border-slate-100 capitalize"
+                    >
+                      {formatVehicleExperienceLabel(entry)}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {carLabels.map((label) => (
+                    <span
+                      key={label}
+                      className="inline-flex px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-100 text-xs text-slate-700 capitalize"
+                    >
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </SectionCard>

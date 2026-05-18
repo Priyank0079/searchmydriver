@@ -7,11 +7,14 @@ const routeTitles = {
   '/admin': 'Dashboard',
   '/admin/users': 'Manage Users',
   '/admin/drivers': 'Manage Drivers',
-  '/admin/kits': 'Driver Kits',
+  '/admin/tasks': 'Team Tasks',
+  '/admin/tasks/activity': 'Task Activity Log',
+  '/admin/settings/kits': 'Driver Kits',
   '/admin/kit-orders': 'Kit Orders',
   '/admin/bookings': 'Manage Bookings',
   '/admin/revenue': 'Revenue Reports',
   '/admin/settings': 'Settings',
+  '/admin/profile': 'My Profile',
 };
 
 const AdminLayout = () => {
