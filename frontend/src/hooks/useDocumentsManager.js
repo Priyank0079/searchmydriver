@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import { uploadImage } from '../utils/upload';
+import { validateImageFile } from '../utils/fileLimits';
 import { EMPTY_DOCUMENT, documentsArrayToMap, documentsMapToArray } from '../utils/documents';
 
 /**
@@ -27,6 +28,11 @@ export function useDocumentsManager(documentTypes = []) {
 
   const uploadDocument = useCallback(async (type, file) => {
     if (!file || !type) return;
+
+    const check = validateImageFile(file);
+    if (!check.ok) {
+      throw new Error(check.message);
+    }
 
     let previousPublicId = null;
     setDocuments((prev) => {

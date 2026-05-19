@@ -55,3 +55,18 @@ export const updateTrainingProgress = asyncHandler(async (req, res) => {
   const result = await driverService.updateTrainingProgressService(req.driver._id, req.body);
   return res.status(200).json(new ApiResponse(200, result, 'Training progress updated'));
 });
+
+export const reopenRejectedApplication = asyncHandler(async (req, res) => {
+  const result = await driverService.reopenRejectedApplicationService(req.driver._id);
+  return res.status(200).json(new ApiResponse(200, result, 'Application reopened for updates'));
+});
+
+export const uploadLiveVerification = asyncHandler(async (req, res) => {
+  const durationSeconds = req.body.durationSeconds;
+  const result = await driverService.uploadLiveVerificationService(
+    req.driver._id,
+    req.file,
+    durationSeconds,
+  );
+  return res.status(200).json(new ApiResponse(200, result, 'Live verification video saved'));
+});

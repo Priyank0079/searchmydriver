@@ -18,6 +18,12 @@ import {
   getWatchThresholdSeconds,
 } from '../utils/driverTraining.util.js';
 import { syncDriverKitEligibility } from '../utils/kitEligibility.util.js';
+import { DRIVER_ONBOARDING_STEP } from '../constants/driverOnboarding.js';
+import {
+  hasCompletedLiveVerification,
+  isApplicationSubmitted,
+} from '../utils/driverOnboarding.util.js';
+import { uploadToCloudinary, deleteFromCloudinary } from '../utils/cloudinary.js';
 
 export const sendOtpService = async (phone) => {
   if (!phone || phone.length !== 10) {
@@ -122,6 +128,7 @@ export const loginDriverService = async (phone, password) => {
       email: driver.email,
       onboardingStep: driver.onboardingStep,
       approvalStatus: driver.approvalStatus,
+      approvalNote: driver.approvalNote || '',
     },
   };
 };
@@ -173,6 +180,88 @@ export const updateOnboardingStepService = async (driverId, data) => {
   return driver;
 };
 
+const LIVE_VERIFICATION_MIN_SECONDS = 15;
+const LIVE_VERIFICATION_MAX_SECONDS = 180;
+
+export const uploadLiveVerificationService = async (driverId, file, durationSeconds) => {
+  if (!file) {
+    throw new ApiError(400, 'Recorded video is required');
+  }
+
+  const driver = await Driver.findById(driverId);
+  if (!driver) throw new ApiError(404, 'Driver not found');
+
+  if (isApplicationSubmitted(driver)) {
+    throw new ApiError(400, 'Application already submitted');
+  }
+
+  if (driver.onboardingStep < DRIVER_ONBOARDING_STEP.SAFETY) {
+    throw new ApiError(400, 'Complete safety documents before live verification');
+  }
+
+  const reportedDuration = Number(durationSeconds) || 0;
+  if (reportedDuration < LIVE_VERIFICATION_MIN_SECONDS) {
+    throw new ApiError(
+      400,
+      `Recording must be at least ${LIVE_VERIFICATION_MIN_SECONDS} seconds`,
+    );
+  }
+  if (reportedDuration > LIVE_VERIFICATION_MAX_SECONDS) {
+    throw new ApiError(400, 'Recording is too long. Please record again.');
+  }
+
+  const oldPublicId = driver.liveVerificationVideo?.cloudinaryPublicId;
+  const uploadResult = await uploadToCloudinary(file.buffer, 'sparedriver/live-verification', {
+    resourceType: 'video',
+  });
+
+  if (oldPublicId) {
+    await deleteFromCloudinary(oldPublicId, 'video');
+  }
+
+  const cloudDuration = Math.round(uploadResult.duration || reportedDuration);
+
+  driver.liveVerificationVideo = {
+    videoUrl: uploadResult.secure_url,
+    cloudinaryPublicId: uploadResult.public_id,
+    recordedAt: new Date(),
+    durationSeconds: cloudDuration,
+  };
+
+  if (driver.onboardingStep < DRIVER_ONBOARDING_STEP.LIVE_VERIFICATION) {
+    driver.onboardingStep = DRIVER_ONBOARDING_STEP.LIVE_VERIFICATION;
+  }
+
+  await driver.save();
+
+  return {
+    liveVerificationVideo: driver.liveVerificationVideo,
+    onboardingStep: driver.onboardingStep,
+  };
+};
+
+export const reopenRejectedApplicationService = async (driverId) => {
+  const driver = await Driver.findById(driverId);
+  if (!driver) throw new ApiError(404, 'Driver not found');
+
+  if (driver.approvalStatus !== 'rejected') {
+    throw new ApiError(400, 'Only rejected applications can be updated');
+  }
+
+  driver.approvalStatus = 'pending';
+  driver.approvalNote = '';
+  driver.onboardingStep = DRIVER_ONBOARDING_STEP.SAFETY;
+  driver.trainingProgress = [];
+  await driver.save();
+
+  return {
+    id: driver._id,
+    onboardingStep: driver.onboardingStep,
+    approvalStatus: driver.approvalStatus,
+    liveVerificationVideo: driver.liveVerificationVideo,
+  };
+};
+
 export const getDriverTrainingService = async (driverId) => {
   const driver = await Driver.findById(driverId);
   if (!driver) throw new ApiError(404, 'Driver not found');
@@ -187,7 +276,10 @@ export const getDriverTrainingService = async (driverId) => {
   return {
     videos: items,
     allRequiredComplete,
-    canSubmit: driver.onboardingStep >= 4 && allRequiredComplete,
+    canSubmit:
+      hasCompletedLiveVerification(driver) &&
+      driver.onboardingStep >= DRIVER_ONBOARDING_STEP.LIVE_VERIFICATION &&
+      allRequiredComplete,
   };
 };
 
@@ -201,11 +293,11 @@ export const updateTrainingProgressService = async (driverId, data) => {
   const driver = await Driver.findById(driverId);
   if (!driver) throw new ApiError(404, 'Driver not found');
 
-  if (driver.onboardingStep < 4) {
-    throw new ApiError(400, 'Complete safety documents before training');
+  if (!hasCompletedLiveVerification(driver)) {
+    throw new ApiError(400, 'Complete live verification before training');
   }
 
-  if (driver.onboardingStep >= 5) {
+  if (isApplicationSubmitted(driver)) {
     throw new ApiError(400, 'Application already submitted');
   }
 
@@ -255,7 +347,11 @@ export const submitApplicationService = async (driverId) => {
     throw new ApiError(404, 'Driver not found');
   }
 
-  if (driver.onboardingStep < 4) {
+  if (!hasCompletedLiveVerification(driver)) {
+    throw new ApiError(400, 'Please complete live identity verification first');
+  }
+
+  if (driver.onboardingStep < DRIVER_ONBOARDING_STEP.LIVE_VERIFICATION) {
     throw new ApiError(400, 'Please complete all onboarding steps before submitting');
   }
 
@@ -269,7 +365,7 @@ export const submitApplicationService = async (driverId) => {
   }
 
   driver.approvalStatus = 'under_review';
-  driver.onboardingStep = 5;
+  driver.onboardingStep = DRIVER_ONBOARDING_STEP.SUBMITTED;
   await driver.save();
 
   const { upsertDriverReviewTask } = await import('./adminTask.service.js');

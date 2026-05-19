@@ -6,6 +6,7 @@ import useDriverAuthStore from '../../../../store/useDriverAuthStore';
 import GoogleSignInButton from '../../../auth/components/GoogleSignInButton';
 import AuthDivider from '../../../auth/components/AuthDivider';
 import useGoogleAuth from '../../../auth/hooks/useGoogleAuth';
+import { navigateDriverAfterAuth } from '../../../auth/utils/authNavigation';
 
 const DriverSignUpPage = () => {
   const navigate = useNavigate();
@@ -13,18 +14,8 @@ const DriverSignUpPage = () => {
   const { handleGoogleSuccess, handleGoogleError, loading: googleLoading } = useGoogleAuth('driver');
 
   useEffect(() => {
-    if (isAuthenticated) {
-      if (driver?.approvalStatus === 'approved') {
-        navigate('/driver/home');
-      } else if (driver?.onboardingStep >= 5) {
-        navigate('/driver/register/approval');
-      } else if (driver?.onboardingStep === 4) {
-        navigate('/driver/register/training');
-      } else if (driver?.onboardingStep === 3) {
-        navigate('/driver/register/safety');
-      } else if (driver?.onboardingStep >= 1) {
-        navigate('/driver/register/credentials');
-      }
+    if (isAuthenticated && driver) {
+      navigateDriverAfterAuth(navigate, driver);
     }
   }, [isAuthenticated, driver, navigate]);
 

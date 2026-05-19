@@ -18,7 +18,7 @@ export async function getDriverKitEligibility(driverId) {
   if (driver.approvalStatus !== 'approved') {
     reasons.push('Driver account is not approved yet');
   }
-  if ((driver.onboardingStep || 0) < 5) {
+  if ((driver.onboardingStep || 0) < 6) {
     reasons.push('Complete onboarding before going online');
   }
   if (driver.approvalStatus === 'suspended') {

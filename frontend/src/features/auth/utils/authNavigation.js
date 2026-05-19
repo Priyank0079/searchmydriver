@@ -1,3 +1,5 @@
+import { DRIVER_ONBOARDING_ROUTES, isApplicationSubmitted } from '../../../utils/driverOnboarding';
+
 export function userNeedsPhone(user) {
   if (!user) return false;
   const phone = String(user.phone_no || '').trim();
@@ -23,19 +25,23 @@ export function navigateDriverAfterAuth(navigate, driver, needsPhone) {
     return;
   }
 
-  if (driver.onboardingStep < 5) {
-    const stepRoutes = {
-      0: '/driver/register/identity',
-      1: '/driver/register/credentials',
-      2: '/driver/register/bank',
-      3: '/driver/register/safety',
-      4: '/driver/register/training',
-    };
-    navigate(stepRoutes[driver.onboardingStep] || '/driver/register/credentials', { replace: true });
+  if (driver.approvalStatus === 'rejected' || driver.approvalStatus === 'under_review') {
+    navigate('/driver/register/approval', { replace: true });
     return;
   }
 
-  navigate('/driver/register/approval', { replace: true });
+  if (isApplicationSubmitted(driver)) {
+    navigate('/driver/register/approval', { replace: true });
+    return;
+  }
+
+  const route = DRIVER_ONBOARDING_ROUTES[driver.onboardingStep];
+  if (route) {
+    navigate(route, { replace: true });
+    return;
+  }
+
+  navigate('/driver/register/credentials', { replace: true });
 }
 
 export function navigateUserAfterAuth(navigate, user, needsPhone) {

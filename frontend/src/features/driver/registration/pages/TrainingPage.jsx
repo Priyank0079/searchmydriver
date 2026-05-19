@@ -7,7 +7,7 @@ import { ArrowLeft, Shield } from 'lucide-react';
 import api from '../../../../utils/api';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
 
-const steps = ['Identity', 'Credentials', 'Bank', 'Safety', 'Training'];
+import { DRIVER_ONBOARDING_STEPS } from '../../../../utils/driverOnboarding';
 
 const TrainingPage = () => {
   const navigate = useNavigate();
@@ -76,7 +76,7 @@ const TrainingPage = () => {
     try {
       const res = await api.post('/driver/onboarding/submit');
       updateDriver({
-        onboardingStep: 5,
+        onboardingStep: 6,
         approvalStatus: res.data.data?.approvalStatus || 'under_review',
       });
       navigate('/driver/register/approval', { replace: true });
@@ -105,9 +105,9 @@ const TrainingPage = () => {
       <div className="px-6 pt-2 pb-4">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-lg font-bold">Training & Certification</h1>
-          <span className="text-xs text-text-muted bg-bg px-2 py-1 rounded-full">5/5</span>
+          <span className="text-xs text-text-muted bg-bg px-2 py-1 rounded-full">6/6</span>
         </div>
-        <StepIndicator steps={steps} currentStep={5} />
+        <StepIndicator steps={DRIVER_ONBOARDING_STEPS} currentStep={6} />
         <p className="text-xs text-text-muted mt-3 flex items-center gap-1.5">
           <Shield className="w-3.5 h-3.5" />
           Watch all required videos to complete registration. This step cannot be skipped.

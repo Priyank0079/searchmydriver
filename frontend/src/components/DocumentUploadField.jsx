@@ -1,5 +1,7 @@
 import { useRef } from 'react';
 import { Upload, Loader2, CheckCircle } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { validateImageFile, MAX_IMAGE_LABEL } from '../utils/fileLimits';
 
 const inputClassName =
   'absolute inset-0 w-full h-full opacity-0 z-10 cursor-pointer disabled:cursor-not-allowed';
@@ -24,10 +26,19 @@ const DocumentUploadField = ({
     e.target.value = '';
     if (!file || isBusy) return;
 
+    const isImageField = !accept || accept.includes('image');
+    if (isImageField) {
+      const check = validateImageFile(file);
+      if (!check.ok) {
+        toast.error(check.message);
+        return;
+      }
+    }
+
     try {
       await onUpload(file);
-    } catch {
-      // Caller may show alert
+    } catch (err) {
+      toast.error(err.message || 'Upload failed');
     }
   };
 
@@ -78,6 +89,9 @@ const DocumentUploadField = ({
               <Upload className="w-8 h-8 text-text-muted" />
               <span className="text-sm text-text-secondary">Tap to upload</span>
               {hint && <span className="text-xs text-text-muted">{hint}</span>}
+              {(!accept || accept.includes('image')) && (
+                <span className="text-xs text-text-muted">Max {MAX_IMAGE_LABEL}</span>
+              )}
             </>
           )}
         </div>

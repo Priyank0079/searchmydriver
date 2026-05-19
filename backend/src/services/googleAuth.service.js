@@ -30,6 +30,7 @@ function sanitizeDriver(driver) {
     email: driver.email || '',
     onboardingStep: driver.onboardingStep,
     approvalStatus: driver.approvalStatus,
+    approvalNote: driver.approvalNote || '',
     authProvider: driver.authProvider,
     needsPhone: !driver.phone,
   };

@@ -8,7 +8,10 @@ import {
   getProfile,
   getTraining,
   updateTrainingProgress,
+  uploadLiveVerification,
+  reopenRejectedApplication,
 } from '../controllers/driver.controller.js';
+import { uploadVideo as uploadVideoMiddleware } from '../middlewares/multer.js';
 import {
   googleSignInDriver,
   linkGoogleDriverPhone,
@@ -38,10 +41,17 @@ router.post('/auth/login', loginDriver);
 router.post('/auth/google', googleSignInDriver);
 
 router.put('/onboarding/step', protectDriver, updateOnboardingStep);
+router.post(
+  '/onboarding/live-verification',
+  protectDriver,
+  uploadVideoMiddleware.single('video'),
+  uploadLiveVerification,
+);
 router.post('/auth/google/link-phone', protectDriver, linkGoogleDriverPhone);
 router.get('/training', protectDriver, getTraining);
 router.put('/training/progress', protectDriver, updateTrainingProgress);
 router.post('/onboarding/submit', protectDriver, submitApplication);
+router.post('/application/reopen', protectDriver, reopenRejectedApplication);
 router.get('/profile', protectDriver, getProfile);
 
 router.get('/kits', protectDriver, getAvailableKits);

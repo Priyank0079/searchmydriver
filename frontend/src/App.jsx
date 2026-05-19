@@ -46,6 +46,7 @@ import IdentityDetailsPage from './features/driver/registration/pages/IdentityDe
 import DrivingCredentialsPage from './features/driver/registration/pages/DrivingCredentialsPage';
 import BankDetailsPage from './features/driver/registration/pages/BankDetailsPage';
 import SafetyProtocolPage from './features/driver/registration/pages/SafetyProtocolPage';
+import LiveVerificationPage from './features/driver/registration/pages/LiveVerificationPage';
 import TrainingPage from './features/driver/registration/pages/TrainingPage';
 import ProfileUnderReviewPage from './features/driver/registration/pages/ProfileUnderReviewPage';
 
@@ -151,6 +152,7 @@ function App() {
           <Route path="/driver/register/credentials" element={<DrivingCredentialsPage />} />
           <Route path="/driver/register/bank" element={<BankDetailsPage />} />
           <Route path="/driver/register/safety" element={<SafetyProtocolPage />} />
+          <Route path="/driver/register/verification" element={<LiveVerificationPage />} />
           <Route path="/driver/register/training" element={<TrainingPage />} />
           <Route path="/driver/register/approval" element={<ProfileUnderReviewPage />} />
         </Route>

@@ -25,5 +25,6 @@ export const ONBOARDING_STEP_LABELS = {
   2: 'Credentials',
   3: 'Bank details',
   4: 'Safety & documents',
-  5: 'Training / submitted',
+  5: 'Live verification',
+  6: 'Training / submitted',
 };

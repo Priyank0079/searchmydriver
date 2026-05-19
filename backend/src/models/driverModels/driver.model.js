@@ -132,7 +132,15 @@ const driverSchema = new mongoose.Schema(
       },
     },
 
-    // ── Step 5: Training & certification (required videos) ───────────────────
+    // ── Step 5: Live identity verification (Aadhaar + licence on camera) ─────
+    liveVerificationVideo: {
+      videoUrl: { type: String, default: '', trim: true },
+      cloudinaryPublicId: { type: String, default: '', trim: true },
+      recordedAt: { type: Date, default: null },
+      durationSeconds: { type: Number, default: 0, min: 0 },
+    },
+
+    // ── Step 6: Training & certification (required videos) ───────────────────
     trainingProgress: {
       type: [trainingProgressSchema],
       default: [],
@@ -141,9 +149,9 @@ const driverSchema = new mongoose.Schema(
     // ── Onboarding & Approval ─────────────────────────────────────────────────
     onboardingStep: {
       type: Number,
-      default: 1, // 1=Identity, 2=Credentials, 3=Bank, 4=Safety, 5=Training done/submitted
+      default: 1,
       min: 1,
-      max: 5,
+      max: 6,
     },
     approvalStatus: {
       type: String,

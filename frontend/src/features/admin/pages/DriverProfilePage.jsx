@@ -247,6 +247,28 @@ const DriverProfilePage = () => {
         </SectionCard>
       </div>
 
+        {driver.liveVerificationVideo?.videoUrl && (
+          <SectionCard title="Live identity verification">
+            <p className="text-xs text-slate-500 mb-3">
+              Recorded {driver.liveVerificationVideo.recordedAt
+                ? formatDate(driver.liveVerificationVideo.recordedAt)
+                : '—'}
+              {driver.liveVerificationVideo.durationSeconds
+                ? ` · ${driver.liveVerificationVideo.durationSeconds}s`
+                : ''}
+            </p>
+            <video
+              src={driver.liveVerificationVideo.videoUrl}
+              controls
+              playsInline
+              className="w-full max-h-[420px] rounded-xl bg-black"
+            />
+            <p className="text-xs text-slate-500 mt-3">
+              Driver should show Aadhaar and driving licence in this recording.
+            </p>
+          </SectionCard>
+        )}
+
       <SectionCard title="Documents">
         <DocumentGallery documents={driver.documents} />
       </SectionCard>

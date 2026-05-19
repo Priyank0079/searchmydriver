@@ -7,7 +7,7 @@ import { ArrowLeft, User, Hash, Building2, CreditCard } from 'lucide-react';
 import api from '../../../../utils/api';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
 
-const steps = ['Identity', 'Credentials', 'Bank', 'Safety', 'Training'];
+import { DRIVER_ONBOARDING_STEPS } from '../../../../utils/driverOnboarding';
 
 const BankDetailsPage = () => {
   const navigate = useNavigate();
@@ -79,7 +79,7 @@ const BankDetailsPage = () => {
           <h1 className="text-lg font-bold">Bank Details</h1>
           <span className="text-xs text-text-muted bg-bg px-2 py-1 rounded-full">3/5</span>
         </div>
-        <StepIndicator steps={steps} currentStep={3} />
+        <StepIndicator steps={DRIVER_ONBOARDING_STEPS} currentStep={3} />
         <p className="text-xs text-text-muted mt-3">Payout routing setup</p>
       </div>
       <form className="flex-1 flex flex-col px-6 pb-8">

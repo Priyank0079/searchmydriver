@@ -14,7 +14,7 @@ import api from '../../../../utils/api';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
 import { useDocumentsManager } from '../../../../hooks/useDocumentsManager';
 
-const steps = ['Identity', 'Credentials', 'Bank', 'Safety', 'Training'];
+import { DRIVER_ONBOARDING_STEPS } from '../../../../utils/driverOnboarding';
 const CREDENTIAL_DOC_TYPES = ['driving_license', 'selfie'];
 
 const CREDENTIAL_DOCUMENTS = [
@@ -191,7 +191,7 @@ const DrivingCredentialsPage = () => {
           <h1 className="text-lg font-bold">Driving Credentials</h1>
           <span className="text-xs text-text-muted bg-bg px-2 py-1 rounded-full">2/5</span>
         </div>
-        <StepIndicator steps={steps} currentStep={2} />
+        <StepIndicator steps={DRIVER_ONBOARDING_STEPS} currentStep={2} />
         <p className="text-xs text-text-muted mt-3">
           License, experience & up to {MAX_DRIVER_VEHICLES} vehicles you can drive for customers
         </p>

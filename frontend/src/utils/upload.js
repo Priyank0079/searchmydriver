@@ -1,4 +1,5 @@
 import api from './api';
+import { validateImageFile } from './fileLimits';
 
 /**
  * Uploads an image file to the backend, which forwards it to Cloudinary.
@@ -7,6 +8,11 @@ import api from './api';
  * @returns {Promise<{url: string, publicId: string}>} - The Cloudinary secure URL and public_id
  */
 export const uploadImage = async (file, oldPublicId = null) => {
+  const check = validateImageFile(file);
+  if (!check.ok) {
+    throw new Error(check.message);
+  }
+
   const formData = new FormData();
   formData.append('image', file);
   if (oldPublicId) {

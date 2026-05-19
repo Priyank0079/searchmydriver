@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import useDriverAuthStore from '../store/useDriverAuthStore';
 import { driverNeedsPhone } from '../features/auth/utils/authNavigation';
+import { isApplicationSubmitted } from '../utils/driverOnboarding';
 
 const OnboardingGuard = () => {
   const { isAuthenticated, driver } = useDriverAuthStore();
@@ -16,17 +17,21 @@ const OnboardingGuard = () => {
   }
 
   const step = driver?.onboardingStep ?? 0;
+  const submitted = isApplicationSubmitted(driver);
 
-  if (driver?.approvalStatus === 'approved' && step >= 5) {
+  if (driver?.approvalStatus === 'approved' && (step >= 6 || submitted)) {
     return <Navigate to="/driver/home" replace />;
   }
 
-  const isSubmitted = step >= 5;
-  const isRestrictedStatus = ['under_review', 'rejected', 'suspended'].includes(
-    driver?.approvalStatus,
-  );
+  if (submitted || driver?.approvalStatus === 'under_review') {
+    if (!path.includes('/register/approval')) {
+      return <Navigate to="/driver/register/approval" replace />;
+    }
+    return <Outlet />;
+  }
 
-  if (isSubmitted || (isRestrictedStatus && step >= 5)) {
+  // Rejected: always show rejection reason first; onboarding only after "Update application"
+  if (driver?.approvalStatus === 'rejected') {
     if (!path.includes('/register/approval')) {
       return <Navigate to="/driver/register/approval" replace />;
     }
@@ -42,15 +47,17 @@ const OnboardingGuard = () => {
   if (path.includes('/register/safety') && step < 3) {
     return <Navigate to="/driver/register/bank" replace />;
   }
-  if (path.includes('/register/training') && step < 4) {
+  if (path.includes('/register/verification') && step < 4) {
     return <Navigate to="/driver/register/safety" replace />;
   }
-  if (path.includes('/register/approval') && step < 5) {
-    return <Navigate to="/driver/register/training" replace />;
+  if (path.includes('/register/training') && step < 5) {
+    return <Navigate to="/driver/register/verification" replace />;
   }
-
-  if (isSubmitted && path.includes('/register/training')) {
-    return <Navigate to="/driver/register/approval" replace />;
+  if (path.includes('/register/approval')) {
+    if (['under_review', 'rejected'].includes(driver?.approvalStatus)) {
+      return <Outlet />;
+    }
+    return <Navigate to="/driver/register/training" replace />;
   }
 
   return <Outlet />;

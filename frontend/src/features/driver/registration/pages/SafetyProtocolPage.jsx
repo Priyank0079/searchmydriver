@@ -8,7 +8,7 @@ import api from '../../../../utils/api';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
 import { useDocumentsManager } from '../../../../hooks/useDocumentsManager';
 
-const steps = ['Identity', 'Credentials', 'Bank', 'Safety', 'Training'];
+import { DRIVER_ONBOARDING_STEPS } from '../../../../utils/driverOnboarding';
 const SAFETY_DOC_TYPES = ['aadhaar_front', 'aadhaar_back', 'police_verification'];
 
 const SafetyProtocolPage = () => {
@@ -58,7 +58,7 @@ const SafetyProtocolPage = () => {
       });
 
       updateDriver({ onboardingStep: 4 });
-      navigate('/driver/register/training', { replace: true });
+      navigate('/driver/register/verification', { replace: true });
     } catch (error) {
       console.error('Failed to submit application', error);
       alert(error.response?.data?.message || 'Failed to submit application. Please try again.');
@@ -78,7 +78,7 @@ const SafetyProtocolPage = () => {
         </button>
       </div>
       <div className="px-6 pt-2 pb-4">
-        <PageHeader steps={steps} currentStep={4} title="Safety & Documents" />
+        <PageHeader steps={DRIVER_ONBOARDING_STEPS} currentStep={4} title="Safety & Documents" />
       </div>
       <div className="flex-1 flex flex-col px-6 pb-8 overflow-y-auto">
         <div className="flex-1 space-y-6 animate-fade-in-up">

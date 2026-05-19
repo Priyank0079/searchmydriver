@@ -12,7 +12,7 @@ import AuthDivider from '../../../auth/components/AuthDivider';
 import useGoogleAuth from '../../../auth/hooks/useGoogleAuth';
 import { driverNeedsPhone, navigateDriverAfterAuth } from '../../../auth/utils/authNavigation';
 
-const steps = ['Identity', 'Credentials', 'Bank', 'Safety', 'Training'];
+import { DRIVER_ONBOARDING_STEPS } from '../../../../utils/driverOnboarding';
 
 const IdentityDetailsPage = () => {
   const navigate = useNavigate();
@@ -95,7 +95,7 @@ const IdentityDetailsPage = () => {
           <h1 className="text-lg font-bold">Identity Legal</h1>
           <span className="text-xs text-text-muted bg-bg px-2 py-1 rounded-full">1/5</span>
         </div>
-        <StepIndicator steps={steps} currentStep={1} />
+        <StepIndicator steps={DRIVER_ONBOARDING_STEPS} currentStep={1} />
         <p className="text-xs text-text-muted mt-3">Secure account creation</p>
       </div>
       

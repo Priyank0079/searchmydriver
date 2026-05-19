@@ -45,8 +45,8 @@ const KitItemsEditor = ({ items, onChange }) => {
       const { url } = await uploadImage(file);
       updateItem(index, { image: url });
       toast.success('Image uploaded');
-    } catch {
-      toast.error('Image upload failed');
+    } catch (err) {
+      toast.error(err.message || 'Image upload failed');
     }
   };
 
