@@ -19,9 +19,9 @@ const driverSchema = new mongoose.Schema(
     },
     phone: {
       type: String,
-      required: true,
-      unique: true,
       trim: true,
+      sparse: true,
+      unique: true,
       match: [/^[0-9]{10}$/, 'Phone number must be exactly 10 digits'],
     },
     email: {
@@ -30,11 +30,21 @@ const driverSchema = new mongoose.Schema(
       trim: true,
       lowercase: true,
     },
+    googleId: {
+      type: String,
+      trim: true,
+      sparse: true,
+      unique: true,
+    },
+    authProvider: {
+      type: String,
+      enum: ['local', 'google'],
+      default: 'local',
+    },
     password: {
       type: String,
-      required: true,
       minlength: 6,
-      select: false, // never returned in queries by default
+      select: false,
     },
     profilePicture: {
       type: String,

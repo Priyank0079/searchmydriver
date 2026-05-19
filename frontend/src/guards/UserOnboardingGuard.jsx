@@ -4,12 +4,13 @@ import useUserAuthStore from '../store/useUserAuthStore';
 import api from '../utils/api';
 import { Loader2 } from 'lucide-react';
 import { MAX_USER_CARS } from '../utils/constants';
+import { userNeedsPhone } from '../features/auth/utils/authNavigation';
 
 const ONBOARDING_PATHS = ['/user/add-car', '/user/my-cars', '/user/checklist'];
 const GARAGE_PATHS = ['/user/my-cars', '/user/add-car'];
 
 const UserOnboardingGuard = () => {
-  const { isAuthenticated, setAuth, onboarding, setOnboarding } = useUserAuthStore();
+  const { isAuthenticated, user, setAuth, onboarding, setOnboarding } = useUserAuthStore();
   const location = useLocation();
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -72,6 +73,10 @@ const UserOnboardingGuard = () => {
   }
 
   const path = location.pathname;
+
+  if (userNeedsPhone(user) && path !== '/link-phone') {
+    return <Navigate to="/link-phone" replace />;
+  }
   const resolved = hasOptimisticCars ? { ...status, ...onboarding } : status;
   const carCount = resolved?.carCount ?? 0;
   const hasChecklist = Boolean(resolved?.hasChecklist);

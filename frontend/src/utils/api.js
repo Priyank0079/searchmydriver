@@ -16,10 +16,12 @@ function shouldSkipTokenRefresh(config) {
     url.includes('/auth/refresh-token') ||
     url.includes('/auth/logout') ||
     url.includes('/auth/login') ||
+    url.includes('/auth/google') ||
     url.includes('/auth/send-otp') ||
     url.includes('/auth/verify-otp') ||
     url.includes('/admin/auth/login') ||
     url.includes('/driver/auth/login') ||
+    url.includes('/driver/auth/google') ||
     url.includes('/driver/auth/send-otp') ||
     url.includes('/driver/auth/verify-otp')
   );

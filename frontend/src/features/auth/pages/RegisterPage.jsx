@@ -3,15 +3,20 @@ import { useNavigate, Link } from 'react-router-dom';
 import Button from '../../../components/Button';
 import Input from '../../../components/Input';
 import Modal from '../../../components/Modal';
-import { User, Mail, Phone, Lock, ArrowLeft } from 'lucide-react';
+import { User, Phone, Lock, ArrowLeft } from 'lucide-react';
 import api from '../../../utils/api';
 import useUserAuthStore from '../../../store/useUserAuthStore';
+import GoogleSignInButton from '../components/GoogleSignInButton';
+import AuthDivider from '../components/AuthDivider';
+import useGoogleAuth from '../hooks/useGoogleAuth';
+import { navigateUserAfterAuth } from '../utils/authNavigation';
 
 const RegisterPage = () => {
   const navigate = useNavigate();
   const setAuth = useUserAuthStore((state) => state.setAuth);
   
-  const [formData, setFormData] = useState({ name: '', email: '', phone: '', password: '' });
+  const [formData, setFormData] = useState({ name: '', phone: '', password: '' });
+  const { handleGoogleSuccess, handleGoogleError, loading: googleLoading } = useGoogleAuth('user');
   const [otp, setOtp] = useState('');
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
@@ -54,7 +59,7 @@ const RegisterPage = () => {
       setAuth(user);
       setIsPhoneVerified(true);
       setShowOtpModal(false);
-      navigate('/user/add-car', { replace: true });
+      navigateUserAfterAuth(navigate, user);
     } catch (err) {
       setError(err.response?.data?.message || 'Invalid OTP');
     } finally {
@@ -96,16 +101,6 @@ const RegisterPage = () => {
             required
           />
 
-          <Input
-            label="Email"
-            type="email"
-            placeholder="your@email.com"
-            value={formData.email}
-            onChange={handleChange('email')}
-            icon={Mail}
-            required
-          />
-
           <div>
             <label className="text-sm font-medium text-text mb-1.5 block">Mobile Number</label>
             <div className="flex gap-2">
@@ -132,6 +127,14 @@ const RegisterPage = () => {
             </Button>
           </div>
         </form>
+
+        <AuthDivider />
+        <GoogleSignInButton
+          onSuccess={handleGoogleSuccess}
+          onError={handleGoogleError}
+          text="signup_with"
+          disabled={loading || googleLoading}
+        />
 
         <p className="text-center text-sm text-text-secondary mt-6 animate-fade-in-up" style={{ animationDelay: '0.2s' }}>
           Already have an account?{' '}

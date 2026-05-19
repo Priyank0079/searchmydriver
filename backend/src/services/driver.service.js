@@ -39,7 +39,7 @@ export const sendOtpService = async (phone) => {
 };
 
 export const verifyOtpAndRegisterService = async (data) => {
-  const { phone, otp, name, email, password } = data;
+  const { phone, otp, name, password } = data;
 
   if (!phone || !otp || !name || !password) {
     throw new ApiError(400, 'Missing required fields');
@@ -58,16 +58,16 @@ export const verifyOtpAndRegisterService = async (data) => {
 
   if (driver) {
     driver.name = name;
-    driver.email = email;
     driver.password = hashedPassword;
+    driver.authProvider = 'local';
     if (driver.onboardingStep < 1) driver.onboardingStep = 1;
     await driver.save();
   } else {
     driver = new Driver({
       name,
       phone,
-      email,
       password: hashedPassword,
+      authProvider: 'local',
       onboardingStep: 1,
       approvalStatus: 'pending',
     });
@@ -98,6 +98,10 @@ export const loginDriverService = async (phone, password) => {
   const driver = await Driver.findOne({ phone }).select('+password');
   if (!driver || driver.isDeleted) {
     throw new ApiError(401, 'Invalid credentials');
+  }
+
+  if (driver.authProvider === 'google') {
+    throw new ApiError(401, 'This account uses Google sign-in');
   }
 
   const isMatch = await bcrypt.compare(password, driver.password);

@@ -4,9 +4,13 @@ import Button from '../../../../components/Button';
 import Input from '../../../../components/Input';
 import StepIndicator from '../../../../components/StepIndicator';
 import Modal from '../../../../components/Modal';
-import { ArrowLeft, User, Phone, Mail, Lock } from 'lucide-react';
+import { ArrowLeft, User, Phone, Lock } from 'lucide-react';
 import api from '../../../../utils/api';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
+import GoogleSignInButton from '../../../auth/components/GoogleSignInButton';
+import AuthDivider from '../../../auth/components/AuthDivider';
+import useGoogleAuth from '../../../auth/hooks/useGoogleAuth';
+import { driverNeedsPhone, navigateDriverAfterAuth } from '../../../auth/utils/authNavigation';
 
 const steps = ['Identity', 'Credentials', 'Bank', 'Safety', 'Training'];
 
@@ -15,22 +19,18 @@ const IdentityDetailsPage = () => {
   const { driver, isAuthenticated, setAuth } = useDriverAuthStore();
   
   useEffect(() => {
-    if (isAuthenticated) {
-      if (driver?.approvalStatus === 'approved') {
-        navigate('/driver/home');
-      } else if (driver?.onboardingStep >= 5) {
-        navigate('/driver/register/approval');
-      } else if (driver?.onboardingStep === 4) {
-        navigate('/driver/register/training');
-      } else if (driver?.onboardingStep === 3) {
-        navigate('/driver/register/safety');
-      } else if (driver?.onboardingStep >= 1) {
-        navigate('/driver/register/credentials');
-      }
+    if (!isAuthenticated || !driver) return;
+    if (driverNeedsPhone(driver)) {
+      navigate('/driver/link-phone', { replace: true });
+      return;
     }
-  }, [isAuthenticated, driver, navigate]);
+    if (driver.onboardingStep >= 1) {
+      navigateDriverAfterAuth(navigate, driver);
+    }
+  }, [isAuthenticated, driver?.id, driver?.phone, driver?.onboardingStep, driver?.approvalStatus, navigate]);
 
-  const [form, setForm] = useState({ name: '', phone: '', email: '', password: '' });
+  const [form, setForm] = useState({ name: '', phone: '', password: '' });
+  const { handleGoogleSuccess, handleGoogleError, loading: googleLoading } = useGoogleAuth('driver');
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [otp, setOtp] = useState('');
@@ -61,7 +61,6 @@ const IdentityDetailsPage = () => {
         phone: form.phone,
         otp,
         name: form.name,
-        email: form.email,
         password: form.password,
       });
 
@@ -102,6 +101,13 @@ const IdentityDetailsPage = () => {
       
       <div className="flex-1 flex flex-col px-6 pb-8">
         <div className="flex-1 space-y-4 animate-fade-in-up">
+          <GoogleSignInButton
+            onSuccess={handleGoogleSuccess}
+            onError={handleGoogleError}
+            text="signup_with"
+            disabled={googleLoading || isPhoneVerified}
+          />
+          <AuthDivider label="or register with phone" />
           <Input label="Full name" placeholder="As per Govt. ID" value={form.name} onChange={handleChange('name')} icon={User} />
           <Input label="Password" type="password" placeholder="Min 6 characters" value={form.password} onChange={handleChange('password')} icon={Lock} />
           
@@ -131,7 +137,6 @@ const IdentityDetailsPage = () => {
             {error && <p className="text-danger text-xs mt-1">{error}</p>}
           </div>
 
-          <Input label="Email (optional)" type="email" placeholder="your@email.com" value={form.email} onChange={handleChange('email')} icon={Mail} />
         </div>
         
         <Button 

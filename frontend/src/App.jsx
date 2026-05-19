@@ -8,6 +8,7 @@ import WelcomePage from './features/auth/pages/WelcomePage';
 import LoginPage from './features/auth/pages/LoginPage';
 import RegisterPage from './features/auth/pages/RegisterPage';
 import ForgotPasswordPage from './features/auth/pages/ForgotPasswordPage';
+import LinkPhonePage from './features/auth/pages/LinkPhonePage';
 
 // User Onboarding
 import AddCarPage from './features/user/onboarding/pages/AddCarPage';
@@ -105,7 +106,10 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/link-phone" element={<LinkPhonePage accountType="user" />} />
         </Route>
+
+        <Route path="/driver/link-phone" element={<LinkPhonePage accountType="driver" />} />
 
         {/* ========== User Onboarding ========== */}
         <Route element={<UserOnboardingGuard />}>

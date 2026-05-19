@@ -1,5 +1,6 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import useDriverAuthStore from '../store/useDriverAuthStore';
+import { driverNeedsPhone } from '../features/auth/utils/authNavigation';
 
 const OnboardingGuard = () => {
   const { isAuthenticated, driver } = useDriverAuthStore();
@@ -10,11 +11,16 @@ const OnboardingGuard = () => {
     return <Navigate to="/driver/login" replace />;
   }
 
-  if (driver?.approvalStatus === 'approved') {
+  if (driverNeedsPhone(driver)) {
+    return <Navigate to="/driver/link-phone" replace />;
+  }
+
+  const step = driver?.onboardingStep ?? 0;
+
+  if (driver?.approvalStatus === 'approved' && step >= 5) {
     return <Navigate to="/driver/home" replace />;
   }
 
-  const step = driver?.onboardingStep || 1;
   const isSubmitted = step >= 5;
   const isRestrictedStatus = ['under_review', 'rejected', 'suspended'].includes(
     driver?.approvalStatus,

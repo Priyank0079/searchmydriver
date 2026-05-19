@@ -11,6 +11,7 @@ import { USER_ROLES } from '../constants/roles.js';
 function sanitizeUser(doc) {
   const o = doc.toObject();
   delete o.password;
+  o.needsPhone = !o.phone_no || !o.isPhoneVerified;
   return o;
 }
 
@@ -36,7 +37,7 @@ export const sendUserOtpService = async (phone) => {
   return { message: 'OTP sent successfully' };
 };
 
-export const verifyUserOtpAndRegisterService = async ({ name, email, phone, password, otp }) => {
+export const verifyUserOtpAndRegisterService = async ({ name, phone, password, otp }) => {
   if (!name || !phone || !password || !otp) {
     throw new ApiError(400, 'All fields are required');
   }
@@ -53,11 +54,12 @@ export const verifyUserOtpAndRegisterService = async ({ name, email, phone, pass
 
   const user = await User.create({
     name,
-    email: email.toLowerCase(),
+    email: `${phone}@phone.sparedriver.local`,
     phone_no: phone,
     password: hashedPassword,
     role: USER_ROLES.USER,
-    onboardingStep: 1,
+    authProvider: 'local',
+    isPhoneVerified: true,
   });
 
   const payload = tokenPayloadFromUser(user);
@@ -80,6 +82,10 @@ export const loginUserService = async (phone, password) => {
 
   if (user.role !== USER_ROLES.USER) {
     throw new ApiError(401, 'Use the correct sign-in page for your account type');
+  }
+
+  if (user.authProvider === 'google') {
+    throw new ApiError(401, 'This account uses Google sign-in');
   }
 
   const isMatch = await bcrypt.compare(password, user.password);
@@ -164,6 +170,7 @@ export const getRegistrationStatusService = async (userId) => {
     hasCar: carCount > 0,
     hasChecklist: await isChecklistComplete(user),
     carCount,
+    needsPhone: !user.phone_no || !user.isPhoneVerified,
     user: sanitizeUser(user),
   };
 };

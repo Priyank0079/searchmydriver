@@ -9,6 +9,10 @@ import {
   getTraining,
   updateTrainingProgress,
 } from '../controllers/driver.controller.js';
+import {
+  googleSignInDriver,
+  linkGoogleDriverPhone,
+} from '../controllers/googleAuth.controller.js';
 import { protectDriver } from '../middlewares/authMiddleware.js';
 import { getMandatoryKit, getAvailableKits } from '../controllers/kit.controller.js';
 import {
@@ -31,8 +35,10 @@ const router = express.Router();
 router.post('/auth/send-otp', sendOtp);
 router.post('/auth/verify-otp', verifyOtpAndRegister);
 router.post('/auth/login', loginDriver);
+router.post('/auth/google', googleSignInDriver);
 
 router.put('/onboarding/step', protectDriver, updateOnboardingStep);
+router.post('/auth/google/link-phone', protectDriver, linkGoogleDriverPhone);
 router.get('/training', protectDriver, getTraining);
 router.put('/training/progress', protectDriver, updateTrainingProgress);
 router.post('/onboarding/submit', protectDriver, submitApplication);

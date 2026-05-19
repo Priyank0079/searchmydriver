@@ -5,33 +5,24 @@ import Input from '../../../../components/Input';
 import { Phone, Lock, ArrowLeft } from 'lucide-react';
 import api from '../../../../utils/api';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
+import GoogleSignInButton from '../../../auth/components/GoogleSignInButton';
+import AuthDivider from '../../../auth/components/AuthDivider';
+import useGoogleAuth from '../../../auth/hooks/useGoogleAuth';
+import { navigateDriverAfterAuth } from '../../../auth/utils/authNavigation';
 
 const DriverLoginPage = () => {
   const navigate = useNavigate();
   const { isAuthenticated, driver, setAuth } = useDriverAuthStore();
 
   useEffect(() => {
-    if (isAuthenticated && driver) {
-      if (driver.approvalStatus === 'approved') {
-        navigate('/driver/home');
-      } else if (driver.onboardingStep < 5) {
-        switch (driver.onboardingStep) {
-          case 0: navigate('/driver/register/identity'); break;
-          case 1: navigate('/driver/register/credentials'); break;
-          case 2: navigate('/driver/register/bank'); break;
-          case 3: navigate('/driver/register/safety'); break;
-          case 4: navigate('/driver/register/training'); break;
-          default: navigate('/driver/register/credentials');
-        }
-      } else {
-        navigate('/driver/register/approval');
-      }
-    }
-  }, [isAuthenticated, driver, navigate]);
+    if (!isAuthenticated || !driver) return;
+    navigateDriverAfterAuth(navigate, driver);
+  }, [isAuthenticated, driver?.id, driver?.phone, driver?.onboardingStep, driver?.approvalStatus, driver?.needsPhone, navigate]);
   
   const [formData, setFormData] = useState({ phone: '', password: '' });
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
+  const { handleGoogleSuccess, handleGoogleError, loading: googleLoading } = useGoogleAuth('driver');
 
   const handleChange = (field) => (e) => {
     setFormData((prev) => ({ ...prev, [field]: e.target.value }));
@@ -58,23 +49,7 @@ const DriverLoginPage = () => {
       const { driver } = res.data.data;
       
       setAuth(driver);
-
-      // Redirection logic
-      if (driver.approvalStatus === 'approved') {
-        navigate('/driver/home');
-      } else if (driver.onboardingStep < 5) {
-        switch (driver.onboardingStep) {
-          case 0: navigate('/driver/register/identity'); break;
-          case 1: navigate('/driver/register/credentials'); break;
-          case 2: navigate('/driver/register/bank'); break;
-          case 3: navigate('/driver/register/safety'); break;
-          case 4: navigate('/driver/register/training'); break;
-          default: navigate('/driver/register/credentials');
-        }
-      } else {
-        navigate('/driver/register/approval');
-      }
-
+      navigateDriverAfterAuth(navigate, driver);
     } catch (error) {
       console.error('Login failed', error);
       setErrors({ phone: error.response?.data?.message || 'Login failed' });
@@ -133,6 +108,14 @@ const DriverLoginPage = () => {
             LOGIN
           </Button>
         </form>
+
+        <AuthDivider />
+        <GoogleSignInButton
+          onSuccess={handleGoogleSuccess}
+          onError={handleGoogleError}
+          text="signin_with"
+          disabled={loading || googleLoading}
+        />
 
         {/* Register Link */}
         <p className="text-center text-sm text-text-secondary mt-8 mb-6 animate-fade-in-up" style={{ animationDelay: '0.2s' }}>

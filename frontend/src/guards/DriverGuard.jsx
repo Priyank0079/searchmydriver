@@ -8,9 +8,9 @@ const DriverGuard = () => {
     return <Navigate to="/driver/login" replace />;
   }
 
-  const step = driver.onboardingStep || 1;
+  const step = driver.onboardingStep ?? 0;
 
-  if (step < 5) {
+  if (step < 5 && driver.approvalStatus !== 'approved') {
     if (step === 1) return <Navigate to="/driver/register/credentials" replace />;
     if (step === 2) return <Navigate to="/driver/register/bank" replace />;
     if (step === 3) return <Navigate to="/driver/register/safety" replace />;
