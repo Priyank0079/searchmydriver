@@ -3,7 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Car, CalendarCheck, DollarSign, Settings,
   LogOut, X, ChevronRight, ChevronDown, ShieldCheck, CreditCard, Monitor, Package,
-  CheckSquare,
+  CheckSquare, MapPin,
 } from 'lucide-react';
 import { APP_NAME } from '../../../utils/constants';
 import useAdminAuthStore from '../../../store/useAdminAuthStore';
@@ -38,6 +38,12 @@ const navItems = [
         path: '/admin/settings/kits',
         label: 'Driver Kits',
         icon: Package,
+        roles: ['admin', 'sub_admin'],
+      },
+      {
+        path: '/admin/settings/zones',
+        label: 'Service Zones',
+        icon: MapPin,
         roles: ['admin', 'sub_admin'],
       },
       {

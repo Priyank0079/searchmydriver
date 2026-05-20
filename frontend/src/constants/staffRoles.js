@@ -51,6 +51,10 @@ export function canManageKitsCatalog(role) {
   return hasOperationalAccess(role);
 }
 
+export function canManageZones(role) {
+  return hasOperationalAccess(role);
+}
+
 export function canAccessUsers(role) {
   return hasOperationalAccess(role);
 }

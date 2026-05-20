@@ -59,6 +59,13 @@ import {
   deliverKitOrder,
 } from '../controllers/kitOrder.controller.js';
 import {
+  createZone,
+  listZones,
+  getZoneById,
+  updateZone,
+  deleteZone,
+} from '../controllers/zone.controller.js';
+import {
   getTaskAssignees,
   getTaskSummary,
   listTasks,
@@ -134,6 +141,12 @@ router.get('/kits', protectStaff, restrictTo(...ALL_STAFF), getKits);
 router.get('/kits/:id', protectStaff, restrictTo(...ALL_STAFF), getKitById);
 router.put('/kits/:id', protectStaff, restrictTo(...OPERATIONS), updateKit);
 router.delete('/kits/:id', protectStaff, restrictTo(...OPERATIONS), deleteKit);
+
+router.get('/zones', protectStaff, restrictTo(...OPERATIONS), listZones);
+router.post('/zones', protectStaff, restrictTo(...OPERATIONS), createZone);
+router.get('/zones/:id', protectStaff, restrictTo(...OPERATIONS), getZoneById);
+router.put('/zones/:id', protectStaff, restrictTo(...OPERATIONS), updateZone);
+router.delete('/zones/:id', protectStaff, restrictTo(...OPERATIONS), deleteZone);
 
 router.get('/kit-orders', protectStaff, restrictTo(...ALL_STAFF), getAdminKitOrders);
 router.get('/kit-orders/:id', protectStaff, restrictTo(...ALL_STAFF), getAdminKitOrderById);

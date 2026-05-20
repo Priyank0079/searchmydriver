@@ -54,3 +54,7 @@ export function canManagePlatformSettings(staff) {
 export function canManageKitsCatalog(staff) {
   return hasOperationalStaffAccess(staff);
 }
+
+export function canManageZones(staff) {
+  return hasOperationalStaffAccess(staff);
+}
