@@ -85,10 +85,11 @@ import ManageUsers from './features/admin/pages/ManageUsers';
 import UserProfilePage from './features/admin/pages/UserProfilePage';
 import ManageBookings from './features/admin/pages/ManageBookings';
 import PlatformSettings from './features/admin/pages/PlatformSettings';
-import PaymentSettings from './features/admin/pages/PaymentSettings';
 import ManageTeam from './features/admin/pages/ManageTeam';
 import ManageKits from './features/admin/pages/ManageKits';
 import ManageZones from './features/admin/pages/ManageZones';
+import ManagePricing from './features/admin/pages/ManagePricing';
+import ManageSubscriptions from './features/admin/pages/ManageSubscriptions';
 import ManageKitOrders from './features/admin/pages/ManageKitOrders';
 import KitOrderDetailPage from './features/admin/pages/KitOrderDetailPage';
 import ManageTasks from './features/admin/pages/ManageTasks';
@@ -201,7 +202,6 @@ function App() {
           <Route element={<SuperAdminOnlyGuard />}>
             <Route path="/admin/tasks/activity" element={<TaskActivityLogPage />} />
             <Route path="/admin/settings/team" element={<ManageTeam />} />
-            <Route path="/admin/settings/payment" element={<PaymentSettings />} />
           </Route>
           <Route path="/admin/drivers" element={<ManageDrivers />} />
           <Route path="/admin/drivers/:driverId/profile" element={<DriverProfilePage />} />
@@ -213,6 +213,8 @@ function App() {
           <Route path="/admin/settings/platform" element={<PlatformSettings />} />
           <Route path="/admin/settings/kits" element={<ManageKits />} />
           <Route path="/admin/settings/zones" element={<ManageZones />} />
+          <Route path="/admin/settings/pricing" element={<ManagePricing />} />
+          <Route path="/admin/settings/subscriptions" element={<ManageSubscriptions />} />
           {/* Note: Revenue page is mapped to Dashboard for now to save scope, or can be a separate page later */}
           <Route path="/admin/revenue" element={<Navigate to="/admin" replace />} />
         </Route>

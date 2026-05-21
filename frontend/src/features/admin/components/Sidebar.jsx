@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Car, CalendarCheck, DollarSign, Settings,
-  LogOut, X, ChevronRight, ChevronDown, ShieldCheck, CreditCard, Monitor, Package,
-  CheckSquare, MapPin,
+  LogOut, X, ChevronRight, ChevronDown, ShieldCheck, Monitor, Package,
+  CheckSquare, MapPin, Receipt, Sparkles,
 } from 'lucide-react';
 import { APP_NAME } from '../../../utils/constants';
 import useAdminAuthStore from '../../../store/useAdminAuthStore';
@@ -47,15 +47,21 @@ const navItems = [
         roles: ['admin', 'sub_admin'],
       },
       {
+        path: '/admin/settings/pricing',
+        label: 'Service Pricing',
+        icon: Receipt,
+        roles: ['admin', 'sub_admin'],
+      },
+      {
+        path: '/admin/settings/subscriptions',
+        label: 'Subscription Plans',
+        icon: Sparkles,
+        roles: ['admin', 'sub_admin'],
+      },
+      {
         path: '/admin/settings/team',
         label: 'Team Management',
         icon: ShieldCheck,
-        roles: ['admin'],
-      },
-      {
-        path: '/admin/settings/payment',
-        label: 'Pricing & Commission',
-        icon: CreditCard,
         roles: ['admin'],
       },
     ],

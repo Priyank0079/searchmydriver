@@ -66,6 +66,19 @@ import {
   deleteZone,
 } from '../controllers/zone.controller.js';
 import {
+  adminListServicePricings,
+  adminUpsertServicePricing,
+  adminUpdateServicePricing,
+  adminDeleteServicePricing,
+  adminListSubscriptionPlans,
+  adminCreateSubscriptionPlan,
+  adminUpdateSubscriptionPlan,
+  adminDeleteSubscriptionPlan,
+  adminListUserSubscriptions,
+  adminAssignDriverToSubscription,
+  adminReleaseSubscriptionDriver,
+} from '../controllers/pricing.controller.js';
+import {
   getTaskAssignees,
   getTaskSummary,
   listTasks,
@@ -147,6 +160,20 @@ router.post('/zones', protectStaff, restrictTo(...OPERATIONS), createZone);
 router.get('/zones/:id', protectStaff, restrictTo(...OPERATIONS), getZoneById);
 router.put('/zones/:id', protectStaff, restrictTo(...OPERATIONS), updateZone);
 router.delete('/zones/:id', protectStaff, restrictTo(...OPERATIONS), deleteZone);
+
+router.get('/pricing/services', protectStaff, restrictTo(...OPERATIONS), adminListServicePricings);
+router.post('/pricing/services', protectStaff, restrictTo(...OPERATIONS), adminUpsertServicePricing);
+router.put('/pricing/services/:id', protectStaff, restrictTo(...OPERATIONS), adminUpdateServicePricing);
+router.delete('/pricing/services/:id', protectStaff, restrictTo(...OPERATIONS), adminDeleteServicePricing);
+
+router.get('/pricing/subscriptions', protectStaff, restrictTo(...OPERATIONS), adminListSubscriptionPlans);
+router.post('/pricing/subscriptions', protectStaff, restrictTo(...OPERATIONS), adminCreateSubscriptionPlan);
+router.put('/pricing/subscriptions/:id', protectStaff, restrictTo(...OPERATIONS), adminUpdateSubscriptionPlan);
+router.delete('/pricing/subscriptions/:id', protectStaff, restrictTo(...OPERATIONS), adminDeleteSubscriptionPlan);
+
+router.get('/subscriptions/users', protectStaff, restrictTo(...OPERATIONS), adminListUserSubscriptions);
+router.post('/subscriptions/users/:id/assign', protectStaff, restrictTo(...OPERATIONS), adminAssignDriverToSubscription);
+router.post('/subscriptions/users/:id/release', protectStaff, restrictTo(...OPERATIONS), adminReleaseSubscriptionDriver);
 
 router.get('/kit-orders', protectStaff, restrictTo(...ALL_STAFF), getAdminKitOrders);
 router.get('/kit-orders/:id', protectStaff, restrictTo(...ALL_STAFF), getAdminKitOrderById);
