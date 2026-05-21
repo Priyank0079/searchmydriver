@@ -1,6 +1,10 @@
 import { Driver } from '../models/driverModels/driver.model.js';
 import { ApiError } from '../utils/apiError.js';
 import { getDriverKitEligibility, syncDriverKitEligibility } from '../utils/kitEligibility.util.js';
+import {
+  markDriverOnlineLive,
+  markDriverOfflineLive,
+} from './driverLocation.service.js';
 
 export const getOnlineStatusService = async (driverId) => {
   const driver = await Driver.findById(driverId).select('isOnline isOnTrip approvalStatus canGoOnline');
@@ -25,6 +29,11 @@ export const setDriverOnlineService = async (driverId, online) => {
   if (!online) {
     driver.isOnline = false;
     await driver.save();
+    // Tear down live presence so the driver disappears from the dispatch
+    // pool and the admin live map immediately.
+    markDriverOfflineLive(driverId).catch((err) => {
+      console.warn('[driverOnline] markDriverOfflineLive failed:', err.message);
+    });
     return { isOnline: false, canGoOnline: driver.canGoOnline };
   }
 
@@ -42,6 +51,12 @@ export const setDriverOnlineService = async (driverId, online) => {
   driver.lastOnlineAt = new Date();
   driver.canGoOnline = true;
   await driver.save();
+
+  // Stand up live presence. The driver socket will start emitting locations
+  // next, which fills in the GPS coords; this just marks the status node.
+  markDriverOnlineLive(driverId).catch((err) => {
+    console.warn('[driverOnline] markDriverOnlineLive failed:', err.message);
+  });
 
   return {
     isOnline: true,

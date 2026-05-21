@@ -58,6 +58,7 @@ import {
   dispatchKitOrder,
   deliverKitOrder,
 } from '../controllers/kitOrder.controller.js';
+import { getLiveDriversSnapshot } from '../controllers/driverLocation.controller.js';
 import {
   createZone,
   listZones,
@@ -109,6 +110,7 @@ router.patch('/tasks/:id/assign', protectStaff, restrictTo(...OPERATIONS), assig
 router.post('/tasks/:id/claim', protectStaff, restrictTo(...OPERATIONS), claimTask);
 
 router.get('/drivers', protectStaff, restrictTo(...ALL_STAFF), getDrivers);
+router.get('/drivers/live', protectStaff, restrictTo(...ALL_STAFF), getLiveDriversSnapshot);
 router.get('/drivers/:id', protectStaff, restrictTo(...ALL_STAFF), getDriverById);
 router.put('/drivers/:id/status', protectStaff, restrictTo(...ALL_STAFF), updateDriverStatus);
 router.patch('/drivers/:id/suspend', protectStaff, restrictTo(...ALL_STAFF), suspendDriver);

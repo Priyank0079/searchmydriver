@@ -206,6 +206,11 @@ const driverSchema = new mongoose.Schema(
         default: [0, 0],
       },
     },
+    /** Last time `location` was updated by the live-location pipeline. */
+    lastLocationAt: {
+      type: Date,
+      default: null,
+    },
     city: {
       type: String,
       default: '',

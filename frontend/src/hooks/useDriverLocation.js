@@ -1,0 +1,179 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSocket } from './useSocket';
+import { C2S_EVENTS } from '../constants/socketEvents';
+
+/**
+ * Driver-side GPS streamer.
+ *
+ * Pipeline:
+ *   1. `navigator.geolocation.watchPosition` fires ~1/sec on most devices.
+ *   2. We throttle emits to the backend to one every `MIN_EMIT_INTERVAL_MS`.
+ *   3. Each accepted emit travels over Socket.IO to the backend, which writes
+ *      to Firebase + (throttled) Mongo.
+ *
+ * The hook returns granular state so the UI can show "Waiting for GPS",
+ * "Sharing location", "Location permission required", etc.
+ */
+
+const MIN_EMIT_INTERVAL_MS = 5_000;
+
+const GEO_OPTIONS = Object.freeze({
+  enableHighAccuracy: true,
+  maximumAge: 2_000,
+  timeout: 15_000,
+});
+
+const PERMISSION = Object.freeze({
+  UNKNOWN: 'unknown',
+  GRANTED: 'granted',
+  DENIED: 'denied',
+  UNSUPPORTED: 'unsupported',
+});
+
+/**
+ * @param {{ enabled: boolean }} opts
+ */
+export function useDriverLocation({ enabled }) {
+  const { socket, isConnected, emit } = useSocket();
+  const [permission, setPermission] = useState(PERMISSION.UNKNOWN);
+  const [coords, setCoords] = useState(null);
+  const [lastEmittedAt, setLastEmittedAt] = useState(null);
+  const [error, setError] = useState(null);
+
+  const watchIdRef = useRef(null);
+  const lastEmitRef = useRef(0);
+  const lastCoordsRef = useRef(null);
+
+  /* ---- permission probe ------------------------------------------- */
+
+  useEffect(() => {
+    if (!('geolocation' in navigator)) {
+      setPermission(PERMISSION.UNSUPPORTED);
+      setError('Geolocation is not supported on this device.');
+      return undefined;
+    }
+
+    if (!navigator.permissions?.query) return undefined;
+    let active = true;
+    navigator.permissions
+      .query({ name: 'geolocation' })
+      .then((status) => {
+        if (!active) return;
+        setPermission(status.state);
+        const onChange = () => {
+          if (active) setPermission(status.state);
+        };
+        status.addEventListener?.('change', onChange);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  /* ---- emit helper ------------------------------------------------- */
+
+  const emitLocation = useCallback(
+    (position) => {
+      const now = Date.now();
+      if (now - lastEmitRef.current < MIN_EMIT_INTERVAL_MS) return;
+
+      const { latitude, longitude, accuracy, heading, speed } = position.coords;
+      const payload = {
+        lat: latitude,
+        lng: longitude,
+        accuracy: Number.isFinite(accuracy) ? accuracy : null,
+        heading: Number.isFinite(heading) ? heading : null,
+        speed: Number.isFinite(speed) ? speed : null,
+      };
+      lastEmitRef.current = now;
+      lastCoordsRef.current = payload;
+
+      const sent = emit(C2S_EVENTS.DRIVER_LOCATION_UPDATE, payload, (ack) => {
+        if (ack?.ok === false && ack.reason !== 'throttled') {
+          if (import.meta.env.DEV) console.warn('[location] backend rejected:', ack.reason);
+        }
+      });
+      if (sent) setLastEmittedAt(now);
+    },
+    [emit],
+  );
+
+  /* ---- main effect: start/stop the GPS watch ---------------------- */
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+    if (permission === PERMISSION.UNSUPPORTED || permission === PERMISSION.DENIED) return undefined;
+    if (!isConnected) return undefined;
+
+    const onSuccess = (position) => {
+      setError(null);
+      setPermission(PERMISSION.GRANTED);
+      setCoords({
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+        ts: position.timestamp,
+      });
+      emitLocation(position);
+    };
+
+    const onError = (err) => {
+      if (err.code === err.PERMISSION_DENIED) {
+        setPermission(PERMISSION.DENIED);
+        setError('Location permission denied. Enable it in your browser settings to go online.');
+      } else if (err.code === err.POSITION_UNAVAILABLE) {
+        setError('GPS signal unavailable. Move to an open area and try again.');
+      } else if (err.code === err.TIMEOUT) {
+        setError('Could not get a location fix in time. Retrying…');
+      } else {
+        setError(err.message || 'Could not read location');
+      }
+    };
+
+    const id = navigator.geolocation.watchPosition(onSuccess, onError, GEO_OPTIONS);
+    watchIdRef.current = id;
+
+    // Announce online to the socket (Firebase status mirror). The REST online
+    // toggle has already set the DB flag — this just nudges Firebase.
+    emit(C2S_EVENTS.DRIVER_ONLINE);
+
+    return () => {
+      if (watchIdRef.current != null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+      // Don't emit DRIVER_OFFLINE here — the REST off-toggle path already
+      // wipes the live presence. Emitting here too would race that.
+    };
+  }, [enabled, permission, isConnected, emit, emitLocation]);
+
+  /* ---- socket disconnect = stop sharing ---------------------------- */
+
+  useEffect(() => {
+    if (!socket) return undefined;
+    const onDisconnect = () => {
+      if (watchIdRef.current != null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+    };
+    socket.on('disconnect', onDisconnect);
+    return () => socket.off('disconnect', onDisconnect);
+  }, [socket]);
+
+  /* ---- API --------------------------------------------------------- */
+
+  const isSharing = enabled && permission === PERMISSION.GRANTED && coords != null;
+
+  return {
+    isSharing,
+    isConnected,
+    permission,
+    coords,
+    lastEmittedAt,
+    error,
+  };
+}
+
+useDriverLocation.PERMISSION = PERMISSION;

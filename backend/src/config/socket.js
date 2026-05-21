@@ -11,6 +11,7 @@ import {
   S2C_EVENTS,
   SOCKET_ROOM_PREFIX,
 } from '../constants/socketEvents.js';
+import { attachDriverSocketHandlers } from '../controllers/driverSocket.controller.js';
 
 /**
  * Socket.IO server bootstrap.
@@ -195,6 +196,11 @@ function attachConnectionHandlers(socket) {
     if (!bookingId) return;
     socket.leave(roomForBooking(bookingId));
   });
+
+  // Driver-specific handlers (location stream, online/offline mirror).
+  if (principal.type === 'driver') {
+    attachDriverSocketHandlers(socket);
+  }
 
   if (process.env.SOCKET_DEBUG === 'true') {
     console.log(

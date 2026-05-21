@@ -94,6 +94,7 @@ import ManageKits from './features/admin/pages/ManageKits';
 import ManageZones from './features/admin/pages/ManageZones';
 import ManagePricing from './features/admin/pages/ManagePricing';
 import ManageSubscriptions from './features/admin/pages/ManageSubscriptions';
+import LiveDriverMap from './features/admin/pages/LiveDriverMap';
 import ManageKitOrders from './features/admin/pages/ManageKitOrders';
 import KitOrderDetailPage from './features/admin/pages/KitOrderDetailPage';
 import ManageTasks from './features/admin/pages/ManageTasks';
@@ -208,6 +209,7 @@ function App() {
             <Route path="/admin/settings/team" element={<ManageTeam />} />
           </Route>
           <Route path="/admin/drivers" element={<ManageDrivers />} />
+          <Route path="/admin/drivers/live" element={<LiveDriverMap />} />
           <Route path="/admin/drivers/:driverId/profile" element={<DriverProfilePage />} />
           <Route path="/admin/kits" element={<Navigate to="/admin/settings/kits" replace />} />
           <Route path="/admin/kit-orders" element={<ManageKitOrders />} />

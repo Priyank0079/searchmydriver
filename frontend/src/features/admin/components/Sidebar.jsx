@@ -3,7 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Car, CalendarCheck, DollarSign, Settings,
   LogOut, X, ChevronRight, ChevronDown, ShieldCheck, Monitor, Package,
-  CheckSquare, MapPin, Receipt, Sparkles,
+  CheckSquare, MapPin, Receipt, Sparkles, Navigation,
 } from 'lucide-react';
 import { APP_NAME } from '../../../utils/constants';
 import useAdminAuthStore from '../../../store/useAdminAuthStore';
@@ -20,6 +20,7 @@ const navItems = [
   { path: '/admin/users', label: 'Users', icon: Users, roles: ['admin', 'sub_admin'] },
   { path: '/admin/tasks', label: 'Team Tasks', icon: CheckSquare },
   { path: '/admin/drivers', label: 'Drivers', icon: Car },
+  { path: '/admin/drivers/live', label: 'Live Map', icon: Navigation },
   { path: '/admin/kit-orders', label: 'Kit Orders', icon: Package },
   { path: '/admin/bookings', label: 'Bookings', icon: CalendarCheck, roles: ['admin'] },
   { path: '/admin/revenue', label: 'Revenue', icon: DollarSign, roles: ['admin'] },
