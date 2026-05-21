@@ -3,6 +3,10 @@ import MobileLayout from './layouts/MobileLayout';
 import AuthLayout from './layouts/AuthLayout';
 import { UserDashboardLayout, DriverDashboardLayout } from './layouts/DashboardLayout';
 
+// Side-effect: starts the global Socket.IO lifecycle (auto-connects when any
+// auth store has a session, auto-disconnects on logout).
+import './store/useSocketStore';
+
 // Auth
 import WelcomePage from './features/auth/pages/WelcomePage';
 import LoginPage from './features/auth/pages/LoginPage';

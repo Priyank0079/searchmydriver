@@ -1,0 +1,84 @@
+/**
+ * Socket.IO event-name catalog.
+ *
+ * Mirrored verbatim in `frontend/src/constants/socketEvents.js`.
+ * Keep both files in sync; any renames must happen on both sides
+ * in the same PR.
+ *
+ * Naming convention: `<domain>:<entity>:<verb>`.
+ *  - `client_to_server` events use imperative verbs (e.g. `update`, `ping`).
+ *  - `server_to_client` events use past-tense verbs (e.g. `updated`, `changed`).
+ */
+
+export const SOCKET_NAMESPACE = '/';
+
+export const SOCKET_ROOM_PREFIX = Object.freeze({
+  USER: 'user',
+  DRIVER: 'driver',
+  ADMIN: 'admin',
+  BOOKING: 'booking',
+});
+
+/** Built-in Socket.IO lifecycle events (re-exported for convenience). */
+export const CONNECTION_EVENTS = Object.freeze({
+  CONNECT: 'connect',
+  DISCONNECT: 'disconnect',
+  CONNECT_ERROR: 'connect_error',
+});
+
+/**
+ * Client → Server events.
+ * The server expects exactly these names from authenticated sockets.
+ */
+export const C2S_EVENTS = Object.freeze({
+  /** Lightweight latency / liveness probe. Server replies on same socket. */
+  PING: 'system:ping',
+
+  /** Driver app pushes current GPS coordinates. Payload validated server-side. */
+  DRIVER_LOCATION_UPDATE: 'driver:location:update',
+
+  /** Driver joins/leaves the dispatch pool (mirror of REST online toggle). */
+  DRIVER_ONLINE: 'driver:online',
+  DRIVER_OFFLINE: 'driver:offline',
+
+  /** Booking lifecycle responses from driver app (accept / reject offer). */
+  BOOKING_ACCEPT: 'booking:accept',
+  BOOKING_REJECT: 'booking:reject',
+
+  /** Booking room join/leave (for users + drivers watching a specific trip). */
+  BOOKING_JOIN: 'booking:join',
+  BOOKING_LEAVE: 'booking:leave',
+});
+
+/**
+ * Server → Client events.
+ * Frontend should subscribe with `socket.on(S2C_EVENTS.X, handler)`.
+ */
+export const S2C_EVENTS = Object.freeze({
+  /** Server-side authentication / authorization error after connect. */
+  AUTH_ERROR: 'system:auth:error',
+
+  /** Pong reply to PING. */
+  PONG: 'system:pong',
+
+  /** Welcome packet sent right after auth succeeds (principal info, server time). */
+  CONNECTED: 'system:connected',
+
+  /** A driver's status (online/offline/on-trip) changed. Broadcast to admins. */
+  DRIVER_STATUS_CHANGED: 'driver:status:changed',
+
+  /** Driver's live location update mirrored to a booking room. */
+  TRIP_LOCATION_UPDATED: 'trip:location:updated',
+
+  /** A new booking offer arrived for a driver. */
+  BOOKING_OFFERED: 'booking:offered',
+
+  /** Booking state transitions (accepted, started, completed, cancelled, …). */
+  BOOKING_UPDATED: 'booking:updated',
+
+  /** Generic toast / in-app notification. */
+  NOTIFICATION: 'notification:new',
+
+  /** Operational alerts for admin dashboards (e.g. low driver count in zone). */
+  ADMIN_ALERT: 'admin:alert',
+});
