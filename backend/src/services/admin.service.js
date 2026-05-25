@@ -1,7 +1,7 @@
 import { Driver } from '../models/driverModels/driver.model.js';
 import User from '../models/user.model.js';
 import Car from '../models/user/car.model.js';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import { ApiError } from '../utils/apiError.js';
 import { USER_ROLES } from '../constants/roles.js';
 import { STAFF_ROLES } from '../constants/staffPermissions.js';

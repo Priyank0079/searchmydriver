@@ -1,4 +1,4 @@
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import User from '../models/user.model.js';
 import { Driver } from '../models/driverModels/driver.model.js';

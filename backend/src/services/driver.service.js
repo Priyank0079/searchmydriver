@@ -1,4 +1,4 @@
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import { OTP } from '../models/otp.model.js';
 import { Driver } from '../models/driverModels/driver.model.js';
 import { ApiError } from '../utils/apiError.js';
