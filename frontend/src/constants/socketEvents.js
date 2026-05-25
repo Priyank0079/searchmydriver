@@ -31,7 +31,12 @@ export const S2C_EVENTS = Object.freeze({
   TRIP_LOCATION_UPDATED: 'trip:location:updated',
 
   BOOKING_OFFERED: 'booking:offered',
+  BOOKING_OFFER_WITHDRAWN: 'booking:offer:withdrawn',
   BOOKING_UPDATED: 'booking:updated',
+  BOOKING_PAYMENT_REQUIRED: 'booking:payment:required',
+  BOOKING_DRIVER_REASSIGNING: 'booking:driver:reassigning',
+  BOOKING_EXTENSION_OFFERED: 'booking:extension:offered',
+  BOOKING_EXTENSION_RESOLVED: 'booking:extension:resolved',
 
   NOTIFICATION: 'notification:new',
   ADMIN_ALERT: 'admin:alert',

@@ -16,12 +16,26 @@ export function useCachedQuery(store, cacheKey, params, options = {}) {
   const refresh = store((state) => state.refresh);
 
   const paramsRef = useRef(params);
-  paramsRef.current = params;
+  // Keep the latest `params` on the ref without writing during render. Refs
+  // are mutated inside an effect so React's strict mode + the
+  // `react-hooks/refs` lint stay happy. Effects fire after every commit, so
+  // by the time any fetch consumer reaches for `paramsRef.current` it sees
+  // the freshest payload.
+  useEffect(() => {
+    paramsRef.current = params;
+  }, [params]);
 
+  // Track `isFetched` in the dep array so that when an external caller
+  // wipes the entry via `store.invalidate(...)`, every still-mounted
+  // subscriber automatically re-fires the fetch. Without this, the entry
+  // disappears, `isLoading` flips to true forever, and the UI hangs on a
+  // spinner (the original kit-purchase infinite-loader bug).
+  const entryIsFetched = !!entry?.isFetched;
   useEffect(() => {
     if (!enabled || !cacheKey) return;
+    if (entryIsFetched) return;
     fetch(cacheKey, paramsRef.current).catch(() => {});
-  }, [cacheKey, enabled, fetch]);
+  }, [cacheKey, enabled, fetch, entryIsFetched]);
 
   const refetch = useCallback(
     () => refresh(cacheKey, paramsRef.current),

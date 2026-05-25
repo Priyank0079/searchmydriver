@@ -84,7 +84,7 @@ const UserOnboardingGuard = () => {
 
   if (hasChecklist) {
     if (onPath(ONBOARDING_PATHS)) {
-      return <Navigate to="/user/choose-service" replace />;
+      return <Navigate to="/user/home" replace />;
     }
     return <Outlet />;
   }

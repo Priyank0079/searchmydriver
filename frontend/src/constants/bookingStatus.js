@@ -1,0 +1,93 @@
+/** Keep in sync with backend/src/constants/bookingStatus.js */
+
+export const BOOKING_STATUS = Object.freeze({
+  SEARCHING: 'searching',
+  DRIVER_ASSIGNED: 'driver_assigned',
+  AWAITING_PAYMENT: 'awaiting_payment',
+  EN_ROUTE: 'en_route',
+  ARRIVED: 'arrived',
+  STARTED: 'started',
+  COMPLETED: 'completed',
+  CANCELLED: 'cancelled',
+  NO_DRIVERS_FOUND: 'no_drivers_found',
+});
+
+export const BOOKING_STATUS_LIST = Object.freeze(Object.values(BOOKING_STATUS));
+
+export const ACTIVE_BOOKING_STATUSES = Object.freeze([
+  BOOKING_STATUS.SEARCHING,
+  BOOKING_STATUS.DRIVER_ASSIGNED,
+  BOOKING_STATUS.AWAITING_PAYMENT,
+  BOOKING_STATUS.EN_ROUTE,
+  BOOKING_STATUS.ARRIVED,
+  BOOKING_STATUS.STARTED,
+]);
+
+export const TERMINAL_BOOKING_STATUSES = Object.freeze([
+  BOOKING_STATUS.COMPLETED,
+  BOOKING_STATUS.CANCELLED,
+  BOOKING_STATUS.NO_DRIVERS_FOUND,
+]);
+
+export const PAYMENT_MODE = Object.freeze({
+  PRE_RIDE: 'pre_ride',
+  POST_RIDE: 'post_ride',
+});
+
+export const PAYMENT_MODE_LIST = Object.freeze(Object.values(PAYMENT_MODE));
+
+export const BOOKING_TYPE = Object.freeze({
+  INSTANT: 'instant',
+  SCHEDULED: 'scheduled',
+});
+
+export const BOOKING_TYPE_LIST = Object.freeze(Object.values(BOOKING_TYPE));
+
+export const BOOKING_TYPE_LABELS = Object.freeze({
+  [BOOKING_TYPE.INSTANT]: 'Book now',
+  [BOOKING_TYPE.SCHEDULED]: 'Schedule for later',
+});
+
+export const BOOKING_TYPE_DESCRIPTIONS = Object.freeze({
+  [BOOKING_TYPE.INSTANT]: "We'll find a driver right now and they'll head over.",
+  [BOOKING_TYPE.SCHEDULED]: 'Pick a date and time — we dispatch a driver closer to start.',
+});
+
+export const PAYMENT_MODE_LABELS = Object.freeze({
+  [PAYMENT_MODE.PRE_RIDE]: 'Pay before ride starts',
+  [PAYMENT_MODE.POST_RIDE]: 'Pay after ride completes',
+});
+
+export const PAYMENT_MODE_DESCRIPTIONS = Object.freeze({
+  [PAYMENT_MODE.PRE_RIDE]:
+    'Settle the bill right after your driver accepts. The ride begins as soon as payment is confirmed.',
+  [PAYMENT_MODE.POST_RIDE]:
+    'Skip payment now. Pay once your driver drops you off and the trip is marked complete.',
+});
+
+export const BOOKING_PAYMENT_STATUS = Object.freeze({
+  NOT_DUE_YET: 'not_due_yet',
+  PENDING: 'pending',
+  PAID: 'paid',
+  REFUNDED: 'refunded',
+  PARTIAL_REFUND: 'partial_refund',
+  FAILED: 'failed',
+});
+
+/**
+ * Payment policy mirror — keep in sync with backend/src/constants/bookingStatus.js
+ * `PAYMENT_POLICY`. The client uses these to drive the Pay Now countdown,
+ * the OTP input length, and the extension-prompt timer.
+ *
+ *   PAYMENT_DEADLINE_SECONDS  Single source of truth for the "user must
+ *                             pay before the booking auto-cancels" clock.
+ *                             Driver overlay + user countdown both read
+ *                             this number — keep them in lockstep.
+ */
+export const PAYMENT_POLICY = Object.freeze({
+  PAYMENT_DEADLINE_SECONDS: 60,
+  PRE_PAY_WINDOW_SECONDS: 60,
+  RIDE_OTP_LENGTH: 4,
+  RIDE_OTP_MAX_ATTEMPTS: 5,
+  EXTENSION_PROMPT_LEAD_SECONDS: 5 * 60,
+});

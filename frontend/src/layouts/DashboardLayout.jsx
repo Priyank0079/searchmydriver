@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom';
 import BottomNav from '../components/BottomNav';
 import { Home, MapPin, ClipboardList, User, Car, DollarSign } from 'lucide-react';
+import BookingOfferModal from '../features/driver/trips/components/BookingOfferModal';
 
 const userNavItems = [
   { path: '/user/home', label: 'Home', icon: Home },
@@ -30,6 +31,7 @@ export const DriverDashboardLayout = () => {
     <div className="flex-1 flex flex-col pb-16">
       <Outlet />
       <BottomNav items={driverNavItems} />
+      <BookingOfferModal />
     </div>
   );
 };

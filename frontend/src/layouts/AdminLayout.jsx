@@ -14,6 +14,7 @@ const routeTitles = {
   '/admin/bookings': 'Manage Bookings',
   '/admin/revenue': 'Revenue Reports',
   '/admin/settings': 'Settings',
+  '/admin/account/refunds': 'Refunds',
   '/admin/profile': 'My Profile',
 };
 

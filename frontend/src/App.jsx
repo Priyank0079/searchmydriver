@@ -1,231 +1,279 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
+
+// Layouts + guards stay eager — they're small, used on every route, and
+// keeping them out of the Suspense boundary avoids a double spinner on every
+// navigation.
 import MobileLayout from './layouts/MobileLayout';
 import AuthLayout from './layouts/AuthLayout';
 import { UserDashboardLayout, DriverDashboardLayout } from './layouts/DashboardLayout';
+import AdminGuard from './guards/AdminGuard';
+import DriverGuard from './guards/DriverGuard';
+import OnboardingGuard from './guards/OnboardingGuard';
+import UserOnboardingGuard from './guards/UserOnboardingGuard';
+import SuperAdminOnlyGuard from './guards/SuperAdminOnlyGuard';
+import AdminLayout from './layouts/AdminLayout';
 
 // Side-effect: starts the global Socket.IO lifecycle (auto-connects when any
 // auth store has a session, auto-disconnects on logout).
 import './store/useSocketStore';
 
 // Auth
-import WelcomePage from './features/auth/pages/WelcomePage';
-import LoginPage from './features/auth/pages/LoginPage';
-import RegisterPage from './features/auth/pages/RegisterPage';
-import ForgotPasswordPage from './features/auth/pages/ForgotPasswordPage';
-import LinkPhonePage from './features/auth/pages/LinkPhonePage';
+const WelcomePage = lazy(() => import('./features/auth/pages/WelcomePage'));
+const LoginPage = lazy(() => import('./features/auth/pages/LoginPage'));
+const RegisterPage = lazy(() => import('./features/auth/pages/RegisterPage'));
+const ForgotPasswordPage = lazy(() => import('./features/auth/pages/ForgotPasswordPage'));
+const LinkPhonePage = lazy(() => import('./features/auth/pages/LinkPhonePage'));
 
 // User Onboarding
-import AddCarPage from './features/user/onboarding/pages/AddCarPage';
-import MyCarsPage from './features/user/onboarding/pages/MyCarsPage';
-import RegistrationChecklistPage from './features/user/onboarding/pages/RegistrationChecklistPage';
-import ChooseServicePage from './features/user/onboarding/pages/ChooseServicePage';
+const AddCarPage = lazy(() => import('./features/user/onboarding/pages/AddCarPage'));
+const MyCarsPage = lazy(() => import('./features/user/onboarding/pages/MyCarsPage'));
+const RegistrationChecklistPage = lazy(() => import('./features/user/onboarding/pages/RegistrationChecklistPage'));
 
 // User Home
-import UserHomePage from './features/user/home/pages/UserHomePage';
+const UserHomePage = lazy(() => import('./features/user/home/pages/UserHomePage'));
 
 // User Booking
-import SelectServicePage from './features/user/booking/pages/SelectServicePage';
-import SelectDurationPage from './features/user/booking/pages/SelectDurationPage';
-import ReviewBookingPage from './features/user/booking/pages/ReviewBookingPage';
-import PaymentPage from './features/user/booking/pages/PaymentPage';
-import SearchingDriverPage from './features/user/booking/pages/SearchingDriverPage';
-import DriverAssignedPage from './features/user/booking/pages/DriverAssignedPage';
+const SelectServicePage = lazy(() => import('./features/user/booking/pages/SelectServicePage'));
+const SelectVariantPage = lazy(() => import('./features/user/booking/pages/SelectVariantPage'));
+const SelectPickupPage = lazy(() => import('./features/user/booking/pages/SelectPickupPage'));
+const SelectDurationPage = lazy(() => import('./features/user/booking/pages/SelectDurationPage'));
+const ReviewBookingPage = lazy(() => import('./features/user/booking/pages/ReviewBookingPage'));
+const PaymentPage = lazy(() => import('./features/user/booking/pages/PaymentPage'));
+const SearchingDriverPage = lazy(() => import('./features/user/booking/pages/SearchingDriverPage'));
+const DriverAssignedPage = lazy(() => import('./features/user/booking/pages/DriverAssignedPage'));
+// Hourly-specific flow (new)
+const HourlyBookingTypePage = lazy(
+  () => import('./features/user/booking/pages/hourly/HourlyBookingTypePage'),
+);
+const HourlyTripDetailsPage = lazy(
+  () => import('./features/user/booking/pages/hourly/HourlyTripDetailsPage'),
+);
+const HourlySlabSelectionPage = lazy(
+  () => import('./features/user/booking/pages/hourly/HourlySlabSelectionPage'),
+);
 
 // User Tracking
-import DriverOnWayPage from './features/user/tracking/pages/DriverOnWayPage';
-import DriverReachedPage from './features/user/tracking/pages/DriverReachedPage';
-import TripInProgressPage from './features/user/tracking/pages/TripInProgressPage';
-import TripCompletedPage from './features/user/tracking/pages/TripCompletedPage';
-import RatePayPage from './features/user/tracking/pages/RatePayPage';
-import InvoicePage from './features/user/tracking/pages/InvoicePage';
+const DriverOnWayPage = lazy(() => import('./features/user/tracking/pages/DriverOnWayPage'));
+const DriverReachedPage = lazy(() => import('./features/user/tracking/pages/DriverReachedPage'));
+const TripInProgressPage = lazy(() => import('./features/user/tracking/pages/TripInProgressPage'));
+const TripCompletedPage = lazy(() => import('./features/user/tracking/pages/TripCompletedPage'));
+const RatePayPage = lazy(() => import('./features/user/tracking/pages/RatePayPage'));
+const InvoicePage = lazy(() => import('./features/user/tracking/pages/InvoicePage'));
 
 // User Dashboard
-import ActivityPage from './features/user/activity/pages/ActivityPage';
-import UserAccountPage from './features/user/account/pages/UserAccountPage';
+const ActivityPage = lazy(() => import('./features/user/activity/pages/ActivityPage'));
+const UserAccountPage = lazy(() => import('./features/user/account/pages/UserAccountPage'));
+const SubscriptionsPage = lazy(() => import('./features/user/subscriptions/pages/SubscriptionsPage'));
 
 // Driver Registration
-import DriverLoginPage from './features/driver/auth/pages/DriverLoginPage';
-import DriverSignUpPage from './features/driver/registration/pages/DriverSignUpPage';
-import IdentityDetailsPage from './features/driver/registration/pages/IdentityDetailsPage';
-import DrivingCredentialsPage from './features/driver/registration/pages/DrivingCredentialsPage';
-import BankDetailsPage from './features/driver/registration/pages/BankDetailsPage';
-import SafetyProtocolPage from './features/driver/registration/pages/SafetyProtocolPage';
-import LiveVerificationPage from './features/driver/registration/pages/LiveVerificationPage';
-import TrainingPage from './features/driver/registration/pages/TrainingPage';
-import ProfileUnderReviewPage from './features/driver/registration/pages/ProfileUnderReviewPage';
+const DriverLoginPage = lazy(() => import('./features/driver/auth/pages/DriverLoginPage'));
+const DriverSignUpPage = lazy(() => import('./features/driver/registration/pages/DriverSignUpPage'));
+const IdentityDetailsPage = lazy(() => import('./features/driver/registration/pages/IdentityDetailsPage'));
+const DrivingCredentialsPage = lazy(() => import('./features/driver/registration/pages/DrivingCredentialsPage'));
+const BankDetailsPage = lazy(() => import('./features/driver/registration/pages/BankDetailsPage'));
+const SafetyProtocolPage = lazy(() => import('./features/driver/registration/pages/SafetyProtocolPage'));
+const LiveVerificationPage = lazy(() => import('./features/driver/registration/pages/LiveVerificationPage'));
+const TrainingPage = lazy(() => import('./features/driver/registration/pages/TrainingPage'));
+const ProfileUnderReviewPage = lazy(() => import('./features/driver/registration/pages/ProfileUnderReviewPage'));
 
 // Driver Home & Trips
-import DriverHomePage from './features/driver/home/pages/DriverHomePage';
-import NewBookingRequestPage from './features/driver/trips/pages/NewBookingRequestPage';
-import NavigateToCustomerPage from './features/driver/trips/pages/NavigateToCustomerPage';
-import ArrivedStartTripPage from './features/driver/trips/pages/ArrivedStartTripPage';
-import DriverTripInProgressPage from './features/driver/trips/pages/DriverTripInProgressPage';
-import DriverTripCompletedPage from './features/driver/trips/pages/DriverTripCompletedPage';
-import PaymentStatusPage from './features/driver/trips/pages/PaymentStatusPage';
-import RateCustomerPage from './features/driver/trips/pages/RateCustomerPage';
-import MyTripsPage from './features/driver/trips/pages/MyTripsPage';
+const DriverHomePage = lazy(() => import('./features/driver/home/pages/DriverHomePage'));
+const NewBookingRequestPage = lazy(() => import('./features/driver/trips/pages/NewBookingRequestPage'));
+const NavigateToCustomerPage = lazy(() => import('./features/driver/trips/pages/NavigateToCustomerPage'));
+const ArrivedStartTripPage = lazy(() => import('./features/driver/trips/pages/ArrivedStartTripPage'));
+const DriverTripInProgressPage = lazy(() => import('./features/driver/trips/pages/DriverTripInProgressPage'));
+const DriverTripCompletedPage = lazy(() => import('./features/driver/trips/pages/DriverTripCompletedPage'));
+const PaymentStatusPage = lazy(() => import('./features/driver/trips/pages/PaymentStatusPage'));
+const RateCustomerPage = lazy(() => import('./features/driver/trips/pages/RateCustomerPage'));
+const MyTripsPage = lazy(() => import('./features/driver/trips/pages/MyTripsPage'));
+const DriverActiveTripPage = lazy(() => import('./features/driver/trips/pages/DriverActiveTripPage'));
 
 // Driver Dashboard
-import EarningsPage from './features/driver/earnings/pages/EarningsPage';
-import DriverAccountPage from './features/driver/account/pages/DriverAccountPage';
-import DriverOrdersPage from './features/driver/account/pages/DriverOrdersPage';
-import DriverOrderDetailPage from './features/driver/account/pages/DriverOrderDetailPage';
-import DriverPaymentHistoryPage from './features/driver/account/pages/DriverPaymentHistoryPage';
+const EarningsPage = lazy(() => import('./features/driver/earnings/pages/EarningsPage'));
+const DriverAccountPage = lazy(() => import('./features/driver/account/pages/DriverAccountPage'));
+const DriverOrdersPage = lazy(() => import('./features/driver/account/pages/DriverOrdersPage'));
+const DriverOrderDetailPage = lazy(() => import('./features/driver/account/pages/DriverOrderDetailPage'));
+const DriverPaymentHistoryPage = lazy(() => import('./features/driver/account/pages/DriverPaymentHistoryPage'));
 
-// Admin Layout & Guard
-import AdminGuard from './guards/AdminGuard';
-import DriverGuard from './guards/DriverGuard';
-import OnboardingGuard from './guards/OnboardingGuard';
-import UserOnboardingGuard from './guards/UserOnboardingGuard';
-import AdminLayout from './layouts/AdminLayout';
+// Driver Kit
+const DriverKitPage = lazy(() => import('./features/driver/kit/pages/DriverKitPage'));
+const KitPurchaseHistoryPage = lazy(() => import('./features/driver/kit/pages/KitPurchaseHistoryPage'));
 
-// Admin Pages
-import AdminLoginPage from './features/auth/pages/AdminLoginPage';
-import AccountInactive from './features/admin/pages/AccountInactive';
-import AdminHomeRedirect from './features/admin/pages/AdminHomeRedirect';
-import ManageDrivers from './features/admin/pages/ManageDrivers';
-import DriverProfilePage from './features/admin/pages/DriverProfilePage';
-import ManageUsers from './features/admin/pages/ManageUsers';
-import UserProfilePage from './features/admin/pages/UserProfilePage';
-import ManageBookings from './features/admin/pages/ManageBookings';
-import PlatformSettings from './features/admin/pages/PlatformSettings';
-import ManageTeam from './features/admin/pages/ManageTeam';
-import ManageKits from './features/admin/pages/ManageKits';
-import ManageZones from './features/admin/pages/ManageZones';
-import ManagePricing from './features/admin/pages/ManagePricing';
-import ManageSubscriptions from './features/admin/pages/ManageSubscriptions';
-import LiveDriverMap from './features/admin/pages/LiveDriverMap';
-import ManageKitOrders from './features/admin/pages/ManageKitOrders';
-import KitOrderDetailPage from './features/admin/pages/KitOrderDetailPage';
-import ManageTasks from './features/admin/pages/ManageTasks';
-import TaskActivityLogPage from './features/admin/pages/TaskActivityLogPage';
-import StaffProfilePage from './features/admin/pages/StaffProfilePage';
-import SuperAdminOnlyGuard from './guards/SuperAdminOnlyGuard';
-import DriverKitPage from './features/driver/kit/pages/DriverKitPage';
-import KitPurchaseHistoryPage from './features/driver/kit/pages/KitPurchaseHistoryPage';
+// Admin
+const AdminLoginPage = lazy(() => import('./features/auth/pages/AdminLoginPage'));
+const AccountInactive = lazy(() => import('./features/admin/pages/AccountInactive'));
+const AdminHomeRedirect = lazy(() => import('./features/admin/pages/AdminHomeRedirect'));
+const ManageDrivers = lazy(() => import('./features/admin/pages/ManageDrivers'));
+const DriverProfilePage = lazy(() => import('./features/admin/pages/DriverProfilePage'));
+const ManageUsers = lazy(() => import('./features/admin/pages/ManageUsers'));
+const UserProfilePage = lazy(() => import('./features/admin/pages/UserProfilePage'));
+const ManageBookings = lazy(() => import('./features/admin/pages/ManageBookings'));
+const PlatformSettings = lazy(() => import('./features/admin/pages/PlatformSettings'));
+const ManageTeam = lazy(() => import('./features/admin/pages/ManageTeam'));
+const ManageKits = lazy(() => import('./features/admin/pages/ManageKits'));
+const ManageZones = lazy(() => import('./features/admin/pages/ManageZones'));
+const ManagePricing = lazy(() => import('./features/admin/pages/ManagePricing'));
+const ManageRefunds = lazy(() => import('./features/admin/pages/ManageRefunds'));
+const ManageSubscriptions = lazy(() => import('./features/admin/pages/ManageSubscriptions'));
+const LiveDriverMap = lazy(() => import('./features/admin/pages/LiveDriverMap'));
+const ManageKitOrders = lazy(() => import('./features/admin/pages/ManageKitOrders'));
+const KitOrderDetailPage = lazy(() => import('./features/admin/pages/KitOrderDetailPage'));
+const ManageTasks = lazy(() => import('./features/admin/pages/ManageTasks'));
+const TaskActivityLogPage = lazy(() => import('./features/admin/pages/TaskActivityLogPage'));
+const StaffProfilePage = lazy(() => import('./features/admin/pages/StaffProfilePage'));
+
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center min-h-dvh bg-bg">
+      <Loader2 className="w-6 h-6 animate-spin text-text-muted" />
+    </div>
+  );
+}
 
 function App() {
   return (
-    <Routes>
-      <Route element={<MobileLayout />}>
-        {/* ========== Auth Routes ========== */}
-        <Route element={<AuthLayout />}>
-          <Route path="/" element={<WelcomePage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/link-phone" element={<LinkPhonePage accountType="user" />} />
-        </Route>
-
-        <Route path="/driver/link-phone" element={<LinkPhonePage accountType="driver" />} />
-
-        {/* ========== User Onboarding ========== */}
-        <Route element={<UserOnboardingGuard />}>
-          <Route path="/user/add-car" element={<AddCarPage />} />
-          <Route path="/user/my-cars" element={<MyCarsPage />} />
-          <Route path="/user/checklist" element={<RegistrationChecklistPage />} />
-          <Route path="/user/choose-service" element={<ChooseServicePage />} />
-
-          {/* ========== User Dashboard (with bottom nav) ========== */}
-          <Route element={<UserDashboardLayout />}>
-            <Route path="/user/home" element={<UserHomePage />} />
-            <Route path="/user/book" element={<Navigate to="/user/book/service" replace />} />
-            <Route path="/user/activity" element={<ActivityPage />} />
-            <Route path="/user/account" element={<UserAccountPage />} />
-          </Route>
-        </Route>
-
-        {/* ========== User Booking Flow ========== */}
-        <Route path="/user/book/service" element={<SelectServicePage />} />
-        <Route path="/user/book/duration" element={<SelectDurationPage />} />
-        <Route path="/user/book/review" element={<ReviewBookingPage />} />
-        <Route path="/user/book/payment" element={<PaymentPage />} />
-        <Route path="/user/book/searching" element={<SearchingDriverPage />} />
-        <Route path="/user/book/assigned" element={<DriverAssignedPage />} />
-        {/* ========== User Tracking Flow ========== */}
-        <Route path="/user/tracking/on-way" element={<DriverOnWayPage />} />
-        <Route path="/user/tracking/reached" element={<DriverReachedPage />} />
-        <Route path="/user/tracking/in-progress" element={<TripInProgressPage />} />
-        <Route path="/user/tracking/completed" element={<TripCompletedPage />} />
-        <Route path="/user/tracking/rate" element={<RatePayPage />} />
-        <Route path="/user/tracking/invoice" element={<InvoicePage />} />
-
-        {/* ========== Driver Registration ========== */}
-        <Route path="/driver/login" element={<DriverLoginPage />} />
-        <Route path="/driver/signup" element={<DriverSignUpPage />} />
-        <Route path="/driver/register/identity" element={<IdentityDetailsPage />} />
-        
-        <Route element={<OnboardingGuard />}>
-          <Route path="/driver/register/credentials" element={<DrivingCredentialsPage />} />
-          <Route path="/driver/register/bank" element={<BankDetailsPage />} />
-          <Route path="/driver/register/safety" element={<SafetyProtocolPage />} />
-          <Route path="/driver/register/verification" element={<LiveVerificationPage />} />
-          <Route path="/driver/register/training" element={<TrainingPage />} />
-          <Route path="/driver/register/approval" element={<ProfileUnderReviewPage />} />
-        </Route>
-
-        {/* ========== Protected Driver Routes ========== */}
-        <Route element={<DriverGuard />}>
-          {/* ========== Driver Dashboard (with bottom nav) ========== */}
-          <Route element={<DriverDashboardLayout />}>
-            <Route path="/driver/home" element={<DriverHomePage />} />
-            <Route path="/driver/trips" element={<MyTripsPage />} />
-            <Route path="/driver/earnings" element={<EarningsPage />} />
-            <Route path="/driver/account" element={<DriverAccountPage />} />
+    <Suspense fallback={<PageLoader />}>
+      <Routes>
+        <Route element={<MobileLayout />}>
+          {/* ========== Auth Routes ========== */}
+          <Route element={<AuthLayout />}>
+            <Route path="/" element={<WelcomePage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/link-phone" element={<LinkPhonePage accountType="user" />} />
           </Route>
 
-          <Route path="/driver/kit" element={<DriverKitPage />} />
-          <Route path="/driver/kit/history" element={<KitPurchaseHistoryPage />} />
-          <Route path="/driver/orders" element={<DriverOrdersPage />} />
-          <Route path="/driver/orders/:orderId" element={<DriverOrderDetailPage />} />
-          <Route path="/driver/payments" element={<DriverPaymentHistoryPage />} />
+          <Route path="/driver/link-phone" element={<LinkPhonePage accountType="driver" />} />
 
-          {/* ========== Driver Trip Flow ========== */}
-          <Route path="/driver/trip/new-request" element={<NewBookingRequestPage />} />
-          <Route path="/driver/trip/navigate" element={<NavigateToCustomerPage />} />
-          <Route path="/driver/trip/arrived" element={<ArrivedStartTripPage />} />
-          <Route path="/driver/trip/in-progress" element={<DriverTripInProgressPage />} />
-          <Route path="/driver/trip/completed" element={<DriverTripCompletedPage />} />
-          <Route path="/driver/trip/payment" element={<PaymentStatusPage />} />
-          <Route path="/driver/trip/rate" element={<RateCustomerPage />} />
-        </Route>
+          {/* ========== User Onboarding ========== */}
+          <Route element={<UserOnboardingGuard />}>
+            <Route path="/user/add-car" element={<AddCarPage />} />
+            <Route path="/user/my-cars" element={<MyCarsPage />} />
+            <Route path="/user/checklist" element={<RegistrationChecklistPage />} />
 
-        {/* Catch all for mobile */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Route>
-
-      {/* ========== Admin Web Panel (Outside MobileLayout) ========== */}
-      <Route path="/admin/login" element={<AdminLoginPage />} />
-      <Route path="/admin/inactive" element={<AccountInactive />} />
-      <Route element={<AdminGuard />}>
-        <Route element={<AdminLayout />}>
-          <Route path="/admin" element={<AdminHomeRedirect />} />
-          <Route path="/admin/users" element={<ManageUsers />} />
-          <Route path="/admin/users/:userId/profile" element={<UserProfilePage />} />
-          <Route path="/admin/profile" element={<StaffProfilePage />} />
-          <Route path="/admin/tasks" element={<ManageTasks />} />
-          <Route element={<SuperAdminOnlyGuard />}>
-            <Route path="/admin/tasks/activity" element={<TaskActivityLogPage />} />
-            <Route path="/admin/settings/team" element={<ManageTeam />} />
+            {/* ========== User Dashboard (with bottom nav) ========== */}
+            <Route element={<UserDashboardLayout />}>
+              <Route path="/user/home" element={<UserHomePage />} />
+              <Route path="/user/book" element={<Navigate to="/user/book/service" replace />} />
+              <Route path="/user/activity" element={<ActivityPage />} />
+              <Route path="/user/account" element={<UserAccountPage />} />
+              <Route path="/user/subscriptions" element={<SubscriptionsPage />} />
+            </Route>
           </Route>
-          <Route path="/admin/drivers" element={<ManageDrivers />} />
-          <Route path="/admin/drivers/live" element={<LiveDriverMap />} />
-          <Route path="/admin/drivers/:driverId/profile" element={<DriverProfilePage />} />
-          <Route path="/admin/kits" element={<Navigate to="/admin/settings/kits" replace />} />
-          <Route path="/admin/kit-orders" element={<ManageKitOrders />} />
-          <Route path="/admin/kit-orders/:orderId" element={<KitOrderDetailPage />} />
-          <Route path="/admin/bookings" element={<ManageBookings />} />
-          <Route path="/admin/settings" element={<Navigate to="/admin/settings/platform" replace />} />
-          <Route path="/admin/settings/platform" element={<PlatformSettings />} />
-          <Route path="/admin/settings/kits" element={<ManageKits />} />
-          <Route path="/admin/settings/zones" element={<ManageZones />} />
-          <Route path="/admin/settings/pricing" element={<ManagePricing />} />
-          <Route path="/admin/settings/subscriptions" element={<ManageSubscriptions />} />
-          {/* Note: Revenue page is mapped to Dashboard for now to save scope, or can be a separate page later */}
-          <Route path="/admin/revenue" element={<Navigate to="/admin" replace />} />
+
+          {/* ========== User Booking Flow ========== */}
+          {/* Legacy / outstation flow */}
+          <Route path="/user/book/service" element={<SelectServicePage />} />
+          <Route path="/user/book/variants" element={<SelectVariantPage />} />
+          <Route path="/user/book/pickup" element={<SelectPickupPage />} />
+          <Route path="/user/book/duration" element={<SelectDurationPage />} />
+          <Route path="/user/book/review" element={<ReviewBookingPage />} />
+          <Route path="/user/book/payment" element={<PaymentPage />} />
+
+          {/* New hourly flow: type → details → slab → searching → assigned */}
+          <Route path="/user/book/hourly" element={<Navigate to="/user/book/hourly/type" replace />} />
+          <Route path="/user/book/hourly/type" element={<HourlyBookingTypePage />} />
+          <Route path="/user/book/hourly/details" element={<HourlyTripDetailsPage />} />
+          <Route path="/user/book/hourly/slab" element={<HourlySlabSelectionPage />} />
+
+          {/* Shared post-creation screens (used by both flows) */}
+          <Route path="/user/book/searching" element={<SearchingDriverPage />} />
+          <Route path="/user/book/assigned" element={<DriverAssignedPage />} />
+          {/* ========== User Tracking Flow ========== */}
+          <Route path="/user/tracking/on-way" element={<DriverOnWayPage />} />
+          <Route path="/user/tracking/reached" element={<DriverReachedPage />} />
+          <Route path="/user/tracking/in-progress" element={<TripInProgressPage />} />
+          <Route path="/user/tracking/completed" element={<TripCompletedPage />} />
+          <Route path="/user/tracking/rate" element={<RatePayPage />} />
+          <Route path="/user/tracking/invoice" element={<InvoicePage />} />
+
+          {/* ========== Driver Registration ========== */}
+          <Route path="/driver/login" element={<DriverLoginPage />} />
+          <Route path="/driver/signup" element={<DriverSignUpPage />} />
+          <Route path="/driver/register/identity" element={<IdentityDetailsPage />} />
+
+          <Route element={<OnboardingGuard />}>
+            <Route path="/driver/register/credentials" element={<DrivingCredentialsPage />} />
+            <Route path="/driver/register/bank" element={<BankDetailsPage />} />
+            <Route path="/driver/register/safety" element={<SafetyProtocolPage />} />
+            <Route path="/driver/register/verification" element={<LiveVerificationPage />} />
+            <Route path="/driver/register/training" element={<TrainingPage />} />
+            <Route path="/driver/register/approval" element={<ProfileUnderReviewPage />} />
+          </Route>
+
+          {/* ========== Protected Driver Routes ========== */}
+          <Route element={<DriverGuard />}>
+            {/* ========== Driver Dashboard (with bottom nav) ========== */}
+            <Route element={<DriverDashboardLayout />}>
+              <Route path="/driver/home" element={<DriverHomePage />} />
+              <Route path="/driver/trips" element={<MyTripsPage />} />
+              <Route path="/driver/earnings" element={<EarningsPage />} />
+              <Route path="/driver/account" element={<DriverAccountPage />} />
+            </Route>
+
+            <Route path="/driver/kit" element={<DriverKitPage />} />
+            <Route path="/driver/kit/history" element={<KitPurchaseHistoryPage />} />
+            <Route path="/driver/orders" element={<DriverOrdersPage />} />
+            <Route path="/driver/orders/:orderId" element={<DriverOrderDetailPage />} />
+            <Route path="/driver/payments" element={<DriverPaymentHistoryPage />} />
+
+            {/* ========== Driver Trip Flow ========== */}
+            {/* Live status-driven page (the one BookingOfferModal navigates to) */}
+            <Route path="/driver/trip/:id" element={<DriverActiveTripPage />} />
+            {/* Legacy static mockups kept around for design reference; remove
+                once Phase 5 ships the live equivalents. */}
+            <Route path="/driver/trip/new-request" element={<NewBookingRequestPage />} />
+            <Route path="/driver/trip/navigate" element={<NavigateToCustomerPage />} />
+            <Route path="/driver/trip/arrived" element={<ArrivedStartTripPage />} />
+            <Route path="/driver/trip/in-progress" element={<DriverTripInProgressPage />} />
+            <Route path="/driver/trip/completed" element={<DriverTripCompletedPage />} />
+            <Route path="/driver/trip/payment" element={<PaymentStatusPage />} />
+            <Route path="/driver/trip/rate" element={<RateCustomerPage />} />
+          </Route>
+
+          {/* Catch all for mobile */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
-      </Route>
-    </Routes>
+
+        {/* ========== Admin Web Panel (Outside MobileLayout) ========== */}
+        <Route path="/admin/login" element={<AdminLoginPage />} />
+        <Route path="/admin/inactive" element={<AccountInactive />} />
+        <Route element={<AdminGuard />}>
+          <Route element={<AdminLayout />}>
+            <Route path="/admin" element={<AdminHomeRedirect />} />
+            <Route path="/admin/users" element={<ManageUsers />} />
+            <Route path="/admin/users/:userId/profile" element={<UserProfilePage />} />
+            <Route path="/admin/profile" element={<StaffProfilePage />} />
+            <Route path="/admin/tasks" element={<ManageTasks />} />
+            <Route element={<SuperAdminOnlyGuard />}>
+              <Route path="/admin/tasks/activity" element={<TaskActivityLogPage />} />
+              <Route path="/admin/settings/team" element={<ManageTeam />} />
+            </Route>
+            <Route path="/admin/drivers" element={<ManageDrivers />} />
+            <Route path="/admin/drivers/live" element={<LiveDriverMap />} />
+            <Route path="/admin/drivers/:driverId/profile" element={<DriverProfilePage />} />
+            <Route path="/admin/kits" element={<Navigate to="/admin/settings/kits" replace />} />
+            <Route path="/admin/kit-orders" element={<ManageKitOrders />} />
+            <Route path="/admin/kit-orders/:orderId" element={<KitOrderDetailPage />} />
+            <Route path="/admin/bookings" element={<ManageBookings />} />
+            <Route path="/admin/settings" element={<Navigate to="/admin/settings/platform" replace />} />
+            <Route path="/admin/settings/platform" element={<PlatformSettings />} />
+            <Route path="/admin/settings/kits" element={<ManageKits />} />
+            <Route path="/admin/settings/zones" element={<ManageZones />} />
+            <Route path="/admin/settings/pricing" element={<ManagePricing />} />
+            <Route path="/admin/settings/subscriptions" element={<ManageSubscriptions />} />
+            {/* Note: Revenue page is mapped to Dashboard for now to save scope, or can be a separate page later */}
+            <Route path="/admin/revenue" element={<Navigate to="/admin" replace />} />
+            {/* Account section */}
+            <Route path="/admin/account" element={<Navigate to="/admin/account/refunds" replace />} />
+            <Route path="/admin/account/refunds" element={<ManageRefunds />} />
+          </Route>
+        </Route>
+      </Routes>
+    </Suspense>
   );
 }
 

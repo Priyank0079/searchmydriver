@@ -25,6 +25,12 @@ const buildDefaultForm = (serviceType) => ({
   slabs: [],
   extraHourCharge: serviceType === SERVICE_TYPES.HOURLY ? 150 : 0,
   waitingCharge: { freeWaitingMinutes: 15, chargePerMinute: 2 },
+  customHours: {
+    enabled: false,
+    maxHours: 24,
+    ratePerHour: 0,
+    label: 'Custom duration',
+  },
 
   // Outstation
   outstation: {
@@ -40,7 +46,11 @@ const buildDefaultForm = (serviceType) => ({
   // Shared extras
   nightCharge: { enabled: false, startTime: '22:00', endTime: '06:00', type: 'flat', amount: 0 },
   tollParkingEnabled: true,
-  foodAllowance: { enabled: serviceType === SERVICE_TYPES.OUTSTATION, amount: 0 },
+  foodAllowance: {
+    enabled: serviceType === SERVICE_TYPES.OUTSTATION,
+    amount: 0,
+    thresholdHours: 4,
+  },
 
   // Platform
   serviceChargePercent: 0,
@@ -49,7 +59,7 @@ const buildDefaultForm = (serviceType) => ({
 
   // Policies
   cancellation: {
-    userCancellationFeePercent: 15,
+    userCancellationFeePercent: 10,
     driverCancellationPenalty: 50,
     freeCancellationMinutes: 2,
   },
@@ -62,34 +72,20 @@ const buildDefaultForm = (serviceType) => ({
   sortOrder: 0,
 });
 
-const buildFormFromExisting = (existing) => ({
-  ...buildDefaultForm(existing.serviceType),
-  ...existing,
-  outstation: {
-    ...buildDefaultForm(existing.serviceType).outstation,
-    ...(existing.outstation || {}),
-  },
-  waitingCharge: {
-    ...buildDefaultForm(existing.serviceType).waitingCharge,
-    ...(existing.waitingCharge || {}),
-  },
-  nightCharge: {
-    ...buildDefaultForm(existing.serviceType).nightCharge,
-    ...(existing.nightCharge || {}),
-  },
-  foodAllowance: {
-    ...buildDefaultForm(existing.serviceType).foodAllowance,
-    ...(existing.foodAllowance || {}),
-  },
-  cancellation: {
-    ...buildDefaultForm(existing.serviceType).cancellation,
-    ...(existing.cancellation || {}),
-  },
-  driverSearch: {
-    ...buildDefaultForm(existing.serviceType).driverSearch,
-    ...(existing.driverSearch || {}),
-  },
-});
+const buildFormFromExisting = (existing) => {
+  const base = buildDefaultForm(existing.serviceType);
+  return {
+    ...base,
+    ...existing,
+    outstation: { ...base.outstation, ...(existing.outstation || {}) },
+    waitingCharge: { ...base.waitingCharge, ...(existing.waitingCharge || {}) },
+    nightCharge: { ...base.nightCharge, ...(existing.nightCharge || {}) },
+    foodAllowance: { ...base.foodAllowance, ...(existing.foodAllowance || {}) },
+    customHours: { ...base.customHours, ...(existing.customHours || {}) },
+    cancellation: { ...base.cancellation, ...(existing.cancellation || {}) },
+    driverSearch: { ...base.driverSearch, ...(existing.driverSearch || {}) },
+  };
+};
 
 const Section = ({ title, subtitle, children }) => (
   <section className="space-y-3">
@@ -218,6 +214,54 @@ const ServicePricingModal = ({ isOpen, onClose, serviceType, existing, onSaved }
                   />
                 </div>
               </Section>
+
+              <Section
+                title="Custom duration"
+                subtitle="Optional. Lets users book any duration beyond the slabs at a flat hourly rate."
+              >
+                <div className="p-3 bg-slate-50 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold">Allow custom duration</span>
+                    <Toggle
+                      checked={form.customHours.enabled}
+                      onChange={(v) => updateNested('customHours', { enabled: v })}
+                    />
+                  </div>
+                  {form.customHours.enabled && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <Input
+                        label="Customer label"
+                        value={form.customHours.label}
+                        onChange={(e) =>
+                          updateNested('customHours', { label: e.target.value })
+                        }
+                      />
+                      <Input
+                        label="Max hours (0 = unlimited)"
+                        type="number"
+                        min={0}
+                        value={form.customHours.maxHours}
+                        onChange={(e) =>
+                          updateNested('customHours', {
+                            maxHours: Number(e.target.value),
+                          })
+                        }
+                      />
+                      <Input
+                        label="Rate (₹ per hour)"
+                        type="number"
+                        min={0}
+                        value={form.customHours.ratePerHour}
+                        onChange={(e) =>
+                          updateNested('customHours', {
+                            ratePerHour: Number(e.target.value),
+                          })
+                        }
+                      />
+                    </div>
+                  )}
+                </div>
+              </Section>
             </>
           )}
 
@@ -295,10 +339,13 @@ const ServicePricingModal = ({ isOpen, onClose, serviceType, existing, onSaved }
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-sm font-semibold block">
-                    Food allowance {isOutstation ? '(per day, outstation)' : '(disabled — hourly)'}
+                    Food allowance{' '}
+                    {isOutstation ? '(per day)' : '(once threshold is crossed)'}
                   </span>
                   <span className="text-xs text-slate-500">
-                    Added when the customer does not provide food
+                    {isOutstation
+                      ? 'Added when the customer does not provide food'
+                      : 'Added when the booked duration is long enough that the driver needs a meal'}
                   </span>
                 </div>
                 <Toggle
@@ -307,15 +354,34 @@ const ServicePricingModal = ({ isOpen, onClose, serviceType, existing, onSaved }
                 />
               </div>
               {form.foodAllowance.enabled && (
-                <Input
-                  label={isOutstation ? 'Food allowance per day (₹)' : 'Food allowance amount (₹)'}
-                  type="number"
-                  min={0}
-                  value={form.foodAllowance.amount}
-                  onChange={(e) =>
-                    updateNested('foodAllowance', { amount: Number(e.target.value) })
-                  }
-                />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <Input
+                    label={
+                      isOutstation
+                        ? 'Food allowance per day (₹)'
+                        : 'Food allowance amount (₹)'
+                    }
+                    type="number"
+                    min={0}
+                    value={form.foodAllowance.amount}
+                    onChange={(e) =>
+                      updateNested('foodAllowance', { amount: Number(e.target.value) })
+                    }
+                  />
+                  {isHourly && (
+                    <Input
+                      label="Charge if booking ≥ (hours)"
+                      type="number"
+                      min={0}
+                      value={form.foodAllowance.thresholdHours}
+                      onChange={(e) =>
+                        updateNested('foodAllowance', {
+                          thresholdHours: Number(e.target.value),
+                        })
+                      }
+                    />
+                  )}
+                </div>
               )}
             </div>
           </Section>

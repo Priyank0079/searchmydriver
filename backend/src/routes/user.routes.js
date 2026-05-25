@@ -10,6 +10,9 @@ import {
   addCar,
   getUserCars,
   deleteUserCar,
+  listSavedLocations,
+  addSavedLocation,
+  deleteSavedLocation,
 } from '../controllers/user.controller.js';
 import {
   googleSignInUser,
@@ -21,6 +24,16 @@ import {
   getActiveSubscriptionPlans,
   estimateFare,
 } from '../controllers/pricing.controller.js';
+import { getNearbyDriversForUser } from '../controllers/driverLocation.controller.js';
+import {
+  createBooking,
+  getMyActiveBooking,
+  getBookingById,
+  cancelBooking,
+  createBookingPayment,
+  verifyBookingPayment,
+  createBookingExtension,
+} from '../controllers/booking.controller.js';
 import { protectUser, protectProfileViewer } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
@@ -46,6 +59,16 @@ router.use(protectUser);
 
 // Fare estimate (auth required so we can apply the user's subscription discount)
 router.post('/bookings/estimate', estimateFare);
+
+// Booking lifecycle (Phase 4)
+router.post('/bookings', createBooking);
+router.get('/bookings/active', getMyActiveBooking);
+router.get('/bookings/:id', getBookingById);
+router.post('/bookings/:id/cancel', cancelBooking);
+router.post('/bookings/:id/pay', createBookingPayment);
+router.post('/bookings/:id/verify-payment', verifyBookingPayment);
+router.post('/bookings/:id/extensions', createBookingExtension);
+
 router.post('/google/link-phone', linkGoogleUserPhone);
 router.get('/onboarding/status', getRegistrationStatus);
 router.put('/onboarding/step', updateUserOnboardingStep);
@@ -54,5 +77,13 @@ router.put('/onboarding/step', updateUserOnboardingStep);
 router.post('/cars', addCar);
 router.get('/cars', getUserCars);
 router.delete('/cars/:id', deleteUserCar);
+
+// Favourite / saved locations
+router.get('/saved-locations', listSavedLocations);
+router.post('/saved-locations', addSavedLocation);
+router.delete('/saved-locations/:id', deleteSavedLocation);
+
+// Nearby drivers (home screen widget + future surfaces)
+router.get('/drivers/nearby', getNearbyDriversForUser);
 
 export default router;

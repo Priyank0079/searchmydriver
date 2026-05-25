@@ -273,3 +273,70 @@ export const deleteUserCarService = async (userId, carId) => {
   await car.save();
   return { id: carId };
 };
+
+// ─── Saved (favourite) locations ─────────────────────────────────────────────
+
+const MAX_SAVED_LOCATIONS = 20;
+
+function normalizeSavedLocationInput(payload = {}) {
+  const lat = Number(payload.lat);
+  const lng = Number(payload.lng);
+  const address = typeof payload.address === 'string' ? payload.address.trim() : '';
+  const label = typeof payload.label === 'string' ? payload.label.trim().slice(0, 60) : '';
+  const city = typeof payload.city === 'string' ? payload.city.trim().slice(0, 120) : '';
+
+  if (!address) throw new ApiError(400, 'Address is required');
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90) throw new ApiError(400, 'Invalid latitude');
+  if (!Number.isFinite(lng) || lng < -180 || lng > 180) throw new ApiError(400, 'Invalid longitude');
+
+  return { label, address: address.slice(0, 300), city, lat, lng };
+}
+
+export const listSavedLocationsService = async (userId) => {
+  const user = await User.findById(userId).select('savedLocations');
+  if (!user) throw new ApiError(404, 'User not found');
+  // Newest first
+  return [...(user.savedLocations || [])].sort(
+    (a, b) => (b.createdAt?.getTime?.() || 0) - (a.createdAt?.getTime?.() || 0),
+  );
+};
+
+export const addSavedLocationService = async (userId, payload) => {
+  const next = normalizeSavedLocationInput(payload);
+
+  const user = await User.findById(userId).select('savedLocations');
+  if (!user) throw new ApiError(404, 'User not found');
+
+  if ((user.savedLocations?.length || 0) >= MAX_SAVED_LOCATIONS) {
+    throw new ApiError(400, `You can save up to ${MAX_SAVED_LOCATIONS} favourite locations`);
+  }
+
+  // De-dup on coords + label (rounded ~10m) so accidental double-taps don't
+  // pile up identical entries.
+  const dupe = (user.savedLocations || []).find(
+    (loc) =>
+      loc.label?.toLowerCase() === next.label.toLowerCase() &&
+      Math.abs(loc.lat - next.lat) < 0.0001 &&
+      Math.abs(loc.lng - next.lng) < 0.0001,
+  );
+  if (dupe) return dupe;
+
+  user.savedLocations.push(next);
+  await user.save();
+  return user.savedLocations[user.savedLocations.length - 1];
+};
+
+export const deleteSavedLocationService = async (userId, locationId) => {
+  const user = await User.findById(userId).select('savedLocations');
+  if (!user) throw new ApiError(404, 'User not found');
+
+  const before = user.savedLocations?.length || 0;
+  user.savedLocations = (user.savedLocations || []).filter(
+    (loc) => String(loc._id) !== String(locationId),
+  );
+  if (user.savedLocations.length === before) {
+    throw new ApiError(404, 'Saved location not found');
+  }
+  await user.save();
+  return { id: locationId };
+};

@@ -2,7 +2,8 @@
  * Comma-separated origins in CLIENT_ORIGIN or FRONTEND_URL (e.g. http://localhost:5173,https://app.example.com)
  */
 export function getCorsOrigins() {
-  const raw = process.env.CLIENT_ORIGIN || process.env.FRONTEND_URL || 'http://localhost:5173';
+  const raw = process.env.CLIENT_ORIGIN || process.env.FRONTEND_URL || 'http://localhost:5173' || 'http://192.168.1.58:5173';
+  // const raw = '*';
   return raw
     .split(',')
     .map((s) => s.trim())

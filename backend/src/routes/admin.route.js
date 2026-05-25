@@ -90,6 +90,10 @@ import {
   claimTask,
   syncReviewTasks,
 } from '../controllers/adminTask.controller.js';
+import {
+  listRefunds,
+  updateRefundStatus,
+} from '../controllers/refund.controller.js';
 
 const router = express.Router();
 const { ALL_STAFF, OPERATIONS, SUPER_ADMIN } = ROUTE_ROLES;
@@ -183,5 +187,13 @@ router.patch('/kit-orders/:id/approve', protectStaff, restrictTo(...ALL_STAFF), 
 router.patch('/kit-orders/:id/reject', protectStaff, restrictTo(...ALL_STAFF), rejectKitOrder);
 router.patch('/kit-orders/:id/dispatch', protectStaff, restrictTo(...ALL_STAFF), dispatchKitOrder);
 router.patch('/kit-orders/:id/deliver', protectStaff, restrictTo(...ALL_STAFF), deliverKitOrder);
+
+/* ---- Account → Refunds ----------------------------------------------- */
+// The cancellation pipeline writes Refund documents; admins review and
+// PATCH the status as they manually move the money on the Razorpay
+// dashboard. There is no automated retry — the gateway call is human-
+// driven and the PATCH is the authoritative state-transition.
+router.get('/refunds', protectStaff, restrictTo(...SUPER_ADMIN), listRefunds);
+router.patch('/refunds/:id', protectStaff, restrictTo(...SUPER_ADMIN), updateRefundStatus);
 
 export default router;

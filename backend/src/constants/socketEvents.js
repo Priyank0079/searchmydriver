@@ -73,8 +73,28 @@ export const S2C_EVENTS = Object.freeze({
   /** A new booking offer arrived for a driver. */
   BOOKING_OFFERED: 'booking:offered',
 
+  /** Offer was withdrawn (driver took too long, user cancelled, etc.). */
+  BOOKING_OFFER_WITHDRAWN: 'booking:offer:withdrawn',
+
   /** Booking state transitions (accepted, started, completed, cancelled, …). */
   BOOKING_UPDATED: 'booking:updated',
+
+  /** Pre-pay flow: backend tells the user app it is time to pay. */
+  BOOKING_PAYMENT_REQUIRED: 'booking:payment:required',
+
+  /**
+   * Driver cancelled a paid pre-STARTED booking. The user app shows a
+   * popup ("driver bailed — finding a new driver") while the dispatcher
+   * spins a fresh wave. Fires once per re-dispatch; the new SEARCHING
+   * state still arrives via the standard BOOKING_UPDATED stream.
+   */
+  BOOKING_DRIVER_REASSIGNING: 'booking:driver:reassigning',
+
+  /** Phase 5: extension flow — backend asks user to confirm +1h. */
+  BOOKING_EXTENSION_OFFERED: 'booking:extension:offered',
+
+  /** Phase 5: user responded to extension; driver hears about it here. */
+  BOOKING_EXTENSION_RESOLVED: 'booking:extension:resolved',
 
   /** Generic toast / in-app notification. */
   NOTIFICATION: 'notification:new',

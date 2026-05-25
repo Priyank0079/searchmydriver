@@ -162,3 +162,74 @@ export const deleteZoneService = async (id) => {
   await Zone.deleteOne({ _id: zone._id });
   return { id: zone._id };
 };
+
+/**
+ * Find the first *active* zone that contains a given point.
+ *
+ * Reusable by:
+ *   - the user app, to gate booking creation by service-area coverage
+ *   - the dispatcher, to cap radius expansion at the matching zone's radius
+ *   - any future surface that needs to answer "do we operate here?"
+ *
+ * Polygon zones win over circle zones when both match the same point —
+ * polygons are usually drawn more tightly and represent the truth, while
+ * circles are convenient approximations.
+ *
+ * @param {{ lat:number; lng:number }} point
+ * @returns {Promise<object|null>} the serialized zone, or null
+ */
+export const findActiveZoneForPointService = async ({ lat, lng } = {}) => {
+  if (
+    typeof lat !== 'number' ||
+    typeof lng !== 'number' ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng) ||
+    lat < -90 ||
+    lat > 90 ||
+    lng < -180 ||
+    lng > 180
+  ) {
+    throw new ApiError(400, 'Valid lat/lng are required');
+  }
+
+  // 1. Polygon match via $geoIntersects.
+  const polygonHit = await Zone.findOne({
+    isActive: true,
+    shapeType: ZONE_SHAPE.POLYGON,
+    boundary: {
+      $geoIntersects: {
+        $geometry: { type: 'Point', coordinates: [lng, lat] },
+      },
+    },
+  });
+  if (polygonHit) return serializeZone(polygonHit);
+
+  // 2. Circle match via $geoNear (so we can compare to each zone's radiusKm).
+  const circleHits = await Zone.aggregate([
+    {
+      $geoNear: {
+        near: { type: 'Point', coordinates: [lng, lat] },
+        distanceField: 'distanceMeters',
+        spherical: true,
+        key: 'center',
+        query: { isActive: true, shapeType: ZONE_SHAPE.CIRCLE },
+      },
+    },
+    {
+      $match: {
+        $expr: {
+          $lte: ['$distanceMeters', { $multiply: ['$radiusKm', 1000] }],
+        },
+      },
+    },
+    { $sort: { distanceMeters: 1 } },
+    { $limit: 1 },
+  ]);
+
+  if (circleHits[0]) {
+    const hydrated = await Zone.findById(circleHits[0]._id);
+    if (hydrated) return serializeZone(hydrated);
+  }
+
+  return null;
+};

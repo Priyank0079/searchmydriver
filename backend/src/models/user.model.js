@@ -1,5 +1,41 @@
 import mongoose from 'mongoose';
 
+const savedLocationSchema = new mongoose.Schema(
+  {
+    label: {
+      type: String,
+      trim: true,
+      maxlength: 60,
+      default: '',
+    },
+    address: {
+      type: String,
+      trim: true,
+      required: true,
+      maxlength: 300,
+    },
+    city: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: 120,
+    },
+    lat: {
+      type: Number,
+      required: true,
+      min: -90,
+      max: 90,
+    },
+    lng: {
+      type: Number,
+      required: true,
+      min: -180,
+      max: 180,
+    },
+  },
+  { timestamps: { createdAt: true, updatedAt: false } },
+);
+
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -75,7 +111,15 @@ const userSchema = new mongoose.Schema(
           default: null,
         },
       }
-    ]
+    ],
+    savedLocations: {
+      type: [savedLocationSchema],
+      default: [],
+      validate: {
+        validator: (arr) => !arr || arr.length <= 20,
+        message: 'You can save up to 20 favourite locations',
+      },
+    },
   },
   {
     timestamps: true,

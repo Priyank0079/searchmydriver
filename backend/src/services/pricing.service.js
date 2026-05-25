@@ -79,6 +79,8 @@ export const deleteServicePricingService = async (id) => {
 function validatePricingForType(serviceType, data) {
   if (serviceType === SERVICE_TYPES.HOURLY) {
     validateSlabs(data.slabs);
+    validateCustomHours(data.customHours);
+    validateHourlyFoodAllowance(data.foodAllowance);
   } else if (serviceType === SERVICE_TYPES.OUTSTATION) {
     const o = data.outstation || {};
     if (o.dailyRate == null || o.dailyRate < 0) {
@@ -111,6 +113,26 @@ function validateSlabs(slabs) {
       throw new ApiError(400, `Slab #${idx + 1}: price must be a non-negative number`);
     }
   });
+}
+
+function validateCustomHours(cfg) {
+  if (!cfg?.enabled) return;
+  if (!cfg.ratePerHour || cfg.ratePerHour <= 0) {
+    throw new ApiError(400, 'Custom hours: ratePerHour must be greater than 0');
+  }
+  if (cfg.maxHours != null && cfg.maxHours < 0) {
+    throw new ApiError(400, 'Custom hours: maxHours cannot be negative');
+  }
+}
+
+function validateHourlyFoodAllowance(cfg) {
+  if (!cfg?.enabled) return;
+  if (!cfg.amount || cfg.amount < 0) {
+    throw new ApiError(400, 'Food allowance: amount must be greater than 0');
+  }
+  if (cfg.thresholdHours == null || cfg.thresholdHours < 0) {
+    throw new ApiError(400, 'Food allowance: thresholdHours must be 0 or more');
+  }
 }
 
 // ─── Subscription plans CRUD ──────────────────────────────────────────────────
@@ -239,6 +261,7 @@ function applyPlatformLayers(subtotal, pricing, subscription) {
 export function calculateHourlyFare({
   pricing,
   slab = null,
+  isCustomDuration = false,
   actualDurationMin = null,
   bookedHours = null,
   isNightRide = false,
@@ -248,8 +271,18 @@ export function calculateHourlyFare({
 } = {}) {
   if (!pricing) throw new ApiError(400, 'Service pricing is required for fare calculation');
 
-  const slabPrice = slab?.price ?? 0;
-  const slabMaxHours = slab?.maxHours ?? bookedHours ?? 0;
+  // Package price: slab → fixed, custom → hourly rate × bookedHours.
+  let packagePrice = 0;
+  let slabMaxHours = 0;
+  if (isCustomDuration) {
+    const rate = pricing.customHours?.ratePerHour || 0;
+    const hours = Math.max(1, Math.ceil(bookedHours || 0));
+    packagePrice = rate * hours;
+    slabMaxHours = hours;
+  } else {
+    packagePrice = slab?.price ?? 0;
+    slabMaxHours = slab?.maxHours ?? bookedHours ?? 0;
+  }
 
   let extraHours = 0;
   let extraHourCharge = 0;
@@ -268,23 +301,40 @@ export function calculateHourlyFare({
   if (isNightRide && pricing.nightCharge?.enabled) {
     nightCharge =
       pricing.nightCharge.type === 'percentage'
-        ? (slabPrice * (pricing.nightCharge.amount || 0)) / 100
+        ? (packagePrice * (pricing.nightCharge.amount || 0)) / 100
         : pricing.nightCharge.amount || 0;
+  }
+
+  // Food allowance kicks in once the booked duration crosses the admin
+  // threshold (e.g. >4h ride needs a meal break). Single flat amount per
+  // booking — not per hour.
+  let foodAllowance = 0;
+  const foodCfg = pricing.foodAllowance;
+  if (foodCfg?.enabled && bookedHours != null) {
+    const threshold = foodCfg.thresholdHours || 0;
+    if (threshold > 0 && bookedHours >= threshold) {
+      foodAllowance = foodCfg.amount || 0;
+    }
   }
 
   const toll = pricing.tollParkingEnabled ? Math.max(0, tollParking || 0) : 0;
 
-  const subtotal = slabPrice + extraHourCharge + waitingCharge + nightCharge + toll;
+  const subtotal =
+    packagePrice + extraHourCharge + waitingCharge + nightCharge + foodAllowance + toll;
   const layers = applyPlatformLayers(subtotal, pricing, subscription);
 
   return {
     serviceType: SERVICE_TYPES.HOURLY,
-    packagePrice: round2(slabPrice),
+    isCustomDuration: !!isCustomDuration,
+    bookedHours: bookedHours || 0,
+    packagePrice: round2(packagePrice),
     extraHours,
     extraHourCharge: round2(extraHourCharge),
     waitingMinutes: waitingMinutes || 0,
     waitingCharge: round2(waitingCharge),
     nightCharge: round2(nightCharge),
+    foodAllowance: round2(foodAllowance),
+    foodThresholdHours: foodCfg?.thresholdHours || 0,
     tollParking: round2(toll),
     subtotal: round2(subtotal),
     ...layers,
@@ -393,16 +443,42 @@ export const estimateFareService = async ({
 
   if (serviceType === SERVICE_TYPES.HOURLY) {
     let slab = null;
+    let isCustom = false;
     if (slabId) {
       slab = pricing.slabs.id(slabId);
       if (!slab) throw new ApiError(400, 'Selected slab not found in pricing config');
     } else if (bookedHours != null) {
-      slab = findSlabForDuration(pricing.slabs, bookedHours);
+      // No slab chosen — try to fit a slab first, otherwise fall back to the
+      // custom-hours rate if enabled.
+      const fitted = findSlabForDuration(pricing.slabs, bookedHours);
+      const maxSlabHours = (pricing.slabs || []).reduce(
+        (max, s) => Math.max(max, s.maxHours || 0),
+        0,
+      );
+      if (pricing.customHours?.enabled && bookedHours > maxSlabHours) {
+        isCustom = true;
+      } else {
+        slab = fitted;
+      }
+    }
+
+    if (isCustom) {
+      if (!pricing.customHours?.enabled) {
+        throw new ApiError(400, 'Custom-duration bookings are disabled for this service');
+      }
+      const maxCustom = pricing.customHours.maxHours || 0;
+      if (maxCustom > 0 && bookedHours > maxCustom) {
+        throw new ApiError(400, `Custom duration cannot exceed ${maxCustom} hours`);
+      }
+      if (!pricing.customHours.ratePerHour || pricing.customHours.ratePerHour <= 0) {
+        throw new ApiError(400, 'Custom hourly rate is not configured');
+      }
     }
 
     const breakdown = calculateHourlyFare({
       pricing,
       slab,
+      isCustomDuration: isCustom,
       bookedHours: bookedHours ?? slab?.maxHours ?? null,
       isNightRide: isNight,
       waitingMinutes,
@@ -411,6 +487,7 @@ export const estimateFareService = async ({
     });
 
     return {
+      pricingId: pricing._id,
       serviceType: pricing.serviceType,
       serviceName: pricing.name,
       selectedSlab: slab
@@ -422,6 +499,15 @@ export const estimateFareService = async ({
             price: slab.price,
           }
         : null,
+      customHours: pricing.customHours?.enabled
+        ? {
+            enabled: true,
+            maxHours: pricing.customHours.maxHours || 0,
+            ratePerHour: pricing.customHours.ratePerHour || 0,
+            label: pricing.customHours.label || 'Custom duration',
+          }
+        : { enabled: false },
+      isCustomDuration: isCustom,
       isNightRide: isNight,
       fareBreakdown: breakdown,
       subscription: serializeSubscriptionForResponse(subscription),
@@ -444,6 +530,7 @@ export const estimateFareService = async ({
     });
 
     return {
+      pricingId: pricing._id,
       serviceType: pricing.serviceType,
       serviceName: pricing.name,
       isNightRide: isNight,

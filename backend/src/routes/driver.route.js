@@ -32,6 +32,22 @@ import {
   getMyOrderById,
   getMyPaymentHistory,
 } from '../controllers/driverHistory.controller.js';
+import {
+  getDriverHomeSummary,
+  getDriverTripsList,
+  getDriverEarnings,
+} from '../controllers/driverTrips.controller.js';
+import {
+  getDriverActiveBooking,
+  driverAcceptBooking,
+  driverRejectBooking,
+  driverGetBookingById,
+  driverMarkEnRoute,
+  driverMarkArrived,
+  driverStartTrip,
+  driverCompleteTrip,
+  driverCancelBooking,
+} from '../controllers/booking.controller.js';
 
 const router = express.Router();
 
@@ -68,5 +84,23 @@ router.post('/payments/verify', protectDriver, verifyKitPayment);
 
 router.get('/online/status', protectDriver, getOnlineStatus);
 router.put('/online', protectDriver, setOnlineStatus);
+
+// Dashboard: today summary, paginated trip history, earnings analytics
+router.get('/home/summary', protectDriver, getDriverHomeSummary);
+router.get('/trips', protectDriver, getDriverTripsList);
+router.get('/earnings', protectDriver, getDriverEarnings);
+
+// Booking lifecycle for the driver (Phase 4)
+router.get('/bookings/active', protectDriver, getDriverActiveBooking);
+router.get('/bookings/:id', protectDriver, driverGetBookingById);
+router.post('/bookings/:id/accept', protectDriver, driverAcceptBooking);
+router.post('/bookings/:id/reject', protectDriver, driverRejectBooking);
+
+// Post-accept trip execution
+router.post('/bookings/:id/en-route', protectDriver, driverMarkEnRoute);
+router.post('/bookings/:id/arrived', protectDriver, driverMarkArrived);
+router.post('/bookings/:id/start', protectDriver, driverStartTrip);
+router.post('/bookings/:id/complete', protectDriver, driverCompleteTrip);
+router.post('/bookings/:id/cancel', protectDriver, driverCancelBooking);
 
 export default router;

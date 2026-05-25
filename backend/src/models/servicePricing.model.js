@@ -36,8 +36,29 @@ const nightChargeSchema = new mongoose.Schema(
 const foodAllowanceSchema = new mongoose.Schema(
   {
     enabled: { type: Boolean, default: false },
-    /** ₹ added per day when the customer does NOT provide food. */
+    /** ₹ added per day (outstation) or per booking (hourly) when food is owed. */
     amount: { type: Number, default: 0, min: 0 },
+    /**
+     * Hourly-only: minimum booked duration (hours) at which food becomes
+     * payable. Charge kicks in when `bookedHours >= thresholdHours`. Ignored
+     * for outstation (food is per-day there).
+     */
+    thresholdHours: { type: Number, default: 4, min: 0 },
+  },
+  { _id: false },
+);
+
+// ─── Hourly: custom-duration option ───────────────────────────────────────────
+const customHoursSchema = new mongoose.Schema(
+  {
+    /** Whether users can request a duration not covered by the slabs. */
+    enabled: { type: Boolean, default: false },
+    /** Upper bound for the custom hours input (0 = unlimited). */
+    maxHours: { type: Number, default: 24, min: 0 },
+    /** ₹ per hour applied as the base package price for custom bookings. */
+    ratePerHour: { type: Number, default: 0, min: 0 },
+    /** Customer-facing label shown on the slab picker. */
+    label: { type: String, default: 'Custom duration', trim: true },
   },
   { _id: false },
 );
@@ -103,6 +124,8 @@ const servicePricingSchema = new mongoose.Schema(
     /** ₹ per extra hour beyond the booked slab (hourly only). */
     extraHourCharge: { type: Number, default: 0, min: 0 },
     waitingCharge: { type: waitingChargeSchema, default: () => ({}) },
+    /** Hourly-only: opt-in custom-duration knob, lets users go beyond slabs. */
+    customHours: { type: customHoursSchema, default: () => ({}) },
 
     // ── Outstation-only block ──
     outstation: { type: outstationSchema, default: () => ({}) },

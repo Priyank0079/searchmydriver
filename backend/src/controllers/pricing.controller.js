@@ -107,8 +107,11 @@ export const estimateFare = asyncHandler(async (req, res) => {
     bookedHours = null,
     scheduledAt = null,
     foodProvided = true,
+    stayProvided = true,
     waitingMinutes = 0,
     tollParking = 0,
+    days = null,
+    actualKm = 0,
   } = req.body || {};
 
   const result = await pricingService.estimateFareService({
@@ -117,8 +120,11 @@ export const estimateFare = asyncHandler(async (req, res) => {
     bookedHours,
     scheduledAt,
     foodProvided,
+    stayProvided,
     waitingMinutes,
     tollParking,
+    days,
+    actualKm,
     userId,
   });
 

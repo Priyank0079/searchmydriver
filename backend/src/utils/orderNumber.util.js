@@ -1,8 +1,17 @@
+function dateStamp() {
+  const d = new Date();
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function randSuffix(n = 5) {
+  const min = 10 ** (n - 1);
+  return String(Math.floor(min + Math.random() * (9 * min)));
+}
+
 export function generateKitOrderNumber() {
-  const date = new Date();
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  const rand = Math.floor(10000 + Math.random() * 90000);
-  return `KIT-${y}${m}${d}-${rand}`;
+  return `KIT-${dateStamp()}-${randSuffix(5)}`;
+}
+
+export function generateBookingNumber() {
+  return `BK-${dateStamp()}-${randSuffix(6)}`;
 }

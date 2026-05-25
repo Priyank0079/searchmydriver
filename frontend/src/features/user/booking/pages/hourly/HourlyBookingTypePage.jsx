@@ -1,0 +1,188 @@
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Zap, CalendarClock, ChevronRight, Check } from 'lucide-react';
+import Button from '../../../../../components/Button';
+import PageShell from '../../components/PageShell';
+import useBookingDraftStore from '../../../../../store/user/useBookingDraftStore';
+import useUserActiveBookingStore from '../../../../../store/user/useUserActiveBookingStore';
+import { SERVICE_TYPES } from '../../../../../constants/serviceTypes';
+import {
+  BOOKING_TYPE,
+  BOOKING_TYPE_LABELS,
+  BOOKING_TYPE_DESCRIPTIONS,
+  BOOKING_STATUS,
+} from '../../../../../constants/bookingStatus';
+
+/**
+ * Step 1 of the hourly booking flow.
+ *
+ *   "Do you need a driver right now, or later?"
+ *
+ *   - Instant   → pickup time defaults to now + 15 minutes (dispatch buffer).
+ *   - Scheduled → user picks a future date+time; minimum is now + 30 minutes.
+ *
+ * Resumes mid-flow: if the user already has an active booking we deep-link
+ * them onward so they never restart from step 1.
+ */
+const HourlyBookingTypePage = () => {
+  const navigate = useNavigate();
+  const setServiceType = useBookingDraftStore((s) => s.setServiceType);
+  const draftBookingType = useBookingDraftStore((s) => s.bookingType);
+  const setBookingType = useBookingDraftStore((s) => s.setBookingType);
+  const setHourly = useBookingDraftStore((s) => s.setHourly);
+  const activeBooking = useUserActiveBookingStore((s) => s.booking);
+  const fetchActive = useUserActiveBookingStore((s) => s.fetchActive);
+
+  const [selected, setSelected] = useState(draftBookingType || null);
+  const [scheduledAt, setScheduledAt] = useState(defaultScheduledValue());
+
+  // Make sure the service is locked to hourly the moment the user opens this
+  // screen — keeps the rest of the flow consistent if they arrived via a
+  // deep link instead of the home tile.
+  useEffect(() => {
+    setServiceType(SERVICE_TYPES.HOURLY);
+  }, [setServiceType]);
+
+  // Resume an in-flight booking — never start a second one.
+  useEffect(() => {
+    if (!activeBooking) fetchActive().catch(() => {});
+  }, [activeBooking, fetchActive]);
+  useEffect(() => {
+    if (!activeBooking) return;
+    if (activeBooking.status === BOOKING_STATUS.SEARCHING) navigate('/user/book/searching');
+    else if (activeBooking.status === BOOKING_STATUS.AWAITING_PAYMENT) navigate('/user/book/assigned');
+    else if (activeBooking.status === BOOKING_STATUS.DRIVER_ASSIGNED) navigate('/user/book/assigned');
+  }, [activeBooking, navigate]);
+
+  const handleContinue = () => {
+    if (!selected) return;
+    setBookingType(selected);
+    if (selected === BOOKING_TYPE.INSTANT) {
+      // 15 min buffer so dispatch has time to find a driver before the
+      // "ride starts" countdown is meaningful.
+      setHourly({ scheduledStartAt: new Date(Date.now() + 15 * 60_000).toISOString() });
+    } else {
+      const iso = new Date(scheduledAt).toISOString();
+      setHourly({ scheduledStartAt: iso });
+    }
+    navigate('/user/book/hourly/details');
+  };
+
+  const minScheduled = toDateTimeInputValue(new Date(Date.now() + 30 * 60_000));
+  const canContinue =
+    selected === BOOKING_TYPE.INSTANT ||
+    (selected === BOOKING_TYPE.SCHEDULED && scheduledAt && new Date(scheduledAt) > new Date());
+
+  return (
+    <PageShell
+      title="When do you need a driver?"
+      subtitle="Hourly bookings"
+      footer={
+        <Button fullWidth disabled={!canContinue} onClick={handleContinue}>
+          Continue
+        </Button>
+      }
+    >
+      <div className="space-y-3">
+        <Option
+          icon={Zap}
+          accent="amber"
+          active={selected === BOOKING_TYPE.INSTANT}
+          title={BOOKING_TYPE_LABELS[BOOKING_TYPE.INSTANT]}
+          description={BOOKING_TYPE_DESCRIPTIONS[BOOKING_TYPE.INSTANT]}
+          onClick={() => setSelected(BOOKING_TYPE.INSTANT)}
+        />
+        <Option
+          icon={CalendarClock}
+          accent="indigo"
+          active={selected === BOOKING_TYPE.SCHEDULED}
+          title={BOOKING_TYPE_LABELS[BOOKING_TYPE.SCHEDULED]}
+          description={BOOKING_TYPE_DESCRIPTIONS[BOOKING_TYPE.SCHEDULED]}
+          onClick={() => setSelected(BOOKING_TYPE.SCHEDULED)}
+        >
+          {selected === BOOKING_TYPE.SCHEDULED && (
+            <div className="mt-3 pt-3 border-t border-border-light">
+              <label className="block text-xs font-semibold text-text-secondary mb-1.5">
+                Pickup date & time
+              </label>
+              <input
+                type="datetime-local"
+                value={scheduledAt}
+                min={minScheduled}
+                onChange={(e) => setScheduledAt(e.target.value)}
+                className="w-full h-12 px-3 bg-white border border-border rounded-xl text-sm focus:outline-none focus:border-primary"
+              />
+              <p className="mt-1.5 text-[11px] text-text-muted">
+                Earliest available is {formatDateTime(minScheduled)}.
+              </p>
+            </div>
+          )}
+        </Option>
+      </div>
+    </PageShell>
+  );
+};
+
+/* ------------------------------------------------------------------ */
+
+function Option({ icon: Icon, accent, active, title, description, onClick, children }) {
+  const ring = active ? 'border-primary bg-primary/5' : 'border-border bg-white hover:bg-gray-50';
+  const accentBg = accent === 'amber' ? 'bg-amber-100' : 'bg-indigo-100';
+  const accentColor = accent === 'amber' ? 'text-amber-700' : 'text-indigo-700';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full text-left rounded-2xl border p-4 transition ${ring}`}
+    >
+      <div className="flex items-start gap-3">
+        <div
+          className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${accentBg}`}
+        >
+          <Icon className={`w-5 h-5 ${accentColor}`} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-base font-bold text-text">{title}</p>
+          </div>
+          <p className="text-xs text-text-muted mt-0.5">{description}</p>
+        </div>
+        <div
+          className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-1 ${
+            active ? 'border-primary bg-primary' : 'border-gray-300'
+          }`}
+        >
+          {active ? <Check className="w-3 h-3 text-white" /> : <ChevronRight className="w-3 h-3 text-transparent" />}
+        </div>
+      </div>
+      {children}
+    </button>
+  );
+}
+
+function defaultScheduledValue() {
+  // Default to "tomorrow 9 AM" for the scheduled option so the input has a
+  // believable starting value the moment the user expands the card.
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(9, 0, 0, 0);
+  return toDateTimeInputValue(d);
+}
+
+function toDateTimeInputValue(d) {
+  const tzOffset = d.getTimezoneOffset() * 60_000;
+  return new Date(d.getTime() - tzOffset).toISOString().slice(0, 16);
+}
+
+function formatDateTime(input) {
+  if (!input) return '';
+  return new Date(input).toLocaleString(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+export default HourlyBookingTypePage;

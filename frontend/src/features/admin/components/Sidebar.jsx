@@ -3,7 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Car, CalendarCheck, DollarSign, Settings,
   LogOut, X, ChevronRight, ChevronDown, ShieldCheck, Monitor, Package,
-  CheckSquare, MapPin, Receipt, Sparkles, Navigation,
+  CheckSquare, MapPin, Receipt, Sparkles, Navigation, Wallet, Banknote,
 } from 'lucide-react';
 import { APP_NAME } from '../../../utils/constants';
 import useAdminAuthStore from '../../../store/useAdminAuthStore';
@@ -24,6 +24,19 @@ const navItems = [
   { path: '/admin/kit-orders', label: 'Kit Orders', icon: Package },
   { path: '/admin/bookings', label: 'Bookings', icon: CalendarCheck, roles: ['admin'] },
   { path: '/admin/revenue', label: 'Revenue', icon: DollarSign, roles: ['admin'] },
+  {
+    label: 'Account',
+    icon: Wallet,
+    roles: ['admin'],
+    children: [
+      {
+        path: '/admin/account/refunds',
+        label: 'Refunds',
+        icon: Banknote,
+        roles: ['admin'],
+      },
+    ],
+  },
   {
     label: 'Settings',
     icon: Settings,
@@ -85,7 +98,7 @@ const Sidebar = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { admin, logout } = useAdminAuthStore();
-  const [expandedItems, setExpandedItems] = useState(['Settings']);
+  const [expandedItems, setExpandedItems] = useState(['Settings', 'Account']);
 
   const filteredNavItems = filterNavByRole(navItems, admin?.role);
 

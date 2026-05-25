@@ -184,41 +184,11 @@ export async function markDriverOfflineLive(driverId) {
 }
 
 /**
- * Mongo-backed nearby driver query. Used by booking dispatch (Phase 4+).
- *
- * @param {{ lat:number; lng:number; radiusKm?:number; carTypeIds?:string[]; limit?:number }} params
- */
-export async function findNearbyDrivers({ lat, lng, radiusKm = 10, carTypeIds, limit = 25 }) {
-  if (!validateCoords({ lat, lng })) {
-    return [];
-  }
-
-  const query = {
-    isOnline: true,
-    isOnTrip: false,
-    approvalStatus: 'approved',
-    isDeleted: false,
-    location: {
-      $nearSphere: {
-        $geometry: { type: 'Point', coordinates: [lng, lat] },
-        $maxDistance: radiusKm * 1000,
-      },
-    },
-  };
-  if (carTypeIds?.length) {
-    query.carTypeExperience = { $in: carTypeIds };
-  }
-
-  return Driver.find(query)
-    .select('_id name phone rating location lastLocationAt carTypeExperience')
-    .limit(limit)
-    .lean();
-}
-
-/**
  * Snapshot of all currently-online drivers from Mongo. Used by the admin
  * live-map page to seed initial markers before the Firebase subscription
  * starts streaming updates.
+ *
+ * For radius-bound / distance-aware queries, see `driverFinder.service.js`.
  */
 export async function listOnlineDriversSnapshot() {
   return Driver.find({

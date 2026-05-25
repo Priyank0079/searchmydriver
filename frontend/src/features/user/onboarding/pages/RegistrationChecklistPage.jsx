@@ -78,7 +78,7 @@ const RegistrationChecklistPage = () => {
       });
 
       setAuth(res.data.data);
-      navigate('/user/choose-service', { replace: true });
+      navigate('/user/home', { replace: true });
     } catch (err) {
       console.error('Failed to save checklist', err);
       alert(err.response?.data?.message || 'Failed to save your responses. Please try again.');

@@ -5,6 +5,10 @@ import {
 } from '../services/driverLocation.service.js';
 import { Driver } from '../models/driverModels/driver.model.js';
 import { C2S_EVENTS, S2C_EVENTS } from '../constants/socketEvents.js';
+import {
+  acceptBookingService,
+  rejectBookingService,
+} from '../services/bookingDispatch.service.js';
 
 /**
  * Socket-side handlers for driver-specific events.
@@ -101,6 +105,38 @@ export function attachDriverSocketHandlers(socket) {
       if (typeof ack === 'function') ack({ ok: true });
     } catch (err) {
       console.error('[driverSocket] offline mirror failed:', err);
+      if (typeof ack === 'function') ack({ ok: false, reason: 'server_error' });
+    }
+  });
+
+  // Booking offer accept/reject over the socket. REST endpoints exist too —
+  // the socket path is just faster and avoids a round-trip on the hot path.
+  socket.on(C2S_EVENTS.BOOKING_ACCEPT, async (payload, ack) => {
+    try {
+      const bookingId = payload?.bookingId;
+      if (!bookingId) {
+        if (typeof ack === 'function') ack({ ok: false, reason: 'bookingId_required' });
+        return;
+      }
+      const result = await acceptBookingService(bookingId, driverId);
+      if (typeof ack === 'function') ack(result);
+    } catch (err) {
+      console.error('[driverSocket] booking accept failed:', err);
+      if (typeof ack === 'function') ack({ ok: false, reason: 'server_error' });
+    }
+  });
+
+  socket.on(C2S_EVENTS.BOOKING_REJECT, async (payload, ack) => {
+    try {
+      const bookingId = payload?.bookingId;
+      if (!bookingId) {
+        if (typeof ack === 'function') ack({ ok: false, reason: 'bookingId_required' });
+        return;
+      }
+      const result = await rejectBookingService(bookingId, driverId);
+      if (typeof ack === 'function') ack(result);
+    } catch (err) {
+      console.error('[driverSocket] booking reject failed:', err);
       if (typeof ack === 'function') ack({ ok: false, reason: 'server_error' });
     }
   });

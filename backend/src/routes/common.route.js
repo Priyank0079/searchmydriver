@@ -6,7 +6,7 @@ import {
   getCarBrands,
   getCarModels,
 } from '../controllers/vehicleCatalog.controller.js';
-import { listActiveZones } from '../controllers/zone.controller.js';
+import { listActiveZones, checkZoneForPoint } from '../controllers/zone.controller.js';
 import { upload, uploadVideo as uploadVideoMiddleware } from '../middlewares/multer.js';
 
 const router = express.Router();
@@ -22,5 +22,6 @@ router.get('/car-models', getCarModels);
 router.get('/conditions', getConditions);
 router.get('/training-videos', getTrainingVideos);
 router.get('/zones', listActiveZones);
+router.get('/zones/check', checkZoneForPoint);
 
 export default router;
