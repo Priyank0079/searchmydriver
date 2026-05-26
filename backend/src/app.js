@@ -1,7 +1,7 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
-import { getCorsOrigins } from './config/cors.config.js';
+import { getCorsOptions } from './config/cors.config.js';
 
 import commonRoutes from './routes/common.route.js';
 import driverRoutes from './routes/driver.route.js';
@@ -11,12 +11,13 @@ import webhookRoutes from './routes/webhook.route.js';
 
 const app = express();
 
-app.use(
-  cors({
-    origin: getCorsOrigins(),
-    credentials: true,
-  }),
-);
+// We sit behind a TLS-terminating proxy on Vercel/Render/Heroku/etc. Without
+// this Express thinks the request is HTTP, which leads to "Secure" cookies
+// being set against a perceived-insecure connection in some flows and breaks
+// `req.secure`, `req.protocol`, and `req.ip`.
+app.set('trust proxy', 1);
+
+app.use(cors(getCorsOptions()));
 app.use(cookieParser());
 app.use('/api/v1/webhooks', webhookRoutes);
 app.use(express.json({ limit: '16kb' }));
