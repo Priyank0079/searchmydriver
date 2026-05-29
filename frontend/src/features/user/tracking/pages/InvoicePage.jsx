@@ -1,18 +1,79 @@
+import { useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, Download, FileText } from 'lucide-react';
 import Card from '../../../../components/Card';
 import Button from '../../../../components/Button';
-import { ArrowLeft, Download, FileText } from 'lucide-react';
+import useUserActiveBookingStore from '../../../../store/user/useUserActiveBookingStore';
+import { formatDistance } from '../../../../utils/geo';
+import { SERVICE_TYPE_LABELS } from '../../../../constants/serviceTypes';
 
+/**
+ * Trip invoice — backed by the booking object stored in
+ * `useUserActiveBookingStore`. Every figure (number, service, distance,
+ * duration, total) is computed from real data so the invoice the user
+ * sees here matches what's persisted server-side. The download button is
+ * left as a hook for the future PDF endpoint.
+ */
 const InvoicePage = () => {
   const navigate = useNavigate();
-  const invoice = {
-    id: 'INV-3578',
-    date: '16 May 2026, 10:10 AM',
-    service: 'Point to Point',
-    distance: '12.4 km',
-    duration: '28 min',
-    total: 449,
-  };
+  const booking = useUserActiveBookingStore((s) => s.booking);
+  const fetchActive = useUserActiveBookingStore((s) => s.fetchActive);
+
+  useEffect(() => {
+    if (!booking) fetchActive().catch(() => {});
+  }, [booking, fetchActive]);
+
+  const invoice = useMemo(() => {
+    if (!booking) {
+      return {
+        id: '—',
+        date: '—',
+        service: '—',
+        distance: '—',
+        duration: '—',
+        total: null,
+      };
+    }
+    // Bookings are not always assigned a separate invoice number — we fall
+    // back to the booking number so the user can still reference it with
+    // support.
+    const id = booking.invoiceNumber || booking.bookingNumber || '—';
+    const createdAt = booking.timeline?.completedAt || booking.timeline?.createdAt || booking.createdAt;
+    const date = createdAt ? new Date(createdAt).toLocaleString() : '—';
+
+    const service =
+      SERVICE_TYPE_LABELS[booking.serviceType] ||
+      (booking.serviceType ? `${booking.serviceType}` : 'Trip');
+
+    const distanceMeters =
+      booking.distanceMeters ??
+      booking.fareSnapshot?.distanceMeters ??
+      booking.tripSummary?.distanceMeters ??
+      null;
+    const distance = distanceMeters != null ? formatDistance(distanceMeters) : '—';
+
+    let duration = '—';
+    const startedAt = booking.timeline?.startedAt;
+    const completedAt = booking.timeline?.completedAt;
+    if (startedAt && completedAt) {
+      const diffMs = new Date(completedAt).getTime() - new Date(startedAt).getTime();
+      if (Number.isFinite(diffMs) && diffMs > 0) {
+        const minutes = Math.max(1, Math.round(diffMs / 60_000));
+        duration = `${minutes} min`;
+      }
+    }
+
+    // Mirror the same total math as the TripCompleted screen so the two
+    // pages can never disagree on what the user owes/paid.
+    const base = booking.fareSnapshot?.total || 0;
+    const extensions = (booking.extensions || []).reduce(
+      (sum, ext) => sum + (ext?.fareDelta || 0),
+      0,
+    );
+    const total = base + extensions || null;
+
+    return { id, date, service, distance, duration, total };
+  }, [booking]);
 
   return (
     <div className="flex-1 flex flex-col bg-bg min-h-dvh">
@@ -49,11 +110,13 @@ const InvoicePage = () => {
             <div className="h-px bg-border-light" />
             <div className="flex justify-between">
               <span className="text-sm font-bold text-text">Total</span>
-              <span className="text-lg font-bold text-text">₹{invoice.total}</span>
+              <span className="text-lg font-bold text-text">
+                {invoice.total != null ? `₹${invoice.total}` : '—'}
+              </span>
             </div>
           </div>
 
-          <Button fullWidth variant="secondary" icon={Download}>
+          <Button fullWidth variant="secondary" icon={Download} disabled>
             Download Invoice
           </Button>
         </Card>

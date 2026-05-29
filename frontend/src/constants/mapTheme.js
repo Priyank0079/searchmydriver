@@ -28,6 +28,71 @@ export const PIN_ASSETS = Object.freeze({
   PICKUP: '/images/pin/gps.png',
 });
 
+/* -------------------------------------------------------------------------- */
+/* Polyline theme                                                             */
+/* -------------------------------------------------------------------------- */
+/**
+ * Single source of truth for the route polyline's look — colour, opacity,
+ * weight, the (optional) outline behind it, and the dashed-loading style.
+ *
+ * Why centralise it?
+ *   - One file to tweak when product asks for a different route colour.
+ *   - Every consumer (`<TripTrackingMap>`, the dev simulator, future
+ *     completed-trip summaries) inherits the same look automatically.
+ *   - Props on `<RoutePolyline>` still let any one screen override a
+ *     specific field (e.g. dim the route on the trip-completed map),
+ *     without forking the defaults.
+ *
+ * Tweak guidance:
+ *   - `STROKE`  → the visible line on top. Bump `strokeWeight` for chunkier
+ *                 lines, change `strokeColor` for brand colour shifts.
+ *   - `OUTLINE` → the wider, translucent halo drawn beneath the stroke for
+ *                 the Uber/Rapido "premium" look. Optional — toggle it off
+ *                 per-instance via `<RoutePolyline showOutline={false} />`
+ *                 or globally by flipping `ROUTE_POLYLINE.OUTLINE_DEFAULT`.
+ *   - `DASHED`  → used by `<TripTrackingMap>` as the placeholder while the
+ *                 Directions API is still resolving.
+ */
+export const ROUTE_POLYLINE = Object.freeze({
+  STROKE: Object.freeze({
+    strokeColor: '#000000',
+    strokeOpacity: 0.92,
+    strokeWeight: 5,
+    geodesic: true,
+    clickable: false,
+  }),
+  OUTLINE: Object.freeze({
+    strokeColor: '#000000',
+    strokeOpacity: 0.18,
+    strokeWeight: 9,
+    geodesic: true,
+    clickable: false,
+  }),
+  DASHED: Object.freeze({
+    strokeColor: '#1F8A4C',
+    repeat: '12px',
+    dotScale: 2.5,
+  }),
+  /** Default for the `showOutline` prop on `<RoutePolyline>`. */
+  OUTLINE_DEFAULT: true,
+});
+
+/* -------------------------------------------------------------------------- */
+/* Z-index layering for overlays                                              */
+/* -------------------------------------------------------------------------- */
+/**
+ * Logical z-index buckets so overlays stack predictably:
+ * polyline outline → polyline stroke → static pins → driver pin.
+ * Stack values are only meaningful *within the same map pane*, but we keep
+ * them here so the precedence is documented in one spot.
+ */
+export const MAP_Z_INDEX = Object.freeze({
+  POLYLINE_OUTLINE: 1,
+  POLYLINE_STROKE: 2,
+  USER_MARKER: 50,
+  DRIVER_MARKER: 60,
+});
+
 /**
  * Rapido-inspired soft palette. Cream landscape, white roads with subtle
  * outlines, warm-amber highways, all POI/transit labels stripped. Designed

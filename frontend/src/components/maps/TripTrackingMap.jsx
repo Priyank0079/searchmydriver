@@ -1,157 +1,79 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, MapPin } from 'lucide-react';
-import { useGoogleMaps } from '../../hooks/useGoogleMaps';
+import MapView from './MapView';
+import UserMarker from './UserMarker';
+import DriverMarker from './DriverMarker';
+import RoutePolyline from './RoutePolyline';
+import { useGoogleMap } from '../../hooks/useGoogleMap';
 import { useDirectionsRoute } from '../../hooks/useDirectionsRoute';
-import { GOOGLE_MAP_ID } from '../../constants/mapDefaults';
-import {
-  PIN_ASSETS,
-  RAPIDO_MAP_OPTIONS,
-  createImageMarkerContent,
-} from '../../constants/mapTheme';
 import { formatDistance, estimateEtaMinutes, haversineMeters } from '../../utils/geo';
-
-const ROUTE_COLOR = '#1F8A4C';
-const ROUTE_OUTLINE_COLOR = '#0F5F33';
+import { ROUTE_POLYLINE } from '../../constants/mapTheme';
 
 /**
- * Map for the post-acceptance phase of a booking — shows the driver pin,
- * the pickup pin and (optionally) a polyline plus ETA label between them.
- * Reused by both the user-side `DriverAssignedPage` and the driver-side
- * `DriverActiveTripPage`, where the audience differs but the visual logic
- * is identical.
+ * <TripTrackingMap /> — the live ride map used by both the customer and
+ * driver post-acceptance flows. Composes the new declarative map
+ * primitives:
  *
- *   props:
- *     - driver         { lat, lng, heading? } — the driver's live location.
- *     - pickup         { lat, lng } — the customer's pickup.
- *     - dropoff        Optional { lat, lng } — drawn as an extra pin when
- *                      the booking has a separate drop location (outstation).
- *     - height         CSS height. Default `260px`.
- *     - showRoute      When true, draws a road-following route between the
- *                      driver and the pickup (via Google DirectionsService)
- *                      plus an ETA badge. While the route is being fetched
- *                      we draw a dotted approximate line so the screen isn't
- *                      empty.
- *     - emphasis       'driver' | 'pickup' — which pin is rendered larger.
- *                      Drivers see the pickup emphasised; customers see the
- *                      driver emphasised.
- *     - className      Extra wrapper classes.
- *     - onEtaChange    Optional callback invoked with `{ distanceMeters,
- *                      etaMinutes }` whenever either input moves.
+ *   <MapView>
+ *     <UserMarker kind="pickup" />
+ *     <UserMarker kind="drop" />       (outstation only)
+ *     <DriverMarker />                  (smoothly animated)
+ *     <RoutePolyline path={…} />        (road-following + premium stroke)
+ *   </MapView>
+ *
+ * Props (kept identical to the previous imperative implementation so
+ * `DriverAssignedPage` and `DriverActiveTripPage` need zero changes):
+ *
+ *   - driver         { lat, lng, heading? }   live driver location
+ *   - pickup         { lat, lng }             customer pickup point
+ *   - dropoff        Optional { lat, lng }    outstation destination
+ *   - height         CSS height (default 260)
+ *   - showRoute      true → fetch & draw road-following route + ETA badge
+ *   - followDriver   true → camera smoothly trails the driver (default off,
+ *                    enabled by callers during ride-in-progress flows)
+ *   - emphasis       'driver' | 'pickup' — which marker renders larger
+ *   - className      extra wrapper classes
+ *   - onEtaChange    callback called with `{ distanceMeters, etaMinutes }`
+ *   - showOutline    true → premium double-stroke polyline (default).
+ *                    false → single clean stroke. Centralised in
+ *                    `ROUTE_POLYLINE.OUTLINE_DEFAULT` (mapTheme.js).
+ *   - strokeOptions  per-instance overrides forwarded to `<RoutePolyline>`
+ *                    (e.g. brand colour on a specific screen). Falls back
+ *                    to `ROUTE_POLYLINE.STROKE` otherwise.
+ *   - outlineOptions per-instance overrides for the outline halo.
+ *
+ * Camera behaviour:
+ *   - First mount + every endpoint change → `fitBounds` so both pins are
+ *     visible with the entire route polyline.
+ *   - While following the driver → smooth `panTo` to the latest position
+ *     each animation tick (we let `<DriverMarker>` interpolate the pin and
+ *     piggy-back on the same prop update for the camera).
+ *   - We never call `setZoom` mid-follow to avoid the jarring "snap-to-
+ *     close-up" zoom that looks bad on mobile.
  */
-const TripTrackingMap = ({
+
+function TripTrackingMap({
   driver,
   pickup,
   dropoff = null,
   height = 260,
   showRoute = true,
+  followDriver = false,
   emphasis = 'driver',
   className = '',
   onEtaChange,
-}) => {
-  const { maps, AdvancedMarkerElement, ready, error } = useGoogleMaps();
-  const containerRef = useRef(null);
-  const mapRef = useRef(null);
-  const [mapInstance, setMapInstance] = useState(null);
-
-  const driverMarkerRef = useRef(null);
-  const pickupMarkerRef = useRef(null);
-  const dropMarkerRef = useRef(null);
-  // Two polylines layered together produce the "stroked" Rapido look:
-  // a darker thicker outline behind a brighter narrower stroke on top.
-  const routeOutlineRef = useRef(null);
-  const routeStrokeRef = useRef(null);
-  // The dashed fallback line we draw when the Directions API hasn't
-  // responded yet (or has failed). Kept on its own ref so we can swap it
-  // in/out independently of the road-following route.
-  const fallbackLineRef = useRef(null);
+  showOutline = ROUTE_POLYLINE.OUTLINE_DEFAULT,
+  strokeOptions,
+  outlineOptions,
+}) {
+  const { isLoaded, loadError, maps } = useGoogleMap();
+  const viewRef = useRef(null);
+  const [mapReady, setMapReady] = useState(false);
   const fittedKeyRef = useRef(null);
 
-  /* ---- Init the map once both endpoints are known --------------------- */
-  useEffect(() => {
-    if (!ready || !maps || !containerRef.current || mapRef.current) return;
-    const initialCenter = pickup || driver || { lat: 0, lng: 0 };
-    mapRef.current = new maps.Map(containerRef.current, {
-      ...RAPIDO_MAP_OPTIONS,
-      center: initialCenter,
-      zoom: 14,
-      mapId: GOOGLE_MAP_ID,
-    });
-    setMapInstance(mapRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, maps]);
-
-  /* ---- Pickup marker -------------------------------------------------- */
-  useEffect(() => {
-    if (!mapInstance || !AdvancedMarkerElement || !pickup) return undefined;
-    const size = emphasis === 'pickup' ? 52 : 44;
-    if (!pickupMarkerRef.current) {
-      pickupMarkerRef.current = new AdvancedMarkerElement({
-        map: mapInstance,
-        position: pickup,
-        content: createImageMarkerContent(PIN_ASSETS.PICKUP, { size, alt: 'Pickup' }),
-        title: 'Pickup',
-        zIndex: 4,
-      });
-    } else {
-      pickupMarkerRef.current.position = pickup;
-      pickupMarkerRef.current.content = createImageMarkerContent(PIN_ASSETS.PICKUP, {
-        size,
-        alt: 'Pickup',
-      });
-    }
-    return undefined;
-  }, [mapInstance, AdvancedMarkerElement, pickup, emphasis]);
-
-  /* ---- Driver marker -------------------------------------------------- */
-  useEffect(() => {
-    if (!mapInstance || !AdvancedMarkerElement) return undefined;
-    if (!driver) {
-      if (driverMarkerRef.current) {
-        driverMarkerRef.current.map = null;
-        driverMarkerRef.current = null;
-      }
-      return undefined;
-    }
-    const size = emphasis === 'driver' ? 52 : 44;
-    if (!driverMarkerRef.current) {
-      driverMarkerRef.current = new AdvancedMarkerElement({
-        map: mapInstance,
-        position: driver,
-        content: createImageMarkerContent(PIN_ASSETS.DRIVER, { size, alt: 'Driver' }),
-        title: 'Driver',
-        zIndex: 6,
-      });
-    } else {
-      driverMarkerRef.current.position = driver;
-    }
-    return undefined;
-  }, [mapInstance, AdvancedMarkerElement, driver, emphasis]);
-
-  /* ---- Optional drop-off marker --------------------------------------- */
-  useEffect(() => {
-    if (!mapInstance || !AdvancedMarkerElement) return undefined;
-    if (!dropoff) {
-      if (dropMarkerRef.current) {
-        dropMarkerRef.current.map = null;
-        dropMarkerRef.current = null;
-      }
-      return undefined;
-    }
-    if (!dropMarkerRef.current) {
-      dropMarkerRef.current = new AdvancedMarkerElement({
-        map: mapInstance,
-        position: dropoff,
-        content: createImageMarkerContent(PIN_ASSETS.PICKUP, { size: 40, alt: 'Drop' }),
-        title: 'Drop',
-        zIndex: 3,
-      });
-    } else {
-      dropMarkerRef.current.position = dropoff;
-    }
-    return undefined;
-  }, [mapInstance, AdvancedMarkerElement, dropoff]);
-
-  /* ---- Directions API: road-following route -------------------------- */
+  /* ------------------------------------------------------------------ */
+  /* Directions: road-following polyline                                 */
+  /* ------------------------------------------------------------------ */
   const {
     path: routePath,
     distanceMeters: routeDistanceMeters,
@@ -163,137 +85,74 @@ const TripTrackingMap = ({
     enabled: showRoute && Boolean(driver && pickup),
   });
 
-  /* ---- Render the real route polyline (outline + stroke) ------------- */
-  useEffect(() => {
-    if (!mapInstance || !maps) return undefined;
-    const hasRoute = showRoute && routePath && routePath.length > 1;
-    if (!hasRoute) {
-      [routeOutlineRef, routeStrokeRef].forEach((ref) => {
-        if (ref.current) {
-          ref.current.setMap(null);
-          ref.current = null;
-        }
-      });
-      return undefined;
-    }
-    if (!routeOutlineRef.current) {
-      routeOutlineRef.current = new maps.Polyline({
-        map: mapInstance,
-        path: routePath,
-        strokeColor: ROUTE_OUTLINE_COLOR,
-        strokeOpacity: 0.45,
-        strokeWeight: 9,
-        zIndex: 1,
-      });
-    } else {
-      routeOutlineRef.current.setPath(routePath);
-    }
-    if (!routeStrokeRef.current) {
-      routeStrokeRef.current = new maps.Polyline({
-        map: mapInstance,
-        path: routePath,
-        strokeColor: ROUTE_COLOR,
-        strokeOpacity: 0.95,
-        strokeWeight: 5,
-        zIndex: 2,
-      });
-    } else {
-      routeStrokeRef.current.setPath(routePath);
-    }
-    return undefined;
-  }, [mapInstance, maps, showRoute, routePath]);
+  /* ------------------------------------------------------------------ */
+  /* Initial centre — picks the most "useful" point on first mount so
+   * the map doesn't start zoomed into the Pacific while we wait for the
+   * effect below to call `fitBounds`.                                    */
+  /* ------------------------------------------------------------------ */
+  const initialCenter = useMemo(() => {
+    return pickup || driver || { lat: 28.6139, lng: 77.209 };
+  }, [pickup, driver]);
 
-  /* ---- Fallback: dotted geodesic line while we have no real route ----- */
+  /* ------------------------------------------------------------------ */
+  /* Fit-bounds: re-runs whenever the endpoints (or the route) change.   */
+  /* ------------------------------------------------------------------ */
   useEffect(() => {
-    if (!mapInstance || !maps) return undefined;
-    const useFallback = showRoute && driver && pickup && (!routePath || routePath.length < 2);
-    if (!useFallback) {
-      if (fallbackLineRef.current) {
-        fallbackLineRef.current.setMap(null);
-        fallbackLineRef.current = null;
-      }
-      return undefined;
-    }
-    const path = [driver, pickup];
-    if (!fallbackLineRef.current) {
-      fallbackLineRef.current = new maps.Polyline({
-        map: mapInstance,
-        path,
-        // Dotted line: hide the base stroke and overlay a `DOT` symbol
-        // every few pixels so it reads as "approximate while we resolve
-        // the real route" rather than a final straight-shot.
-        strokeOpacity: 0,
-        zIndex: 0,
-        icons: [
-          {
-            icon: {
-              path: maps.SymbolPath.CIRCLE,
-              fillColor: ROUTE_COLOR,
-              fillOpacity: 0.85,
-              strokeOpacity: 0,
-              scale: 2.5,
-            },
-            offset: '0',
-            repeat: '12px',
-          },
-        ],
-      });
-    } else {
-      fallbackLineRef.current.setPath(path);
-    }
-    return undefined;
-  }, [mapInstance, maps, showRoute, driver, pickup, routePath]);
+    if (!mapReady || !maps || !viewRef.current) return;
+    if (!pickup && !driver) return;
 
-  /* ---- Fit map to include both endpoints (and the full route) -------- */
-  useEffect(() => {
-    if (!mapInstance || !maps || !pickup) return;
-    const points = [pickup];
+    // While in "follow driver" mode we deliberately skip fitBounds — the
+    // dedicated follow effect below owns the camera. Without this skip the
+    // bounds would yank the camera away from the driver each tick.
+    if (followDriver) return;
+
+    const points = [];
+    if (pickup) points.push(pickup);
     if (driver) points.push(driver);
     if (dropoff) points.push(dropoff);
-    // When a real route is available we widen the bounds to cover the
-    // entire path — otherwise a detour around the bounding rectangle
-    // would scroll off-screen on initial fit.
     if (Array.isArray(routePath) && routePath.length > 1) {
+      // Anchor the bounds against the route endpoints too — long detours
+      // would otherwise scroll off-screen on the initial fit.
       points.push(routePath[0], routePath[routePath.length - 1]);
     }
-    const key = points.map((p) => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`).join('|');
+
+    if (points.length === 0) return;
+
+    const key = points
+      .map((p) => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`)
+      .join('|');
     if (fittedKeyRef.current === key) return;
     fittedKeyRef.current = key;
+
     if (points.length === 1) {
-      mapInstance.panTo(points[0]);
+      viewRef.current.panTo(points[0]);
       return;
     }
+
     const bounds = new maps.LatLngBounds();
     points.forEach((p) => bounds.extend(p));
-    if (Array.isArray(routePath)) {
-      routePath.forEach((p) => bounds.extend(p));
-    }
-    mapInstance.fitBounds(bounds, 64);
-  }, [mapInstance, maps, driver, pickup, dropoff, routePath]);
+    if (Array.isArray(routePath)) routePath.forEach((p) => bounds.extend(p));
+    viewRef.current.fitBounds(bounds, 64);
+  }, [mapReady, maps, pickup, driver, dropoff, routePath, followDriver]);
 
-  /* ---- Cleanup on unmount -------------------------------------------- */
+  /* ------------------------------------------------------------------ */
+  /* Smooth follow: pan the camera to each new driver sample.            */
+  /*                                                                     */
+  /* We piggy-back on the parent's `driver` prop change rather than
+   * polling the DriverMarker's animated position — keeping the camera
+   * on the *target* (not the in-flight interpolated point) avoids the
+   * compounded jitter you'd otherwise get from two animation loops.    */
+  /* ------------------------------------------------------------------ */
   useEffect(() => {
-    return () => {
-      [driverMarkerRef, pickupMarkerRef, dropMarkerRef].forEach((ref) => {
-        if (ref.current) {
-          ref.current.map = null;
-          ref.current = null;
-        }
-      });
-      [routeOutlineRef, routeStrokeRef, fallbackLineRef].forEach((ref) => {
-        if (ref.current) {
-          ref.current.setMap(null);
-          ref.current = null;
-        }
-      });
-      mapRef.current = null;
-    };
-  }, []);
+    if (!mapReady || !followDriver || !driver) return;
+    viewRef.current?.panTo(driver);
+  }, [mapReady, followDriver, driver]);
 
-  /* ---- Distance + ETA derivation ------------------------------------- */
-  // Prefer the Directions API's numbers when present — they account for
-  // road geometry. Fall back to haversine + an average-speed estimate so
-  // the badge never reads "—" just because the API call hasn't returned.
+  /* ------------------------------------------------------------------ */
+  /* ETA derivation — prefer the Directions response, fall back to a
+   * straight-line haversine + avg-urban-speed estimate so the badge
+   * never reads "—" just because the API call hasn't returned.          */
+  /* ------------------------------------------------------------------ */
   const { distanceMeters, etaMinutes } = useMemo(() => {
     if (!driver || !pickup) return { distanceMeters: null, etaMinutes: null };
     if (Number.isFinite(routeDistanceMeters) && Number.isFinite(routeDurationSeconds)) {
@@ -311,23 +170,94 @@ const TripTrackingMap = ({
     onEtaChange({ distanceMeters, etaMinutes });
   }, [distanceMeters, etaMinutes, onEtaChange]);
 
+  /* ------------------------------------------------------------------ */
+  /* Render                                                              */
+  /* ------------------------------------------------------------------ */
+  if (loadError) {
+    return (
+      <div
+        className={`relative overflow-hidden rounded-2xl bg-rose-50 ${className}`}
+        style={{ height }}
+      >
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
+          <MapPin className="w-7 h-7 text-rose-400" />
+          <p className="text-sm font-medium text-rose-800 mt-2">
+            {loadError.message || 'Failed to load Google Maps'}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const hasRoute = showRoute && Array.isArray(routePath) && routePath.length > 1;
+  const showFallback =
+    showRoute && driver && pickup && (!routePath || routePath.length < 2);
+
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl bg-gray-50 ${className}`}
+      className={`relative overflow-hidden rounded-2xl bg-[#f4efe6] ${className}`}
       style={{ height }}
     >
-      <div ref={containerRef} className="w-full h-full" />
-      {!ready && !error && (
+      <MapView
+        ref={viewRef}
+        center={initialCenter}
+        zoom={14}
+        height="100%"
+        rounded={false}
+        onLoad={() => setMapReady(true)}
+      >
+        {pickup && (
+          <UserMarker
+            position={pickup}
+            kind="pickup"
+            size={emphasis === 'pickup' ? 52 : 44}
+            ariaLabel="Pickup"
+          />
+        )}
+
+        {dropoff && (
+          <UserMarker
+            position={dropoff}
+            kind="drop"
+            size={40}
+            ariaLabel="Drop"
+          />
+        )}
+
+        {driver && (
+          <DriverMarker
+            position={driver}
+            heading={typeof driver.heading === 'number' ? driver.heading : undefined}
+            size={emphasis === 'driver' ? 52 : 44}
+            animateMs={1200}
+          />
+        )}
+
+        {hasRoute && (
+          <RoutePolyline
+            path={routePath}
+            animate={false}
+            showOutline={false}
+            strokeOptions={strokeOptions}
+            outlineOptions={outlineOptions}
+          />
+        )}
+
+        {showFallback && (
+          <RoutePolyline
+            path={[driver, pickup]}
+            animate={false}
+            dashed
+          />
+        )}
+      </MapView>
+
+      {!isLoaded && !loadError && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-50/80 pointer-events-none">
           <Loader2 className="w-6 h-6 animate-spin text-text-muted" />
         </div>
       )}
-      {error && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-rose-50 p-4 text-center">
-          <MapPin className="w-7 h-7 text-rose-400" />
-          <p className="text-sm font-medium text-rose-800 mt-2">{error}</p>
-        </div>
-      )}
+
       {distanceMeters != null && etaMinutes != null && (
         <div className="absolute top-3 left-3 right-3 flex justify-center pointer-events-none">
           <div className="bg-white/95 backdrop-blur rounded-full shadow px-3.5 py-1.5 flex items-center gap-2 text-[12px] font-semibold text-text">
@@ -340,6 +270,6 @@ const TripTrackingMap = ({
       )}
     </div>
   );
-};
+}
 
-export default TripTrackingMap;
+export default memo(TripTrackingMap);

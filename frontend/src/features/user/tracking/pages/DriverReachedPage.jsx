@@ -1,45 +1,124 @@
+import { useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Star, Phone, MessageSquare, CheckCircle, Loader2 } from 'lucide-react';
 import Card from '../../../../components/Card';
 import Button from '../../../../components/Button';
 import Avatar from '../../../../components/Avatar';
-import DummyMap from '../../../../components/DummyMap';
-import { Star, Phone, MessageSquare, CheckCircle } from 'lucide-react';
+import TripTrackingMap from '../../../../components/maps/TripTrackingMap';
+import useUserActiveBookingStore from '../../../../store/user/useUserActiveBookingStore';
+import { useFirebaseDriverLocations } from '../../../../hooks/useFirebaseDriverLocations';
+import { BOOKING_STATUS } from '../../../../constants/bookingStatus';
 
+/**
+ * "Driver has arrived" screen — same layout as `DriverOnWayPage`, but
+ * with the in-trip OTP and the start-trip CTA front-and-centre. Real
+ * booking data is pulled from `useUserActiveBookingStore`.
+ */
 const DriverReachedPage = () => {
   const navigate = useNavigate();
-  const driver = { name: 'Ravi Kumar', rating: 4.8, car: 'MP09 AB 1234' };
+  const booking = useUserActiveBookingStore((s) => s.booking);
+  const fetchActive = useUserActiveBookingStore((s) => s.fetchActive);
+
+  useEffect(() => {
+    if (!booking) fetchActive().catch(() => {});
+  }, [booking, fetchActive]);
+
+  const driverObj = typeof booking?.driverId === 'object' ? booking?.driverId : null;
+  const driverId = driverObj?._id || (typeof booking?.driverId === 'string' ? booking.driverId : null);
+  const { map: liveDrivers } = useFirebaseDriverLocations();
+  const liveDriver = driverId ? liveDrivers[String(driverId)] : null;
+
+  const pickupPoint = useMemo(() => {
+    const c = booking?.pickup?.location?.coordinates;
+    if (!Array.isArray(c) || c.length !== 2) return null;
+    return { lat: c[1], lng: c[0] };
+  }, [booking?.pickup]);
+
+  const driverPoint = useMemo(() => {
+    if (!liveDriver) return null;
+    return { lat: liveDriver.lat, lng: liveDriver.lng, heading: liveDriver.heading };
+  }, [liveDriver]);
+
+  useEffect(() => {
+    if (!booking?.status) return;
+    if (booking.status === BOOKING_STATUS.STARTED) {
+      navigate('/user/tracking/in-progress', { replace: true });
+    } else if (booking.status === BOOKING_STATUS.COMPLETED) {
+      navigate('/user/tracking/completed', { replace: true });
+    }
+  }, [booking?.status, navigate]);
+
+  const driverName = driverObj?.name || 'Your driver';
+  const driverRating = driverObj?.rating;
+  const otpCode = booking?.rideStartOtp?.code;
 
   return (
     <div className="flex-1 flex flex-col bg-bg min-h-dvh">
-      <DummyMap className="h-64" showDriverPins label="Driver has arrived">
-        {/* Overlay badge */}
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-success/90 backdrop-blur-sm px-4 py-2 rounded-full shadow-md animate-bounce-in">
-          <div className="flex items-center gap-2">
-            <CheckCircle className="w-4 h-4 text-white" />
-            <span className="text-white font-medium text-sm">Has reached your location</span>
+      {pickupPoint ? (
+        <div className="relative">
+          <TripTrackingMap
+            driver={driverPoint}
+            pickup={pickupPoint}
+            height={256}
+            showRoute={false}
+            emphasis="driver"
+          />
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-success/95 backdrop-blur-sm px-4 py-2 rounded-full shadow-md">
+            <div className="flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 text-white" />
+              <span className="text-white font-medium text-sm">Driver has arrived</span>
+            </div>
           </div>
         </div>
-      </DummyMap>
+      ) : (
+        <div className="h-64 bg-[#f4efe6] flex items-center justify-center">
+          <Loader2 className="w-6 h-6 animate-spin text-text-muted" />
+        </div>
+      )}
+
       <div className="flex-1 -mt-6 z-10">
         <Card className="mx-4">
           <div className="flex items-center gap-3 mb-4">
-            <Avatar name={driver.name} size="lg" online />
-            <div className="flex-1">
-              <h3 className="font-bold text-text">{driver.name}</h3>
-              <div className="flex items-center gap-1 mt-0.5">
-                <Star className="w-3.5 h-3.5 text-primary fill-primary" />
-                <span className="text-sm">{driver.rating}</span>
-              </div>
+            <Avatar name={driverName} size="lg" online={!!liveDriver} />
+            <div className="flex-1 min-w-0">
+              <h3 className="font-bold text-text truncate">{driverName}</h3>
+              {driverRating ? (
+                <div className="flex items-center gap-1 mt-0.5">
+                  <Star className="w-3.5 h-3.5 text-primary fill-primary" />
+                  <span className="text-sm">{driverRating}</span>
+                </div>
+              ) : null}
             </div>
           </div>
-          <div className="flex gap-3 mb-4">
+
+          {otpCode ? (
+            <div className="rounded-2xl bg-primary/10 border border-primary/30 px-4 py-3 mb-4 flex items-center justify-between">
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-text-muted">Ride OTP</p>
+                <p className="text-2xl font-bold text-primary-dark font-mono tracking-[0.4em]">
+                  {otpCode}
+                </p>
+              </div>
+              <p className="text-[11px] text-text-muted max-w-[140px] text-right leading-snug">
+                Share this with the driver to start the trip.
+              </p>
+            </div>
+          ) : null}
+
+          <div className="flex gap-3 mb-2">
             <Button variant="secondary" size="md" className="flex-1" icon={Phone}>Call</Button>
             <Button variant="secondary" size="md" className="flex-1" icon={MessageSquare}>Message</Button>
           </div>
         </Card>
+
         <div className="px-4 mt-4">
-          <Button fullWidth variant="success" onClick={() => navigate('/user/tracking/in-progress')}>
-            Start Trip
+          <Button
+            fullWidth
+            variant="success"
+            disabled={!booking}
+            onClick={() => navigate('/user/tracking/in-progress')}
+          >
+            Continue
           </Button>
         </div>
       </div>

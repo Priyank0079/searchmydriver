@@ -26,6 +26,12 @@ const RegisterPage = lazy(() => import('./features/auth/pages/RegisterPage'));
 const ForgotPasswordPage = lazy(() => import('./features/auth/pages/ForgotPasswordPage'));
 const LinkPhonePage = lazy(() => import('./features/auth/pages/LinkPhonePage'));
 
+// Developer-only sandbox screens. Bundled in every build (so a tester can
+// reach `/dev/map-simulator` against the deployed dev/staging frontend),
+// but never linked from the user-facing UI. Safe to remove once the live
+// driver pipeline is fully validated in production.
+const MapSimulatorPage = lazy(() => import('./features/dev/pages/MapSimulatorPage'));
+
 // User Onboarding
 const AddCarPage = lazy(() => import('./features/user/onboarding/pages/AddCarPage'));
 const MyCarsPage = lazy(() => import('./features/user/onboarding/pages/MyCarsPage'));
@@ -233,6 +239,13 @@ function App() {
             <Route path="/driver/trip/payment" element={<PaymentStatusPage />} />
             <Route path="/driver/trip/rate" element={<RateCustomerPage />} />
           </Route>
+
+          {/* ========== Dev-only Sandbox ========== */}
+          {/* Reachable directly via URL (e.g. /dev/map-simulator). Used by
+              the team to verify the live-trip map's smooth animation,
+              polyline, and follow-camera against a virtual driver feed
+              before wiring up real drivers. */}
+          <Route path="/dev/map-simulator" element={<MapSimulatorPage />} />
 
           {/* Catch all for mobile */}
           <Route path="*" element={<Navigate to="/" replace />} />
