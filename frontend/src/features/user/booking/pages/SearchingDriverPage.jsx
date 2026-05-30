@@ -6,6 +6,7 @@ import Button from '../../../../components/Button';
 import { useSocketEvent } from '../../../../hooks/useSocket';
 import { S2C_EVENTS } from '../../../../constants/socketEvents';
 import useUserActiveBookingStore from '../../../../store/user/useUserActiveBookingStore';
+import useUserWalletStore from '../../../../store/user/useUserWalletStore';
 import { BOOKING_STATUS } from '../../../../constants/bookingStatus';
 import { SERVICE_TYPES } from '../../../../constants/serviceTypes';
 import useBookingDraftStore from '../../../../store/user/useBookingDraftStore';
@@ -19,6 +20,7 @@ const SearchingDriverPage = () => {
   const cancelBooking = useUserActiveBookingStore((s) => s.cancelBooking);
   const clearActiveBooking = useUserActiveBookingStore((s) => s.clear);
   const draftReset = useBookingDraftStore((s) => s.reset);
+  const fetchWallet = useUserWalletStore((s) => s.fetchWallet);
   const [cancelling, setCancelling] = useState(false);
   // Surfaces the "driver bailed — searching again" popup the moment the
   // backend re-dispatches a previously-accepted booking. The popup is
@@ -40,6 +42,7 @@ const SearchingDriverPage = () => {
 
   const bookingStatus = booking?.status;
   const serviceType = booking?.serviceType;
+  const paymentMethod = booking?.paymentMethod;
   useEffect(() => {
     if (!bookingStatus) return;
     switch (bookingStatus) {
@@ -47,13 +50,24 @@ const SearchingDriverPage = () => {
         navigate('/user/book/assigned');
         break;
       case BOOKING_STATUS.AWAITING_PAYMENT:
-        navigate('/user/book/payment');
+        // Wallet-paid bookings should never land here — but if the
+        // server flips a wallet booking into AWAITING_PAYMENT for any
+        // reason (legacy extension flow, etc.) we treat it as
+        // assigned and let the assigned page handle the pay sheet.
+        if (paymentMethod === 'wallet') {
+          navigate('/user/book/assigned');
+        } else {
+          navigate('/user/book/payment');
+        }
         break;
       case BOOKING_STATUS.NO_DRIVERS_FOUND: {
         // Drop the failed booking from the local store but keep the booking
         // draft intact so the user can tweak their selection and retry
-        // without re-entering pickup / car / time.
+        // without re-entering pickup / car / time. The wallet was auto-
+        // refunded server-side; pull a fresh snapshot so the next
+        // retry's "balance" line reflects it.
         clearActiveBooking();
+        fetchWallet().catch(() => {});
         if (serviceType === SERVICE_TYPES.HOURLY) {
           navigate('/user/book/hourly/slab', {
             replace: true,
@@ -71,12 +85,23 @@ const SearchingDriverPage = () => {
         break;
       }
       case BOOKING_STATUS.CANCELLED:
+        // Wallet-paid bookings: any refund landed in the wallet on the
+        // server; refresh so the user sees the new balance.
+        fetchWallet().catch(() => {});
         navigate('/user/home', { replace: true });
         break;
       default:
         break;
     }
-  }, [bookingStatus, serviceType, navigate, draftReset, clearActiveBooking]);
+  }, [
+    bookingStatus,
+    serviceType,
+    paymentMethod,
+    navigate,
+    draftReset,
+    clearActiveBooking,
+    fetchWallet,
+  ]);
 
   // Live patches from the dispatcher.
   useSocketEvent(S2C_EVENTS.BOOKING_UPDATED, (payload) => {
@@ -117,6 +142,9 @@ const SearchingDriverPage = () => {
     setCancelling(true);
     try {
       await cancelBooking('cancelled_by_user');
+      // The cancellation refund (if any) hits the wallet atomically on
+      // the backend — pull the fresh balance now.
+      fetchWallet().catch(() => {});
       draftReset();
       navigate('/user/home', { replace: true });
     } catch (err) {

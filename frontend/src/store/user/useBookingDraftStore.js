@@ -27,6 +27,19 @@ const DEFAULT_STATE = {
     durationHours: null,
     slabId: null,
     isCustomDuration: false,
+    // Hourly food allowance never adds a charge — the threshold instead
+    // gates a mandatory acknowledgement checkbox: "I'll feed the driver".
+    // `foodAcknowledged` defaults to `false`; the slab page sets it to
+    // `true` once the customer ticks the box. The confirm screen blocks
+    // payment until this is true (when the threshold is crossed).
+    foodAcknowledged: false,
+    // Back-compat — always forwarded as `true` to the backend so older
+    // pricing engines don't bill for hourly food.
+    foodProvided: null,
+    // `null` = user hasn't decided yet (server defaults to `true`,
+    // i.e. stay allowance ON). Surfaced as a toggle on the slab page
+    // only when the booked duration crosses the admin threshold.
+    stayProvided: null,
   },
   outstation: {
     destinationAddress: '',
@@ -149,6 +162,15 @@ const useBookingDraftStore = create(
             durationHours: s.hourly.durationHours,
             slabId: s.hourly.isCustomDuration ? null : s.hourly.slabId,
             isCustomDuration: !!s.hourly.isCustomDuration,
+            // Only forward overrides the user explicitly set. `null`
+            // means "use the admin/default behaviour" — the backend
+            // treats undefined as `true` (allowance on).
+            ...(s.hourly.foodProvided != null
+              ? { foodProvided: !!s.hourly.foodProvided }
+              : {}),
+            ...(s.hourly.stayProvided != null
+              ? { stayProvided: !!s.hourly.stayProvided }
+              : {}),
           };
         }
         if (s.serviceType === SERVICE_TYPES.OUTSTATION) {

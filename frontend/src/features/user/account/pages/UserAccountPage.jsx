@@ -1,30 +1,61 @@
+import { useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Card from '../../../../components/Card';
 import Avatar from '../../../../components/Avatar';
-import { User, Car, CreditCard, Wallet, Users, HelpCircle, Settings, LogOut, ChevronRight } from 'lucide-react';
+import {
+  User,
+  Car,
+  CreditCard,
+  Wallet,
+  Users,
+  HelpCircle,
+  Settings,
+  LogOut,
+  ChevronRight,
+} from 'lucide-react';
+import useUserAuthStore from '../../../../store/useUserAuthStore';
+import useUserWalletStore from '../../../../store/user/useUserWalletStore';
 
 const menuItems = [
-  { icon: User, label: 'My Profile', path: '#' },
-  { icon: Car, label: 'My Cars', path: '/user/my-cars' },
-  { icon: CreditCard, label: 'Payment Methods', path: '#' },
-  { icon: Wallet, label: 'My Wallet', sub: '₹1,250.00', path: '#' },
-  { icon: Users, label: 'Refer & Earn', path: '#' },
-  { icon: HelpCircle, label: 'Help & Support', path: '#' },
-  { icon: Settings, label: 'Settings', path: '#' },
+  { id: 'profile', icon: User, label: 'My Profile', path: '#' },
+  { id: 'cars', icon: Car, label: 'My Cars', path: '/user/my-cars' },
+  { id: 'payments', icon: CreditCard, label: 'Payment Methods', path: '#' },
+  { id: 'wallet', icon: Wallet, label: 'My Wallet', path: '/user/wallet', dynamic: 'wallet' },
+  { id: 'refer', icon: Users, label: 'Refer & Earn', path: '#' },
+  { id: 'help', icon: HelpCircle, label: 'Help & Support', path: '#' },
+  { id: 'settings', icon: Settings, label: 'Settings', path: '#' },
 ];
 
 const UserAccountPage = () => {
   const navigate = useNavigate();
+  const user = useUserAuthStore((s) => s.user);
+  const logout = useUserAuthStore((s) => s.logout);
+  const wallet = useUserWalletStore((s) => s.wallet);
+  const fetchWallet = useUserWalletStore((s) => s.fetchWallet);
+
+  useEffect(() => {
+    fetchWallet().catch(() => {});
+  }, [fetchWallet]);
+
+  const walletLabel = useMemo(
+    () =>
+      `\u20B9${Number(wallet.balance || 0).toLocaleString('en-IN', {
+        minimumFractionDigits: 2,
+      })}`,
+    [wallet.balance],
+  );
 
   return (
     <div className="flex-1 flex flex-col bg-bg">
       {/* Profile Header */}
       <div className="bg-white px-4 pt-6 pb-6 shadow-sm">
         <div className="flex items-center gap-4">
-          <Avatar name="Raj Nagoriya" size="xl" />
+          <Avatar name={user?.name || 'Customer'} size="xl" />
           <div>
-            <h1 className="text-xl font-bold text-text">My Account</h1>
-            <p className="text-sm text-text-secondary">+91 98765 43210</p>
+            <h1 className="text-xl font-bold text-text">{user?.name || 'My Account'}</h1>
+            <p className="text-sm text-text-secondary">
+              {user?.phone_no ? `+91 ${user.phone_no}` : ''}
+            </p>
           </div>
         </div>
       </div>
@@ -32,21 +63,33 @@ const UserAccountPage = () => {
       {/* Menu */}
       <div className="flex-1 p-4">
         <Card className="divide-y divide-border-light">
-          {menuItems.map((item, idx) => (
-            <button key={idx} onClick={() => navigate(item.path)}
-              className="w-full flex items-center gap-3 py-3.5 px-1 hover:bg-gray-50 transition-colors first:pt-1 last:pb-1">
-              <div className="w-9 h-9 rounded-lg bg-bg flex items-center justify-center shrink-0">
-                <item.icon className="w-5 h-5 text-text-secondary" />
-              </div>
-              <span className="flex-1 text-left text-sm font-medium text-text">{item.label}</span>
-              {item.sub && <span className="text-xs text-text-muted">{item.sub}</span>}
-              <ChevronRight className="w-4 h-4 text-text-muted" />
-            </button>
-          ))}
+          {menuItems.map((item) => {
+            const sub = item.dynamic === 'wallet' ? walletLabel : null;
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                onClick={() => item.path !== '#' && navigate(item.path)}
+                className="w-full flex items-center gap-3 py-3.5 px-1 hover:bg-gray-50 transition-colors first:pt-1 last:pb-1"
+              >
+                <div className="w-9 h-9 rounded-lg bg-bg flex items-center justify-center shrink-0">
+                  <Icon className="w-5 h-5 text-text-secondary" />
+                </div>
+                <span className="flex-1 text-left text-sm font-medium text-text">
+                  {item.label}
+                </span>
+                {sub && <span className="text-xs font-semibold text-text">{sub}</span>}
+                <ChevronRight className="w-4 h-4 text-text-muted" />
+              </button>
+            );
+          })}
         </Card>
 
         {/* Logout */}
-        <button className="w-full mt-4 flex items-center justify-center gap-2 py-3.5 bg-white rounded-2xl shadow-card text-danger font-medium text-sm hover:bg-danger-light transition-colors">
+        <button
+          onClick={logout}
+          className="w-full mt-4 flex items-center justify-center gap-2 py-3.5 bg-white rounded-2xl shadow-card text-danger font-medium text-sm hover:bg-danger-light transition-colors"
+        >
           <LogOut className="w-5 h-5" />
           Logout
         </button>

@@ -37,6 +37,7 @@ export const S2C_EVENTS = Object.freeze({
   BOOKING_DRIVER_REASSIGNING: 'booking:driver:reassigning',
   BOOKING_EXTENSION_OFFERED: 'booking:extension:offered',
   BOOKING_EXTENSION_RESOLVED: 'booking:extension:resolved',
+  BOOKING_NOSHOW_PROMPT: 'booking:noshow:prompt',
 
   NOTIFICATION: 'notification:new',
   ADMIN_ALERT: 'admin:alert',

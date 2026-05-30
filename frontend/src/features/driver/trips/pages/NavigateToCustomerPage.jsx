@@ -42,8 +42,10 @@ const NavigateToCustomerPage = () => {
     return { distanceMeters: d, etaMinutes: estimateEtaMinutes(d) };
   }, [driverPoint, pickupPoint]);
 
-  const customer = booking?.userId;
-  const customerName = typeof customer === 'object' ? customer?.name : null;
+  const customer = typeof booking?.userId === 'object' ? booking.userId : null;
+  const customerName = customer?.name || null;
+  const customerPhone = customer?.phone_no || customer?.phone || null;
+  const customerPhoto = customer?.profilePicture || null;
 
   return (
     <div className="flex-1 flex flex-col bg-bg min-h-dvh">
@@ -75,16 +77,33 @@ const NavigateToCustomerPage = () => {
       <div className="flex-1 p-4 -mt-4 z-10 space-y-4">
         <Card className="animate-fade-in-up">
           <div className="flex items-center gap-3 mb-3">
-            <Avatar name={customerName || 'Customer'} size="lg" />
+            <Avatar
+              src={customerPhoto}
+              name={customerName || 'Customer'}
+              size="lg"
+            />
             <div className="flex-1 min-w-0">
               <h3 className="font-bold text-text truncate">{customerName || 'Customer'}</h3>
               <p className="text-xs text-text-muted truncate">
-                {booking?.bookingNumber || '—'}
+                {customerPhone || booking?.bookingNumber || '—'}
               </p>
             </div>
           </div>
           <div className="flex gap-3 mb-4">
-            <Button variant="secondary" size="md" className="flex-1" icon={Phone}>Call</Button>
+            <Button
+              variant="secondary"
+              size="md"
+              className="flex-1"
+              icon={Phone}
+              disabled={!customerPhone}
+              onClick={() => {
+                if (customerPhone) {
+                  window.location.href = `tel:+91${String(customerPhone).replace(/\D/g, '')}`;
+                }
+              }}
+            >
+              Call
+            </Button>
             <Button variant="secondary" size="md" className="flex-1" icon={MessageSquare}>Message</Button>
           </div>
           <div>

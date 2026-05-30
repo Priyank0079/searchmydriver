@@ -81,6 +81,7 @@ function validatePricingForType(serviceType, data) {
     validateSlabs(data.slabs);
     validateCustomHours(data.customHours);
     validateHourlyFoodAllowance(data.foodAllowance);
+    validateHourlyStayAllowance(data.stayAllowance);
   } else if (serviceType === SERVICE_TYPES.OUTSTATION) {
     const o = data.outstation || {};
     if (o.dailyRate == null || o.dailyRate < 0) {
@@ -127,11 +128,27 @@ function validateCustomHours(cfg) {
 
 function validateHourlyFoodAllowance(cfg) {
   if (!cfg?.enabled) return;
-  if (!cfg.amount || cfg.amount < 0) {
-    throw new ApiError(400, 'Food allowance: amount must be greater than 0');
+  // Hourly food allowance is no longer charged — only the threshold
+  // matters (it controls when the "please provide driver's food"
+  // notice fires on the customer UI).
+  if (cfg.thresholdHours == null || cfg.thresholdHours <= 0) {
+    throw new ApiError(
+      400,
+      'Food allowance: thresholdHours must be greater than 0',
+    );
   }
-  if (cfg.thresholdHours == null || cfg.thresholdHours < 0) {
-    throw new ApiError(400, 'Food allowance: thresholdHours must be 0 or more');
+}
+
+function validateHourlyStayAllowance(cfg) {
+  if (!cfg?.enabled) return;
+  if (!cfg.amount || cfg.amount < 0) {
+    throw new ApiError(400, 'Accommodation allowance: amount must be greater than 0');
+  }
+  if (cfg.thresholdHours == null || cfg.thresholdHours <= 0) {
+    throw new ApiError(
+      400,
+      'Accommodation allowance: thresholdHours must be greater than 0',
+    );
   }
 }
 
@@ -209,16 +226,64 @@ export function findSlabForDuration(slabs = [], hours = 0) {
   return sorted[sorted.length - 1];
 }
 
+function minutesOfDay(date) {
+  const at = new Date(date);
+  return at.getHours() * 60 + at.getMinutes();
+}
+
+function parseHHmm(s, fallback) {
+  const [h, m] = (s || fallback).split(':').map(Number);
+  return h * 60 + m;
+}
+
+/**
+ * Returns true when the given timestamp falls inside the night window.
+ * Handles wrap-around (e.g. 22:00 → 06:00) by splitting the window
+ * around midnight.
+ */
 export function isNightRideAt(date, nightConfig) {
   if (!nightConfig?.enabled) return false;
-  const [startH, startM] = (nightConfig.startTime || '22:00').split(':').map(Number);
-  const [endH, endM] = (nightConfig.endTime || '06:00').split(':').map(Number);
-  const at = new Date(date);
-  const cur = at.getHours() * 60 + at.getMinutes();
-  const start = startH * 60 + startM;
-  const end = endH * 60 + endM;
+  const start = parseHHmm(nightConfig.startTime, '22:00');
+  const end = parseHHmm(nightConfig.endTime, '06:00');
   if (start === end) return false;
+  const cur = minutesOfDay(date);
   return start < end ? cur >= start && cur < end : cur >= start || cur < end;
+}
+
+/**
+ * Does any part of a ride that starts at `startAt` and lasts `durationHours`
+ * cross the night window? Lets a 6-hour booking that starts at 18:00 still
+ * trigger the night charge because the last few hours dip into the night.
+ *
+ * Implementation: walk hour-by-hour across the booking, returning true the
+ * moment any minute hits the window. Cheap (max ~24 iterations) and avoids
+ * the corner-case-laden arithmetic of overlapping two wrap-around ranges.
+ */
+export function rideCoversNightWindow(startAt, durationHours, nightConfig) {
+  if (!nightConfig?.enabled) return false;
+  const duration = Math.max(0, Math.ceil(Number(durationHours) || 0));
+  if (!duration) return isNightRideAt(startAt, nightConfig);
+  const startMs = startAt ? new Date(startAt).getTime() : Date.now();
+  // Sample every 15 minutes so we never miss a short window (e.g. 23:50–00:10).
+  const stepMs = 15 * 60 * 1000;
+  const totalMs = duration * 60 * 60 * 1000;
+  for (let t = 0; t <= totalMs; t += stepMs) {
+    if (isNightRideAt(new Date(startMs + t), nightConfig)) return true;
+  }
+  return false;
+}
+
+/**
+ * Does this booking qualify for a night charge purely on the basis of
+ * its booked duration? Admin sets `nightCharge.thresholdHours` (0 to
+ * disable). Independent of `isNightRideAt` — either trigger fires the
+ * charge.
+ */
+export function isLongDurationNight(bookedHours, nightConfig) {
+  if (!nightConfig?.enabled) return false;
+  const threshold = Number(nightConfig.thresholdHours) || 0;
+  if (threshold <= 0) return false;
+  return Number(bookedHours) >= threshold;
 }
 
 function applySubscriptionDiscount(subtotal, subscription) {
@@ -267,6 +332,14 @@ export function calculateHourlyFare({
   isNightRide = false,
   waitingMinutes = 0,
   tollParking = 0,
+  /**
+   * User overrides for the long-booking driver allowances. Default to
+   * `true` so a missing flag means "the user IS providing it" and we
+   * don't accidentally charge extra. Only takes effect once the
+   * configured `thresholdHours` is crossed AND `userOptOut` is on.
+   */
+  foodProvided = true,
+  stayProvided = true,
   subscription = null,
 } = {}) {
   if (!pricing) throw new ApiError(400, 'Service pricing is required for fare calculation');
@@ -297,30 +370,64 @@ export function calculateHourlyFare({
   const billableWait = Math.max(0, (waitingMinutes || 0) - freeWait);
   const waitingCharge = billableWait * perMin;
 
+  // Night charge: time-of-day window OR long-duration threshold (both
+  // are admin-configurable). Either trigger applies the charge once.
   let nightCharge = 0;
-  if (isNightRide && pricing.nightCharge?.enabled) {
-    nightCharge =
-      pricing.nightCharge.type === 'percentage'
-        ? (packagePrice * (pricing.nightCharge.amount || 0)) / 100
-        : pricing.nightCharge.amount || 0;
+  let nightChargeTriggered = false;
+  if (pricing.nightCharge?.enabled) {
+    const longRide = isLongDurationNight(bookedHours, pricing.nightCharge);
+    if (isNightRide || longRide) {
+      nightChargeTriggered = true;
+      nightCharge =
+        pricing.nightCharge.type === 'percentage'
+          ? (packagePrice * (pricing.nightCharge.amount || 0)) / 100
+          : pricing.nightCharge.amount || 0;
+    }
   }
 
-  // Food allowance kicks in once the booked duration crosses the admin
-  // threshold (e.g. >4h ride needs a meal break). Single flat amount per
-  // booking — not per hour.
-  let foodAllowance = 0;
+  // Food allowance for HOURLY is no longer billed — the threshold acts
+  // purely as a "your booking is long enough that the driver will need a
+  // meal, please arrange food yourself" notice. We surface
+  // `foodRequired` / `foodThresholdHours` so the UI can render the
+  // warning; the customer is never charged an allowance for hourly.
+  const foodAllowance = 0;
   const foodCfg = pricing.foodAllowance;
-  if (foodCfg?.enabled && bookedHours != null) {
-    const threshold = foodCfg.thresholdHours || 0;
-    if (threshold > 0 && bookedHours >= threshold) {
-      foodAllowance = foodCfg.amount || 0;
-    }
+  const foodThresholdHours = foodCfg?.thresholdHours || 0;
+  const foodRequired =
+    !!foodCfg?.enabled &&
+    bookedHours != null &&
+    foodThresholdHours > 0 &&
+    Number(bookedHours) >= foodThresholdHours;
+  // Kept `foodEligible` in the response shape for back-compat with
+  // any older clients that read it — always equal to foodRequired now.
+  const foodEligible = foodRequired;
+
+  // Driver accommodation allowance for very long hourly bookings
+  // (overnight). Mirrors the food allowance shape so the UI can treat
+  // the two identically.
+  let stayAllowance = 0;
+  const stayCfg = pricing.stayAllowance;
+  const stayThresholdHours = stayCfg?.thresholdHours || 0;
+  const stayEligible =
+    !!stayCfg?.enabled &&
+    bookedHours != null &&
+    stayThresholdHours > 0 &&
+    Number(bookedHours) >= stayThresholdHours;
+  const stayOptedOut = stayCfg?.userOptOut && stayProvided === true;
+  if (stayEligible && !stayOptedOut) {
+    stayAllowance = stayCfg.amount || 0;
   }
 
   const toll = pricing.tollParkingEnabled ? Math.max(0, tollParking || 0) : 0;
 
   const subtotal =
-    packagePrice + extraHourCharge + waitingCharge + nightCharge + foodAllowance + toll;
+    packagePrice +
+    extraHourCharge +
+    waitingCharge +
+    nightCharge +
+    foodAllowance +
+    stayAllowance +
+    toll;
   const layers = applyPlatformLayers(subtotal, pricing, subscription);
 
   return {
@@ -333,8 +440,24 @@ export function calculateHourlyFare({
     waitingMinutes: waitingMinutes || 0,
     waitingCharge: round2(waitingCharge),
     nightCharge: round2(nightCharge),
+    nightChargeTriggered,
+    nightChargeThresholdHours: pricing.nightCharge?.thresholdHours || 0,
     foodAllowance: round2(foodAllowance),
-    foodThresholdHours: foodCfg?.thresholdHours || 0,
+    foodThresholdHours,
+    foodEligible,
+    /**
+     * Notice flag for the customer UI: "your booking is long enough
+     * that the driver needs a meal — please arrange food yourself".
+     * No charge is added to the fare when this is true.
+     */
+    foodRequired,
+    foodProvided: true,
+    foodOptOutAvailable: false,
+    stayAllowance: round2(stayAllowance),
+    stayThresholdHours,
+    stayEligible,
+    stayProvided: !!stayProvided,
+    stayOptOutAvailable: !!(stayCfg?.userOptOut && stayEligible),
     tollParking: round2(toll),
     subtotal: round2(subtotal),
     ...layers,
@@ -439,7 +562,16 @@ export const estimateFareService = async ({
   }
 
   const subscription = userId ? await getActiveUserSubscriptionService(userId) : null;
-  const isNight = isNightRideAt(scheduledAt || new Date(), pricing.nightCharge);
+  // Outstation only checks the start; hourly checks the whole booked
+  // window so a 6-hour ride that starts at 18:00 still triggers night.
+  const isNight =
+    serviceType === SERVICE_TYPES.HOURLY
+      ? rideCoversNightWindow(
+          scheduledAt || new Date(),
+          Number(bookedHours) || 0,
+          pricing.nightCharge,
+        )
+      : isNightRideAt(scheduledAt || new Date(), pricing.nightCharge);
 
   if (serviceType === SERVICE_TYPES.HOURLY) {
     let slab = null;
@@ -483,6 +615,8 @@ export const estimateFareService = async ({
       isNightRide: isNight,
       waitingMinutes,
       tollParking,
+      foodProvided,
+      stayProvided,
       subscription,
     });
 
@@ -509,6 +643,34 @@ export const estimateFareService = async ({
         : { enabled: false },
       isCustomDuration: isCustom,
       isNightRide: isNight,
+      // Surface the admin extras config so the FE can decide whether to
+      // render the food / stay toggles without re-fetching the pricing
+      // doc separately.
+      extrasConfig: {
+        foodAllowance: {
+          enabled: !!pricing.foodAllowance?.enabled,
+          // Amount is intentionally 0 for hourly — we no longer
+          // charge a food allowance, only display the "please provide
+          // driver's food" notice when threshold is crossed.
+          amount: 0,
+          thresholdHours: pricing.foodAllowance?.thresholdHours || 0,
+          userOptOut: false,
+        },
+        stayAllowance: {
+          enabled: !!pricing.stayAllowance?.enabled,
+          amount: pricing.stayAllowance?.amount || 0,
+          thresholdHours: pricing.stayAllowance?.thresholdHours || 0,
+          userOptOut: !!pricing.stayAllowance?.userOptOut,
+        },
+        nightCharge: {
+          enabled: !!pricing.nightCharge?.enabled,
+          startTime: pricing.nightCharge?.startTime || '22:00',
+          endTime: pricing.nightCharge?.endTime || '06:00',
+          type: pricing.nightCharge?.type || 'flat',
+          amount: pricing.nightCharge?.amount || 0,
+          thresholdHours: pricing.nightCharge?.thresholdHours || 0,
+        },
+      },
       fareBreakdown: breakdown,
       subscription: serializeSubscriptionForResponse(subscription),
     };

@@ -13,6 +13,10 @@ import {
   createExtensionService,
 } from '../services/bookingExtension.service.js';
 import {
+  recordCustomerOnMyWay,
+  recordCustomerNotComing,
+} from '../services/bookingNoShowTimeout.service.js';
+import {
   dispatchNextDriverService,
   acceptBookingService,
   rejectBookingService,
@@ -119,7 +123,13 @@ export const driverMarkEnRoute = asyncHandler(async (req, res) => {
 });
 
 export const driverMarkArrived = asyncHandler(async (req, res) => {
-  const booking = await markDriverArrivedService(req.driver._id, req.params.id);
+  const { driverCoords } = req.body || {};
+  const booking = await markDriverArrivedService(req.driver._id, req.params.id, {
+    driverCoords:
+      driverCoords && typeof driverCoords === 'object'
+        ? { lat: Number(driverCoords.lat), lng: Number(driverCoords.lng) }
+        : null,
+  });
   return res
     .status(200)
     .json(new ApiResponse(200, { booking: sanitizeBookingForDriver(booking) }, 'Arrived at pickup'));
@@ -165,4 +175,38 @@ export const createBookingExtension = asyncHandler(async (req, res) => {
   return res
     .status(201)
     .json(new ApiResponse(201, { booking }, 'Ride extended'));
+});
+
+/**
+ * POST /auth/bookings/:id/noshow/respond
+ *
+ * Customer's answer to the "are you coming?" prompt that fired when
+ * the driver had been waiting past `noShowPromptMinutes`.
+ *
+ *   body: { response: 'on_my_way' | 'not_coming' }
+ *
+ * "on_my_way" cancels the auto-complete timer and reschedules the
+ * prompt for another grace cycle. "not_coming" fires the auto-complete
+ * immediately so the driver doesn't sit idle through the deadline.
+ */
+export const respondToNoShowPrompt = asyncHandler(async (req, res) => {
+  const response = String(req.body?.response || '').trim();
+  if (response !== 'on_my_way' && response !== 'not_coming') {
+    throw new ApiError(
+      400,
+      'response must be "on_my_way" or "not_coming"',
+    );
+  }
+  // The booking is loaded inside the no-show service — we just trust
+  // `:id` here since the caller is authenticated as a user already
+  // and a stray bookingId is a no-op (no timer to cancel, no booking
+  // to update).
+  if (response === 'on_my_way') {
+    await recordCustomerOnMyWay(req.params.id);
+  } else {
+    await recordCustomerNotComing(req.params.id);
+  }
+  return res
+    .status(200)
+    .json(new ApiResponse(200, { response }, 'Response recorded'));
 });

@@ -7,16 +7,16 @@ import {
   Flag,
   Loader2,
   MapPin,
-  Phone,
   PlayCircle,
   Route,
   XCircle,
   CreditCard,
+  Wallet as WalletIcon,
 } from 'lucide-react';
 import { PAYMENT_POLICY } from '../../../../constants/bookingStatus';
 import Card from '../../../../components/Card';
 import Button from '../../../../components/Button';
-import Avatar from '../../../../components/Avatar';
+import PersonContactCard from '../../../../components/PersonContactCard';
 import TripTrackingMap from '../../../../components/maps/TripTrackingMap';
 import StartRideOtpSheet from '../components/StartRideOtpSheet';
 import ConfirmDialog from '../../../../components/ConfirmDialog';
@@ -40,6 +40,13 @@ import { previewDriverCancellation } from '../../../user/booking/utils/cancellat
  * step CTA is derived from `booking.status` so adding a new transition
  * only requires a new entry in `NEXT_ACTION_BY_STATUS`.
  */
+
+/**
+ * Maximum distance (metres) between the driver and the pickup at which
+ * the "I have arrived" CTA is enabled. Mirrors `ARRIVAL_PROXIMITY_METERS`
+ * on the backend (kept in sync by hand).
+ */
+const ARRIVAL_PROXIMITY_METERS = 100;
 
 /**
  * Per-status header + CTA. Drivers never see anything payment-related;
@@ -213,6 +220,20 @@ const DriverActiveTripPage = () => {
     [status],
   );
 
+  // Distance from the driver's live position to the pickup. Used to
+  // gate the "I've arrived" CTA — both as a UX hint and to feed the
+  // server's proximity guard with fresh coords on every request.
+  const distanceToPickup = useMemo(() => {
+    if (!driverPoint || !pickupCoords) return null;
+    return haversineMeters(driverPoint, pickupCoords);
+  }, [driverPoint, pickupCoords]);
+
+  const isEnRoute = status === BOOKING_STATUS.EN_ROUTE;
+  const arrivalReady =
+    isEnRoute &&
+    distanceToPickup != null &&
+    distanceToPickup <= ARRIVAL_PROXIMITY_METERS;
+
   const handleAdvance = useCallback(async () => {
     if (!config?.cta) return;
     const action = config.cta.action;
@@ -223,12 +244,30 @@ const DriverActiveTripPage = () => {
       setOtpOpen(true);
       return;
     }
+    if (action === 'markArrived') {
+      if (!driverPoint) {
+        toast.error('We need your location to confirm arrival. Enable GPS and try again.');
+        return;
+      }
+      if (distanceToPickup == null || distanceToPickup > ARRIVAL_PROXIMITY_METERS) {
+        toast.error(
+          `You're too far from the pickup (${formatDistance(distanceToPickup || 0)}). Move within ${ARRIVAL_PROXIMITY_METERS} m to mark arrival.`,
+        );
+        return;
+      }
+      try {
+        await useDriverActiveTripStore.getState().markArrived(driverPoint);
+      } catch (err) {
+        toast.error(err?.response?.data?.message || err?.message || 'Could not mark arrival');
+      }
+      return;
+    }
     try {
       await useDriverActiveTripStore.getState()[action]();
     } catch (err) {
       toast.error(err?.response?.data?.message || err?.message || 'Something went wrong');
     }
-  }, [config]);
+  }, [config, driverPoint, distanceToPickup]);
 
   const handleStartWithOtp = useCallback(
     (otp) => useDriverActiveTripStore.getState().startTrip(otp),
@@ -240,23 +279,37 @@ const DriverActiveTripPage = () => {
     setCancelOpen(true);
   }, [config]);
 
-  // Live cancellation preview — kept reactive so a STARTED transition
-  // during the confirm prompt updates the warning copy automatically.
-  const cancelPreview = useMemo(
-    () => previewDriverCancellation(booking),
-    [booking],
-  );
+  // Tick a heartbeat once a second so the cancel preview's grace-window
+  // recompute (in `previewDriverCancellation`) reflects the live wall
+  // clock. Without this the preview is frozen at mount time and the
+  // dialog would happily say "no penalty" 30 seconds after the grace
+  // window actually expired.
+  const [, setHeartbeat] = useState(0);
+  useEffect(() => {
+    if (!booking) return undefined;
+    const id = setInterval(() => setHeartbeat((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [booking?._id]);
+
+  // Live cancellation preview — recomputes every render (cheap pure
+  // function) so the wall-clock heartbeat above drives the copy.
+  const cancelPreview = previewDriverCancellation(booking);
 
   const handleCancelConfirm = useCallback(async () => {
     setCancelling(true);
-    const tripStarted = !!cancelPreview.tripStarted;
     const penalty = Number(cancelPreview.driverPenalty) || 0;
+    const chancesBefore = Number(cancelPreview.chance?.chancesLeft) || 0;
     try {
       await useDriverActiveTripStore.getState().cancelTrip('cancelled_by_driver');
-      if (tripStarted && penalty > 0) {
+      if (penalty > 0) {
         toast(`\u20B9${penalty} deducted from your wallet.`, { icon: '\u26A0\uFE0F' });
       } else {
-        toast.success('Trip cancelled');
+        const left = Math.max(0, chancesBefore - 1);
+        toast.success(
+          left > 0
+            ? `Trip cancelled \u00B7 ${left} free cancel${left === 1 ? '' : 's'} left today`
+            : 'Trip cancelled \u00B7 no free cancels left today',
+        );
       }
       setCancelOpen(false);
     } catch (err) {
@@ -295,11 +348,19 @@ const DriverActiveTripPage = () => {
     return null;
   }
 
-  const customer = booking.userId;
-  const customerName = typeof customer === 'object' ? customer?.name : null;
-  const customerPhone = typeof customer === 'object' ? customer?.phone : null;
+  const customer = typeof booking.userId === 'object' ? booking.userId : null;
+  const customerName = customer?.name || null;
+  // Server populates the user's primary contact field as `phone_no`.
+  // Older builds returned `phone`; we honour both so the call CTA keeps
+  // working on bookings created before the rename.
+  const customerPhone = customer?.phone_no || customer?.phone || null;
+  const customerPhoto = customer?.profilePicture || null;
 
-  const fare = booking.fareSnapshot?.total || 0;
+  // The driver-safe fareSnapshot only carries `driverEarning` — the
+  // customer's gross fare and the platform commission are stripped on
+  // the backend. This is intentional: the driver sees what they make,
+  // not what the customer pays.
+  const driverEarning = booking.fareSnapshot?.driverEarning || 0;
   // The only thing that "blocks" the driver's En-Route CTA today is the
   // AWAITING_PAYMENT status. Treating it as a neutral "customer is getting
   // ready" hint keeps the payment-mode private (per spec).
@@ -353,29 +414,25 @@ const DriverActiveTripPage = () => {
         </Card>
 
         {/* Customer */}
-        <Card>
-          <div className="flex items-start gap-3">
-            <Avatar name={customerName || 'Customer'} size="lg" />
-            <div className="flex-1 min-w-0">
-              <p className="text-[11px] text-text-muted">Customer</p>
-              <p className="text-sm font-bold text-text truncate">
-                {customerName || 'Customer'}
-              </p>
-              {customerPhone && (
-                <p className="text-[11px] text-text-muted font-mono">{customerPhone}</p>
-              )}
-            </div>
-            {customerPhone && (
-              <a
-                href={`tel:${customerPhone}`}
-                className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center hover:bg-emerald-100"
-                aria-label="Call customer"
-              >
-                <Phone className="w-4 h-4" />
-              </a>
-            )}
-          </div>
-        </Card>
+        <PersonContactCard
+          src={customerPhoto}
+          name={customerName || 'Customer'}
+          roleLabel="Customer"
+          metaLine={customerPhone || null}
+          phone={customerPhone}
+          phoneCallLabel="Call customer"
+        />
+
+        {/* Waiting timer — only at ARRIVED. Ticks once a second and
+            flips colour the moment the free wait expires so the
+            driver can see when the meter starts. */}
+        {booking.status === BOOKING_STATUS.ARRIVED && (
+          <WaitingTimerCard
+            arrivedAt={booking.timeline?.arrivedAt}
+            freeMinutes={booking.waiting?.freeMinutes}
+            perMinuteRupees={booking.waiting?.perMinuteRupees}
+          />
+        )}
 
         {/* Trip details */}
         <Card>
@@ -404,12 +461,22 @@ const DriverActiveTripPage = () => {
           )}
         </Card>
 
-        {/* Fare — the driver sees the worth of the trip; payment timing is hidden */}
+        {/* Driver earning — we deliberately don't show the customer's
+            gross fare or the platform commission on this screen. The
+            number the driver cares about is what lands in their wallet
+            after this trip closes out. */}
         <Card>
           <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[11px] text-text-muted">Estimated fare</p>
-              <p className="text-base font-bold text-text">₹{fare}</p>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center">
+                <WalletIcon className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-[11px] text-text-muted">Your earning</p>
+                <p className="text-base font-bold text-text">
+                  {'\u20B9'}{driverEarning}
+                </p>
+              </div>
             </div>
             {booking.hourly?.durationHours && (
               <span className="text-[10px] font-bold uppercase px-2 py-1 rounded-full bg-primary/15 text-primary-dark">
@@ -417,6 +484,10 @@ const DriverActiveTripPage = () => {
               </span>
             )}
           </div>
+          <p className="text-[11px] text-text-muted mt-2 leading-snug">
+            Net amount after platform commission. Credited to your wallet
+            once the trip is completed.
+          </p>
         </Card>
 
         {/* Extensions */}
@@ -440,8 +511,42 @@ const DriverActiveTripPage = () => {
 
         {driverPoint && pickupCoords && booking.status !== BOOKING_STATUS.STARTED && (
           <p className="text-[11px] text-text-muted text-center">
-            About {formatDistance(haversineMeters(driverPoint, pickupCoords))} to the pickup
+            About {formatDistance(distanceToPickup ?? 0)} to the pickup
           </p>
+        )}
+
+        {isEnRoute && (
+          <div
+            className={`rounded-2xl border p-3 flex items-start gap-3 ${
+              arrivalReady
+                ? 'border-emerald-200 bg-emerald-50'
+                : 'border-amber-200 bg-amber-50'
+            }`}
+          >
+            <div
+              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                arrivalReady ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+              }`}
+            >
+              <MapPin className="w-4 h-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className={`text-sm font-bold ${arrivalReady ? 'text-emerald-900' : 'text-amber-900'}`}>
+                {arrivalReady
+                  ? 'You are at the pickup'
+                  : driverPoint
+                    ? 'Get closer to mark arrival'
+                    : 'Waiting for your location'}
+              </p>
+              <p className={`text-[12px] leading-snug mt-0.5 ${arrivalReady ? 'text-emerald-800' : 'text-amber-800'}`}>
+                {arrivalReady
+                  ? `Tap "I have arrived" to start the trip with the customer.`
+                  : driverPoint
+                    ? `You need to be within ${ARRIVAL_PROXIMITY_METERS} m of the pickup before you can mark arrival.`
+                    : 'Enable GPS so we can confirm you have reached the pickup.'}
+              </p>
+            </div>
+          </div>
         )}
       </div>
 
@@ -468,7 +573,11 @@ const DriverActiveTripPage = () => {
           <Button
             fullWidth
             variant="driver"
-            disabled={paymentBlocker || busy === 'cancel'}
+            disabled={
+              paymentBlocker ||
+              busy === 'cancel' ||
+              (config.cta.action === 'markArrived' && !arrivalReady)
+            }
             loading={busy === config.cta.action}
             icon={config.cta.icon}
             onClick={handleAdvance}
@@ -494,11 +603,7 @@ const DriverActiveTripPage = () => {
         onClose={() => !cancelling && setCancelOpen(false)}
         onConfirm={handleCancelConfirm}
         title={cancelPreview.tripStarted ? 'Cancel this active trip?' : 'Cancel this trip?'}
-        description={
-          cancelPreview.tripStarted && Number(cancelPreview.driverPenalty) > 0
-            ? `\u20B9${Number(cancelPreview.driverPenalty)} will be deducted from your wallet as a cancellation penalty.`
-            : 'Repeated cancellations may affect your rating.'
-        }
+        description={buildCancelDialogCopy(cancelPreview)}
         confirmLabel="Cancel trip"
         cancelLabel="Keep trip"
         variant="danger"
@@ -509,6 +614,153 @@ const DriverActiveTripPage = () => {
 };
 
 /* ------------------------------------------------------------------ */
+
+/**
+ * Pick the right description for the cancel confirm dialog. Three
+ * cases the driver needs to disambiguate before tapping Cancel:
+ *
+ *   1. Free cancel available — within the grace window AND chances left.
+ *   2. Penalty applies — past the grace window OR chances exhausted.
+ *   3. Mid-trip cancel — penalty applies regardless (customer in car).
+ *
+ * Copy is intentionally explicit about chances remaining so drivers
+ * can budget their daily allowance.
+ */
+function buildCancelDialogCopy(preview) {
+  const penalty = Number(preview?.driverPenalty) || 0;
+  const fullPenalty = Number(preview?.fullPenalty) || 0;
+  const chance = preview?.chance || null;
+  const chancesLeft = Math.max(0, Number(chance?.chancesLeft) || 0);
+  const dailyLimit = Math.max(0, Number(chance?.dailyLimit) || 0);
+  const grace = Math.max(0, Number(chance?.graceMinutes) || 0);
+  const remainingMinutes = Number(chance?.remainingMinutes) || 0;
+
+  if (preview?.tripStarted) {
+    return penalty > 0
+      ? `\u20B9${penalty} will be deducted from your wallet as a mid-trip cancellation penalty.`
+      : 'You are about to cancel a trip in progress. This may affect your rating.';
+  }
+
+  // Inside the grace window AND chances remaining → free cancel. Show
+  // the live countdown so the driver sees how long they have left.
+  if (preview?.penaltyWaived) {
+    const remainingAfter = Math.max(0, chancesLeft - 1);
+    const countdown = formatGraceRemaining(remainingMinutes);
+    const window = `${countdown} left in the ${grace}-min grace window`;
+    return remainingAfter > 0
+      ? `No penalty \u2014 ${window}. ${remainingAfter} of ${dailyLimit} free cancellation${remainingAfter === 1 ? '' : 's'} will remain today.`
+      : `No penalty \u2014 ${window}. This is your last free cancellation today; further cancellations will charge \u20B9${fullPenalty}.`;
+  }
+
+  if (penalty > 0) {
+    if (chancesLeft <= 0 && dailyLimit > 0) {
+      return `Daily free cancellations used up \u2014 \u20B9${penalty} will be deducted from your wallet.`;
+    }
+    if (grace > 0) {
+      return `Grace window of ${grace} minute${grace === 1 ? '' : 's'} has passed \u2014 \u20B9${penalty} will be deducted from your wallet.`;
+    }
+    return `\u20B9${penalty} will be deducted from your wallet as a cancellation penalty.`;
+  }
+
+  return 'Repeated cancellations may affect your rating.';
+}
+
+/**
+ * Render a `remainingMinutes` float (e.g. 1.42) as a human countdown
+ * the driver can read at a glance: "1m 25s" or "12s". Negative or
+ * non-numeric → "0s".
+ */
+function formatGraceRemaining(minutes) {
+  const total = Math.max(0, Math.floor((Number(minutes) || 0) * 60));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  if (m === 0) return `${s}s`;
+  return `${m}m ${String(s).padStart(2, '0')}s`;
+}
+
+/**
+ * Live waiting-timer tile shown on the driver's Active Trip screen
+ * once the booking hits ARRIVED. Ticks the wait every second and
+ * flips colour the moment the free wait expires so the driver can
+ * see when the customer's bill starts climbing.
+ *
+ * Props:
+ *   arrivedAt        ISO timestamp the driver hit "I've arrived".
+ *   freeMinutes      Admin-configured free wait window (minutes).
+ *   perMinuteRupees  Admin-configured per-minute charge.
+ */
+function WaitingTimerCard({ arrivedAt, freeMinutes, perMinuteRupees }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  if (!arrivedAt) return null;
+
+  const free = Math.max(0, Number(freeMinutes) || 0);
+  const perMin = Math.max(0, Number(perMinuteRupees) || 0);
+  const waitedMs = Math.max(0, now - new Date(arrivedAt).getTime());
+  const waitedSec = Math.floor(waitedMs / 1000);
+  const waitedMin = waitedMs / 60_000;
+  const billableMin = Math.max(0, Math.ceil(waitedMin - free));
+  const chargedRupees = Math.round(billableMin * perMin * 100) / 100;
+  const inFreeWindow = waitedMin <= free;
+
+  // Display formatting
+  const m = Math.floor(waitedSec / 60);
+  const s = waitedSec % 60;
+  const display = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  const remainingFreeSec = Math.max(0, Math.floor(free * 60 - waitedSec));
+  const remM = Math.floor(remainingFreeSec / 60);
+  const remS = remainingFreeSec % 60;
+  const remainingFree = `${remM}m ${String(remS).padStart(2, '0')}s`;
+
+  const tone = inFreeWindow
+    ? 'border-l-emerald-500 bg-emerald-50/40'
+    : 'border-l-amber-500 bg-amber-50/60';
+  const headlineTone = inFreeWindow ? 'text-emerald-700' : 'text-amber-700';
+
+  return (
+    <Card className={`border-l-4 ${tone}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] uppercase tracking-wide text-text-muted font-semibold">
+            Waiting at pickup
+          </p>
+          <p className={`text-2xl font-bold mt-1 tabular-nums ${headlineTone}`}>
+            {display}
+          </p>
+          {free > 0 && (
+            <p className="text-[11px] text-text-muted mt-0.5">
+              {inFreeWindow
+                ? `Free wait \u00B7 ${remainingFree} until charges start`
+                : `Past free wait of ${free} min`}
+            </p>
+          )}
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-[11px] uppercase tracking-wide text-text-muted font-semibold">
+            Charge so far
+          </p>
+          <p
+            className={`text-base font-bold mt-1 ${
+              chargedRupees > 0 ? 'text-amber-700' : 'text-text-muted'
+            }`}
+          >
+            {'\u20B9'}
+            {chargedRupees}
+          </p>
+          {perMin > 0 && (
+            <p className="text-[10px] text-text-muted mt-0.5">
+              {'\u20B9'}
+              {perMin}/min after free
+            </p>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
 
 /**
  * Full-screen overlay that locks the driver while the customer settles

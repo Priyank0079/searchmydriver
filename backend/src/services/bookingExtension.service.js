@@ -58,7 +58,8 @@ export function extensionsFareDelta(booking) {
  */
 export function effectiveTotalForBooking(booking) {
   const base = booking?.fareSnapshot?.total || 0;
-  return round2(base + extensionsFareDelta(booking));
+  const waiting = Number(booking?.waiting?.chargeRupees) || 0;
+  return round2(base + extensionsFareDelta(booking) + waiting);
 }
 
 /**

@@ -81,7 +81,9 @@ const DriverTripCard = ({ trip, onClick, className = '', style }) => {
   const badge = statusBadge(trip.status);
   const dateInfo = formatTripDate(trip);
   const duration = formatDurationLabel(trip);
-  const fare = trip?.fareSnapshot?.total;
+  // Driver-side trip cards only ever display the driver's earning —
+  // the customer's gross fare is stripped on the backend.
+  const fare = trip?.fareSnapshot?.driverEarning;
   const serviceLabel = SERVICE_TYPE_LABELS[trip.serviceType] || trip.serviceType;
   const pickupLabel = trip?.pickup?.address || 'Pickup pending';
   const dropoffLabel = trip?.dropoff?.address;
@@ -109,7 +111,14 @@ const DriverTripCard = ({ trip, onClick, className = '', style }) => {
         <div className="flex flex-col items-end gap-1 shrink-0">
           <Badge variant={badge.variant}>{badge.label}</Badge>
           {fare > 0 && (
-            <span className="text-sm font-bold text-text">{formatCurrency(fare)}</span>
+            <div className="text-right">
+              <p className="text-[9px] uppercase tracking-wide text-text-muted font-semibold leading-none">
+                Earning
+              </p>
+              <p className="text-sm font-bold text-emerald-700 leading-tight">
+                {formatCurrency(fare)}
+              </p>
+            </div>
           )}
         </div>
       </div>

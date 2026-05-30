@@ -46,9 +46,13 @@ const SelectVariantPage = lazy(() => import('./features/user/booking/pages/Selec
 const SelectPickupPage = lazy(() => import('./features/user/booking/pages/SelectPickupPage'));
 const SelectDurationPage = lazy(() => import('./features/user/booking/pages/SelectDurationPage'));
 const ReviewBookingPage = lazy(() => import('./features/user/booking/pages/ReviewBookingPage'));
+const ConfirmAndPayPage = lazy(() => import('./features/user/booking/pages/ConfirmAndPayPage'));
 const PaymentPage = lazy(() => import('./features/user/booking/pages/PaymentPage'));
 const SearchingDriverPage = lazy(() => import('./features/user/booking/pages/SearchingDriverPage'));
 const DriverAssignedPage = lazy(() => import('./features/user/booking/pages/DriverAssignedPage'));
+
+// User Wallet
+const WalletPage = lazy(() => import('./features/user/wallet/pages/WalletPage'));
 // Hourly-specific flow (new)
 const HourlyBookingTypePage = lazy(
   () => import('./features/user/booking/pages/hourly/HourlyBookingTypePage'),
@@ -122,6 +126,7 @@ const ManageKits = lazy(() => import('./features/admin/pages/ManageKits'));
 const ManageZones = lazy(() => import('./features/admin/pages/ManageZones'));
 const ManagePricing = lazy(() => import('./features/admin/pages/ManagePricing'));
 const ManageRefunds = lazy(() => import('./features/admin/pages/ManageRefunds'));
+const ManageRevenue = lazy(() => import('./features/admin/pages/ManageRevenue'));
 const ManageSubscriptions = lazy(() => import('./features/admin/pages/ManageSubscriptions'));
 const LiveDriverMap = lazy(() => import('./features/admin/pages/LiveDriverMap'));
 const ManageKitOrders = lazy(() => import('./features/admin/pages/ManageKitOrders'));
@@ -167,6 +172,7 @@ function App() {
               <Route path="/user/activity" element={<ActivityPage />} />
               <Route path="/user/account" element={<UserAccountPage />} />
               <Route path="/user/subscriptions" element={<SubscriptionsPage />} />
+              <Route path="/user/wallet" element={<WalletPage />} />
             </Route>
           </Route>
 
@@ -177,6 +183,9 @@ function App() {
           <Route path="/user/book/pickup" element={<SelectPickupPage />} />
           <Route path="/user/book/duration" element={<SelectDurationPage />} />
           <Route path="/user/book/review" element={<ReviewBookingPage />} />
+          {/* Wallet-pay confirmation step (shared across hourly + outstation). */}
+          <Route path="/user/book/confirm" element={<ConfirmAndPayPage />} />
+          {/* Legacy Razorpay-after-accept screen, kept for fallback flows. */}
           <Route path="/user/book/payment" element={<PaymentPage />} />
 
           {/* New hourly flow: type → details → slab → searching → assigned */}
@@ -278,11 +287,13 @@ function App() {
             <Route path="/admin/settings/zones" element={<ManageZones />} />
             <Route path="/admin/settings/pricing" element={<ManagePricing />} />
             <Route path="/admin/settings/subscriptions" element={<ManageSubscriptions />} />
-            {/* Note: Revenue page is mapped to Dashboard for now to save scope, or can be a separate page later */}
-            <Route path="/admin/revenue" element={<Navigate to="/admin" replace />} />
+            {/* Top-level /admin/revenue now forwards into the Account section
+                so all revenue management lives under one roof. */}
+            <Route path="/admin/revenue" element={<Navigate to="/admin/account/revenue" replace />} />
             {/* Account section */}
-            <Route path="/admin/account" element={<Navigate to="/admin/account/refunds" replace />} />
+            <Route path="/admin/account" element={<Navigate to="/admin/account/revenue" replace />} />
             <Route path="/admin/account/refunds" element={<ManageRefunds />} />
+            <Route path="/admin/account/revenue" element={<ManageRevenue />} />
           </Route>
         </Route>
       </Routes>

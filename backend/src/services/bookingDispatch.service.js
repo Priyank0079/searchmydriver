@@ -1,7 +1,12 @@
 import Booking from '../models/booking.model.js';
+import Car from '../models/user/car.model.js';
+import User from '../models/user.model.js';
 import { Driver } from '../models/driverModels/driver.model.js';
 import { findDriversInExpandingRadius } from './driverFinder.service.js';
-import { adminMarkNoDriversFoundService } from './booking.service.js';
+import {
+  adminMarkNoDriversFoundService,
+  driverEarningFromFareSnapshot,
+} from './booking.service.js';
 import { schedulePaymentTimeout } from './bookingPaymentTimeout.service.js';
 import {
   BOOKING_STATUS,
@@ -64,19 +69,42 @@ function alreadyOfferedDriverIds(booking) {
   return (booking.dispatch?.offers || []).map((o) => String(o.driverId));
 }
 
-function buildOfferPayload(booking, driver) {
+function buildOfferPayload(booking, driver, { customer, car } = {}) {
   return {
     bookingId: String(booking._id),
     bookingNumber: booking.bookingNumber,
     serviceType: booking.serviceType,
     paymentMode: booking.paymentMode,
     pickup: booking.pickup,
+    dropoff: booking.dropoff || null,
     hourly: booking.hourly || null,
     outstation: booking.outstation || null,
+    // Drivers only ever see their own earning — never the customer's
+    // gross total or the platform commission. Computed once here so the
+    // offer payload, the active-trip view and the trip history all show
+    // the same number.
     fare: {
-      total: booking.fareSnapshot.total,
+      driverEarning: driverEarningFromFareSnapshot(booking.fareSnapshot),
       currency: 'INR',
     },
+    customer: customer
+      ? {
+          name: customer.name || '',
+          phone: customer.phone_no ? String(customer.phone_no) : '',
+          profilePicture: customer.profilePicture || '',
+        }
+      : null,
+    car: car
+      ? {
+          _id: String(car._id),
+          vehicleNumber: car.vehicleNumber || '',
+          transmission: car.transmission || '',
+          carTypeName: car.carTypeId?.name || '',
+          brandName: car.brandId?.name || '',
+          modelName: car.modelId?.name || '',
+          fuelTypeName: car.fuelTypeId?.name || '',
+        }
+      : null,
     offerExpiresAt: booking.dispatch.currentExpiresAt,
     distanceMeters: driver.distanceMeters ?? null,
     waveSize: booking.dispatch.pendingOfferIds.length,
@@ -140,6 +168,23 @@ export async function dispatchNextDriverService(bookingId) {
     booking.dispatch?.currentRadiusMeters || DISPATCH.SEARCH_RADIUS_START_METERS;
   const maxMeters = booking.dispatch?.maxRadiusMeters || DISPATCH.SEARCH_RADIUS_MAX_METERS;
 
+  // Restrict driver matching to the user's chosen car-type so the driver
+  // who picks up the offer is qualified to drive that vehicle. We also
+  // pull the full car + customer doc here so we can hydrate the offer
+  // payload without an extra round-trip per driver in the wave.
+  const car = booking.carId
+    ? await Car.findById(booking.carId)
+        .populate('carTypeId', 'name')
+        .populate('brandId', 'name')
+        .populate('modelId', 'name')
+        .populate('fuelTypeId', 'name')
+        .lean()
+    : null;
+  const customer = await User.findById(booking.userId)
+    .select('name phone_no profilePicture')
+    .lean();
+  const carTypeIds = car?.carTypeId?._id ? [String(car.carTypeId._id)] : [];
+
   const { drivers, radiusMeters } = await findDriversInExpandingRadius({
     lat,
     lng,
@@ -148,6 +193,7 @@ export async function dispatchNextDriverService(bookingId) {
     maxMeters,
     limit: DISPATCH.WAVE_SIZE,
     minResults: 1,
+    carTypeIds,
     excludeDriverIds: alreadyOfferedDriverIds(booking),
   });
 
@@ -172,7 +218,11 @@ export async function dispatchNextDriverService(bookingId) {
 
   // Emit to every driver in the wave in parallel.
   for (const driver of drivers) {
-    emitToDriver(driver._id, S2C_EVENTS.BOOKING_OFFERED, buildOfferPayload(booking, driver));
+    emitToDriver(
+      driver._id,
+      S2C_EVENTS.BOOKING_OFFERED,
+      buildOfferPayload(booking, driver, { customer, car }),
+    );
   }
   emitUserDispatchUpdate(booking);
 

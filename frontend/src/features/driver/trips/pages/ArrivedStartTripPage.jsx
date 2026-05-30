@@ -34,8 +34,9 @@ const ArrivedStartTripPage = () => {
     return { lat: c[1], lng: c[0] };
   }, [booking?.pickup]);
 
-  const customer = booking?.userId;
-  const customerName = typeof customer === 'object' ? customer?.name : null;
+  const customer = typeof booking?.userId === 'object' ? booking.userId : null;
+  const customerName = customer?.name || null;
+  const customerPhoto = customer?.profilePicture || null;
   const vehiclePlate = booking?.vehicle?.vehicleNumber || booking?.car?.vehicleNumber || null;
 
   return (
@@ -65,7 +66,11 @@ const ArrivedStartTripPage = () => {
       <div className="flex-1 p-4 -mt-4 z-10 space-y-4">
         <Card className="animate-fade-in-up">
           <div className="flex items-center gap-3 mb-3">
-            <Avatar name={customerName || 'Customer'} size="lg" />
+            <Avatar
+              src={customerPhoto}
+              name={customerName || 'Customer'}
+              size="lg"
+            />
             <div className="flex-1 min-w-0">
               <h3 className="font-bold truncate">{customerName || 'Customer'}</h3>
               <p className="text-xs text-text-muted truncate">

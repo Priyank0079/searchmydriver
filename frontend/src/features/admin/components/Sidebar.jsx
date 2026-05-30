@@ -23,12 +23,17 @@ const navItems = [
   { path: '/admin/drivers/live', label: 'Live Map', icon: Navigation },
   { path: '/admin/kit-orders', label: 'Kit Orders', icon: Package },
   { path: '/admin/bookings', label: 'Bookings', icon: CalendarCheck, roles: ['admin'] },
-  { path: '/admin/revenue', label: 'Revenue', icon: DollarSign, roles: ['admin'] },
   {
     label: 'Account',
     icon: Wallet,
     roles: ['admin'],
     children: [
+      {
+        path: '/admin/account/revenue',
+        label: 'Revenue',
+        icon: DollarSign,
+        roles: ['admin'],
+      },
       {
         path: '/admin/account/refunds',
         label: 'Refunds',

@@ -49,6 +49,7 @@ const useUserActiveBookingStore = create((set, get) => ({
     if (patch.status) merged.status = patch.status;
     if (patch.paymentStatus) merged.paymentStatus = patch.paymentStatus;
     if (patch.paymentMode) merged.paymentMode = patch.paymentMode;
+    if (patch.paymentMethod) merged.paymentMethod = patch.paymentMethod;
     // `driverId` can legitimately go from a value back to `null` (driver
     // bailed → booking back to SEARCHING). Honour an explicit `null` in
     // the patch instead of only forwarding truthy ids.
@@ -164,6 +165,18 @@ const useUserActiveBookingStore = create((set, get) => ({
     const booking = res?.data?.data?.booking || null;
     if (booking) set({ booking });
     return booking;
+  },
+
+  /**
+   * Customer's answer to the "are you coming?" no-show prompt. Posts
+   * to the backend which either reschedules the prompt (Yes) or
+   * auto-completes the ride (No).
+   *   response: 'on_my_way' | 'not_coming'
+   */
+  async respondToNoShow(response) {
+    const id = get().booking?._id;
+    if (!id) throw new Error('No active booking');
+    await api.post(`/auth/bookings/${id}/noshow/respond`, { response });
   },
 }));
 

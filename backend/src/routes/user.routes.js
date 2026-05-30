@@ -33,7 +33,14 @@ import {
   createBookingPayment,
   verifyBookingPayment,
   createBookingExtension,
+  respondToNoShowPrompt,
 } from '../controllers/booking.controller.js';
+import {
+  getMyWallet,
+  getMyWalletTransactions,
+  createWalletTopupOrder,
+  verifyWalletTopupPayment,
+} from '../controllers/wallet.controller.js';
 import { protectUser, protectProfileViewer } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
@@ -68,6 +75,14 @@ router.post('/bookings/:id/cancel', cancelBooking);
 router.post('/bookings/:id/pay', createBookingPayment);
 router.post('/bookings/:id/verify-payment', verifyBookingPayment);
 router.post('/bookings/:id/extensions', createBookingExtension);
+router.post('/bookings/:id/noshow/respond', respondToNoShowPrompt);
+
+// Wallet — read + Razorpay top-up. Mutations go through the
+// wallet service so the WalletTransaction ledger stays in sync.
+router.get('/wallet', getMyWallet);
+router.get('/wallet/transactions', getMyWalletTransactions);
+router.post('/wallet/topup', createWalletTopupOrder);
+router.post('/wallet/topup/verify', verifyWalletTopupPayment);
 
 router.post('/google/link-phone', linkGoogleUserPhone);
 router.get('/onboarding/status', getRegistrationStatus);

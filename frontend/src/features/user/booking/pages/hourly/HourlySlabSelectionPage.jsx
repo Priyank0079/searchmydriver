@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import toast from 'react-hot-toast';
-import { Check, Loader2, AlertTriangle, X } from 'lucide-react';
+import { Check, Loader2, AlertTriangle, X, Utensils, BedDouble, Info } from 'lucide-react';
 import Button from '../../../../../components/Button';
 import PageShell from '../../components/PageShell';
 import FareCard from '../../components/FareCard';
 import useFareEstimate from '../../hooks/useFareEstimate';
 import useBookingDraftStore from '../../../../../store/user/useBookingDraftStore';
-import useUserActiveBookingStore from '../../../../../store/user/useUserActiveBookingStore';
 import {
   useUserServicePricingsStore,
 } from '../../../../../store/user/useUserPricingStore';
@@ -31,7 +29,6 @@ const HourlySlabSelectionPage = () => {
   const draft = useBookingDraftStore();
   const setHourly = useBookingDraftStore((s) => s.setHourly);
   const setFareEstimate = useBookingDraftStore((s) => s.setFareEstimate);
-  const createBooking = useUserActiveBookingStore((s) => s.createBooking);
 
   // The searching page bounces the user here with `state.noDriversFound`
   // when the dispatcher exhausts every wave without an accept. We surface
@@ -106,51 +103,85 @@ const HourlySlabSelectionPage = () => {
     };
   }, [selectedKey, slabs, customHours]);
 
-  // Fare estimation payload — debounced inside the hook.
+  // Fare estimation payload — debounced inside the hook. We forward the
+  // user's food/stay overrides here so the live total reflects them.
   const estimatePayload = useMemo(() => {
     if (!currentSelection || !draft.hourly.scheduledStartAt) return null;
-    return {
+    const base = {
       serviceType: SERVICE_TYPES.HOURLY,
       slabId: currentSelection.isCustom ? null : currentSelection.slabId,
       bookedHours: currentSelection.durationHours,
       scheduledAt: draft.hourly.scheduledStartAt,
     };
-  }, [currentSelection, draft.hourly.scheduledStartAt]);
+    if (draft.hourly.foodProvided != null) base.foodProvided = !!draft.hourly.foodProvided;
+    if (draft.hourly.stayProvided != null) base.stayProvided = !!draft.hourly.stayProvided;
+    return base;
+  }, [
+    currentSelection,
+    draft.hourly.scheduledStartAt,
+    draft.hourly.foodProvided,
+    draft.hourly.stayProvided,
+  ]);
 
   const { estimate, loading: estimating, error: estimateError } = useFareEstimate(estimatePayload, {
     onResult: (data) => setFareEstimate(data),
   });
 
+  // Extras config tells the FE whether the food / stay notice should
+  // appear and whether accommodation can be skipped. Food is no longer
+  // billed for hourly — we only surface a "please arrange the driver's
+  // meal" notice once the booked duration crosses the admin threshold.
+  const extras = estimate?.extrasConfig || {};
+  const foodCfg = extras.foodAllowance || {};
+  const stayCfg = extras.stayAllowance || {};
+  const durationHours = Number(currentSelection?.durationHours || 0);
+  const foodRequired =
+    !!foodCfg.enabled &&
+    Number(foodCfg.thresholdHours || 0) > 0 &&
+    durationHours >= Number(foodCfg.thresholdHours);
+  const showStayToggle =
+    !!stayCfg.enabled &&
+    !!stayCfg.userOptOut &&
+    Number(stayCfg.thresholdHours || 0) > 0 &&
+    durationHours >= Number(stayCfg.thresholdHours);
+
+  // Stay opt-out for very long hourly bookings.
+  const stayProvided = draft.hourly.stayProvided ?? true;
+
+  // Mandatory acknowledgement when the booked duration crosses the food
+  // threshold: the customer must explicitly tick "I'll feed the driver"
+  // before they can move on. Once the threshold no longer applies (e.g.
+  // user switched to a shorter slab) we silently clear the flag so a
+  // later long-duration switch re-asks for consent.
+  const foodAcknowledged = !!draft.hourly.foodAcknowledged;
+  useEffect(() => {
+    if (!foodRequired && foodAcknowledged) {
+      setHourly({ foodAcknowledged: false });
+    }
+  }, [foodRequired, foodAcknowledged, setHourly]);
+  const foodGateUnmet = foodRequired && !foodAcknowledged;
+
   /* ---------------- Confirm ---------------- */
 
-  const [submitting, setSubmitting] = useState(false);
-
-  const handleConfirm = async () => {
-    if (!currentSelection || submitting) return;
-    setSubmitting(true);
-    try {
-      // Stamp the final hourly picks into the draft so `buildCreatePayload`
-      // emits the right values.
-      setHourly({
-        durationHours: currentSelection.durationHours,
-        slabId: currentSelection.isCustom ? null : currentSelection.slabId,
-        isCustomDuration: currentSelection.isCustom,
-      });
-      // Tiny wait so the store update is committed before buildCreatePayload
-      // reads back (zustand sync; we keep this safe with an immediate read).
-      const payload = useBookingDraftStore.getState().buildCreatePayload();
-      const { booking } = await createBooking(payload);
-      if (booking) navigate('/user/book/searching');
-    } catch (err) {
-      toast.error(err?.response?.data?.message || err?.message || 'Could not create booking');
-    } finally {
-      setSubmitting(false);
-    }
+  const handleConfirm = () => {
+    if (!currentSelection) return;
+    if (foodGateUnmet) return;
+    // Stamp the final hourly picks into the draft so the confirm-and-pay
+    // page reads consistent values. No backend call here — that happens
+    // on /user/book/confirm.
+    setHourly({
+      durationHours: currentSelection.durationHours,
+      slabId: currentSelection.isCustom ? null : currentSelection.slabId,
+      isCustomDuration: currentSelection.isCustom,
+    });
+    navigate('/user/book/confirm');
   };
 
-  const ctaLabel = estimate?.fareBreakdown?.totalPayable
-    ? `Confirm booking · ₹${estimate.fareBreakdown.totalPayable}`
-    : 'Confirm booking';
+  const ctaLabel = foodGateUnmet
+    ? 'Please confirm the driver\u2019s meal'
+    : estimate?.fareBreakdown?.totalPayable
+      ? `Review & pay · \u20B9${estimate.fareBreakdown.totalPayable}`
+      : 'Review & pay';
 
   /* ---------------- Render ---------------- */
 
@@ -161,8 +192,9 @@ const HourlySlabSelectionPage = () => {
       footer={
         <Button
           fullWidth
-          loading={submitting}
-          disabled={!currentSelection || estimating || !!estimateError}
+          disabled={
+            !currentSelection || estimating || !!estimateError || foodGateUnmet
+          }
           onClick={handleConfirm}
         >
           {ctaLabel}
@@ -234,18 +266,35 @@ const HourlySlabSelectionPage = () => {
             </div>
           </div>
 
+          {selectedKey && foodRequired && (
+            <FoodRequiredCheckbox
+              thresholdHours={Number(foodCfg.thresholdHours)}
+              checked={foodAcknowledged}
+              onChange={(v) => setHourly({ foodAcknowledged: v })}
+            />
+          )}
+
+          {selectedKey && showStayToggle && (
+            <div className="space-y-2">
+              <p className="text-[11px] uppercase tracking-wide text-text-muted font-semibold">
+                Driver care for longer bookings
+              </p>
+              <ExtraToggleRow
+                icon={BedDouble}
+                title="Provide driver's stay"
+                helper={`Bookings ≥ ${stayCfg.thresholdHours}h normally include ₹${stayCfg.amount} stay allowance.`}
+                enabled={stayProvided}
+                onChange={(value) => setHourly({ stayProvided: value })}
+                amount={stayCfg.amount}
+              />
+            </div>
+          )}
+
           {selectedKey && (
             <FareCard
               estimate={estimate}
               estimating={estimating}
               error={estimateError}
-              footnote={
-                estimate?.fareBreakdown?.foodAllowance
-                  ? `Includes ₹${estimate.fareBreakdown.foodAllowance} food allowance (booking ≥ ${
-                      estimate.fareBreakdown.foodThresholdHours || ''
-                    } h).`
-                  : null
-              }
             />
           )}
 
@@ -254,6 +303,97 @@ const HourlySlabSelectionPage = () => {
     </PageShell>
   );
 };
+
+/**
+ * Mandatory acknowledgement: when the booked duration crosses the food
+ * threshold the customer must explicitly tick "I'll arrange the
+ * driver's meal" before they can move on. No fee is ever added — this
+ * is purely a consent gate so drivers aren't left hungry on long
+ * bookings.
+ */
+function FoodRequiredCheckbox({ thresholdHours, checked, onChange }) {
+  return (
+    <label
+      className={`rounded-2xl border p-3 flex items-start gap-3 cursor-pointer transition ${
+        checked
+          ? 'border-emerald-200 bg-emerald-50'
+          : 'border-amber-300 bg-amber-50'
+      }`}
+    >
+      <div
+        className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+          checked
+            ? 'bg-emerald-100 text-emerald-700'
+            : 'bg-amber-100 text-amber-700'
+        }`}
+      >
+        <Utensils className="w-4 h-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p
+            className={`text-sm font-bold ${
+              checked ? 'text-emerald-900' : 'text-amber-900'
+            }`}
+          >
+            I&apos;ll arrange the driver&apos;s meal
+          </p>
+          {!checked && (
+            <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-200 text-amber-900">
+              Required
+            </span>
+          )}
+          {checked && <Info className="w-3.5 h-3.5 text-emerald-700" />}
+        </div>
+        <p
+          className={`text-[12px] leading-snug mt-0.5 ${
+            checked ? 'text-emerald-800' : 'text-amber-800'
+          }`}
+        >
+          Bookings of {thresholdHours} hours or longer cross meal time. We
+          don&apos;t add a food charge to your fare — please confirm you&apos;ll
+          arrange a meal for the driver during the trip.
+        </p>
+      </div>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(!!e.target.checked)}
+        className="mt-1 w-4 h-4 accent-emerald-600 shrink-0"
+        aria-label="Confirm you will arrange the driver's meal"
+      />
+    </label>
+  );
+}
+
+function ExtraToggleRow({ icon: Icon, title, helper, enabled, onChange, amount }) {
+  // `enabled === true` means the user has NOT opted out — i.e. food/stay
+  // allowance is billed. The toggle reads "I will provide it" (saves the
+  // allowance) so we flip the semantics for the user-facing copy.
+  const userProvides = !enabled; // user provides => no allowance billed
+  return (
+    <label className="flex items-start gap-3 rounded-2xl border border-border bg-white p-3 cursor-pointer">
+      <div className="w-9 h-9 rounded-xl bg-bg flex items-center justify-center shrink-0">
+        <Icon className="w-4 h-4 text-text-secondary" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-semibold text-text">{title}</p>
+          <p className={`text-xs font-semibold ${userProvides ? 'text-success' : 'text-text-muted'}`}>
+            {userProvides ? `Save ₹${amount}` : `+ ₹${amount}`}
+          </p>
+        </div>
+        <p className="text-[11px] text-text-muted mt-0.5">{helper}</p>
+      </div>
+      <input
+        type="checkbox"
+        checked={userProvides}
+        onChange={(e) => onChange(!e.target.checked)}
+        className="mt-2 w-4 h-4 accent-primary"
+      />
+    </label>
+  );
+}
 
 /* ------------------------------------------------------------------ */
 

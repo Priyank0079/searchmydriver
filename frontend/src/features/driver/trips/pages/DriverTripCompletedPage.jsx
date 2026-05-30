@@ -27,10 +27,11 @@ const DriverTripCompletedPage = () => {
 
   const totalEarnings = useMemo(() => {
     if (!booking) return null;
+    // Drivers only see their own earning — the customer's `payment`
+    // and `fareSnapshot.total` are stripped on the backend.
     return (
       booking.driverPayout?.totalRupees ??
-      booking.payment?.driverShareRupees ??
-      booking.fareSnapshot?.total ??
+      booking.fareSnapshot?.driverEarning ??
       null
     );
   }, [booking]);

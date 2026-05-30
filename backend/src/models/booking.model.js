@@ -186,14 +186,37 @@ const rideStartOtpSchema = new mongoose.Schema(
  * `attempts` counts Razorpay-order retries during the AWAITING_PAYMENT
  * window — used to refresh the auto-cancel deadline (see
  * bookingPaymentTimeout.service.js).
+ *
+ * `walletTxId` points to the WalletTransaction row that debited the
+ * user when this booking was paid from the wallet. It lets cancel /
+ * no-driver-found paths credit the exact amount back without consulting
+ * a separate refund table.
  */
 const paymentLedgerSchema = new mongoose.Schema(
   {
     amountPaidRupees: { type: Number, default: 0, min: 0 },
     attempts: { type: Number, default: 0, min: 0 },
+    walletTxId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'WalletTransaction',
+      default: null,
+    },
   },
   { _id: false },
 );
+
+/**
+ * Which rail the customer actually paid through.
+ *
+ *   wallet   — fare debited from the user's wallet at booking creation
+ *              (the default, post-refactor).
+ *   razorpay — legacy "Pay Now after driver accepts" flow.
+ */
+export const BOOKING_PAYMENT_METHOD = Object.freeze({
+  WALLET: 'wallet',
+  RAZORPAY: 'razorpay',
+});
+const BOOKING_PAYMENT_METHOD_LIST = Object.values(BOOKING_PAYMENT_METHOD);
 
 /* ------------------------------------------------------------------ */
 /* Main schema                                                         */
@@ -240,6 +263,16 @@ const bookingSchema = new mongoose.Schema(
       default: PAYMENT_MODE.POST_RIDE,
       required: true,
     },
+    /**
+     * Which rail the customer paid through. `wallet` means the fare was
+     * debited from `User.wallet.balance` at booking creation (the new
+     * default). `razorpay` is the legacy "pay after accept" path.
+     */
+    paymentMethod: {
+      type: String,
+      enum: BOOKING_PAYMENT_METHOD_LIST,
+      default: BOOKING_PAYMENT_METHOD.WALLET,
+    },
     paymentStatus: {
       type: String,
       enum: Object.values(BOOKING_PAYMENT_STATUS),
@@ -280,6 +313,63 @@ const bookingSchema = new mongoose.Schema(
       cancelledBy: { type: String, enum: ['user', 'driver', 'system', 'admin', ''], default: '' },
       feeCharged: { type: Number, default: 0 },
       refundAmount: { type: Number, default: 0 },
+      // Split of `feeCharged` between the driver who was mobilised and
+      // the platform — driven by `ServicePricing.cancellation.driverSharePercent`.
+      // `driverShare + companyShare === feeCharged`. Persisted so the
+      // admin audit (and the Revenue page) can reconcile the books.
+      driverShare: { type: Number, default: 0 },
+      companyShare: { type: Number, default: 0 },
+    },
+
+    /**
+     * Waiting charge accrued between the driver hitting "I've arrived"
+     * and the trip actually starting (OTP verification). Computed when
+     * `startTripService` fires using the live admin policy:
+     *
+     *   billableWait = max(0, waitedMinutes − freeWaitingMinutes)
+     *   waitingCharge = billableWait × chargePerMinute
+     *
+     * Persisted here so completion can add it to the customer's bill
+     * and the admin audit can see exactly what the driver waited.
+     */
+    waiting: {
+      waitedMinutes: { type: Number, default: 0, min: 0 },
+      billableMinutes: { type: Number, default: 0, min: 0 },
+      chargeRupees: { type: Number, default: 0, min: 0 },
+      freeMinutes: { type: Number, default: 0, min: 0 },
+      perMinuteRupees: { type: Number, default: 0, min: 0 },
+      // Set when the no-show flow auto-completes a ride the customer
+      // never showed up for. Lets the driver-history UI badge the
+      // booking with a "no-show" pill and admin audits filter on it.
+      noShow: { type: Boolean, default: false },
+    },
+
+    /**
+     * No-show prompt state. Lifecycle:
+     *
+     *   1. Driver hits ARRIVED → server schedules a job for
+     *      `noShowPromptMinutes` later.
+     *   2. Job fires → `promptSentAt` set + customer notified.
+     *      `promptDeadlineAt` = promptSentAt + noShowGraceMinutes.
+     *   3. Customer responds:
+     *        Yes → `customerResponse = 'on_my_way'`, reschedule.
+     *        No  → `customerResponse = 'not_coming'`, auto-complete.
+     *   4. No response by deadline → auto-complete.
+     *
+     * `firedFor` records the minute threshold that triggered the
+     * prompt so consecutive "on_my_way" responses can each re-prompt
+     * at a later threshold without losing the audit trail.
+     */
+    noShow: {
+      promptSentAt: { type: Date, default: null },
+      promptDeadlineAt: { type: Date, default: null },
+      customerResponse: {
+        type: String,
+        enum: ['', 'on_my_way', 'not_coming'],
+        default: '',
+      },
+      respondedAt: { type: Date, default: null },
+      firedFor: { type: Number, default: 0 }, // minute threshold that triggered the prompt
     },
 
     isDeleted: { type: Boolean, default: false, index: true },

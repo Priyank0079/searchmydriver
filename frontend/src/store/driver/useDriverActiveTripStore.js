@@ -4,17 +4,25 @@ import {
   useDriverHomeSummaryStore,
   useDriverTripsListStore,
   useDriverEarningsStore,
+  useDriverEarningsLedgerStore,
 } from './useDriverTripsStore';
 
 /**
  * Wipe every dashboard cache that depends on trip-history. Called whenever
  * a trip terminates so the next render of Home / Trips / Earnings sees the
  * fresh aggregate without the user having to pull-to-refresh.
+ *
+ * The earnings ledger is the only one without a `createQueryStore`
+ * cache key (it owns its own pagination state), so we just kick it
+ * back to page-1 instead of invalidating a key.
  */
 function invalidateDashboardCaches() {
   useDriverHomeSummaryStore.getState().invalidate('driver-home-summary');
   useDriverTripsListStore.getState().invalidate('driver-trips-list');
   useDriverEarningsStore.getState().invalidate('driver-earnings');
+  // Best-effort: a refresh failure here just means the page-level
+  // re-mount will catch up. Never wedges the cancel/complete flow.
+  useDriverEarningsLedgerStore.getState().refresh().catch(() => {});
 }
 
 /**
@@ -141,8 +149,18 @@ const useDriverActiveTripStore = create((set, get) => ({
   markEnRoute() {
     return get()._runTransition('en-route', 'en-route');
   },
-  markArrived() {
-    return get()._runTransition('arrived', 'arrived');
+  /**
+   * Driver taps "I have arrived". We forward the driver's current GPS
+   * coords so the backend can enforce the proximity guard — the server
+   * rejects the request when the driver is further than
+   * `ARRIVAL_PROXIMITY_METERS` from the pickup, which prevents drivers
+   * from harvesting the arrival fee from across town.
+   */
+  markArrived(driverCoords) {
+    const body = driverCoords
+      ? { driverCoords: { lat: driverCoords.lat, lng: driverCoords.lng } }
+      : undefined;
+    return get()._runTransition('arrived', 'arrived', body);
   },
   /**
    * Verify the start-of-ride OTP the customer reads out, then transition

@@ -1,0 +1,333 @@
+import mongoose from 'mongoose';
+import User from '../models/user.model.js';
+import WalletTransaction, {
+  WALLET_TXN_DIRECTION,
+  WALLET_TXN_SOURCE,
+  WALLET_TXN_STATUS,
+} from '../models/walletTransaction.model.js';
+import { ApiError } from '../utils/apiError.js';
+import {
+  createRazorpayOrder,
+  getRazorpayKeyId,
+  verifyRazorpayPaymentSignature,
+} from '../utils/razorpay.js';
+
+/**
+ * User wallet service.
+ *
+ * Single chokepoint for every balance mutation. The pattern is always:
+ *
+ *   1. Atomic `User.findOneAndUpdate({ _id, balance >= amount }, $inc)`
+ *      so we never let a wallet go negative even under concurrent debits.
+ *   2. Write a `WalletTransaction` row capturing `balanceAfter` so the
+ *      ledger renders without re-deriving from history.
+ *
+ * Top-ups are split into two RPCs (`createTopupOrder` returns a Razorpay
+ * order; `verifyTopupPayment` validates the signature and credits the
+ * wallet). The two-step shape mirrors the booking-payment flow so the
+ * FE checkout helper is reusable as-is.
+ */
+
+const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+const toPaise = (rupees) => Math.round(Number(rupees) * 100);
+
+const MIN_TOPUP_RUPEES = 10;
+const MAX_TOPUP_RUPEES = 100_000;
+
+function ensurePositive(amount, label = 'amount') {
+  const n = Number(amount);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new ApiError(400, `${label} must be a positive number`);
+  }
+  return round2(n);
+}
+
+/* ------------------------------------------------------------------ */
+/* Read                                                                */
+/* ------------------------------------------------------------------ */
+
+export async function getWalletService(userId) {
+  if (!userId) throw new ApiError(400, 'userId is required');
+  const user = await User.findById(userId).select('wallet name').lean();
+  if (!user) throw new ApiError(404, 'User not found');
+  const wallet = user.wallet || { balance: 0, totalCredited: 0, totalSpent: 0, currency: 'INR' };
+  return {
+    balance: round2(wallet.balance || 0),
+    totalCredited: round2(wallet.totalCredited || 0),
+    totalSpent: round2(wallet.totalSpent || 0),
+    currency: wallet.currency || 'INR',
+  };
+}
+
+export async function listWalletTransactionsService(userId, { page = 1, limit = 20 } = {}) {
+  if (!userId) throw new ApiError(400, 'userId is required');
+  const safeLimit = Math.max(1, Math.min(100, Number(limit) || 20));
+  const safePage = Math.max(1, Number(page) || 1);
+  const filter = { userId };
+  const [transactions, total] = await Promise.all([
+    WalletTransaction.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((safePage - 1) * safeLimit)
+      .limit(safeLimit)
+      .lean(),
+    WalletTransaction.countDocuments(filter),
+  ]);
+  return { transactions, total, page: safePage, limit: safeLimit };
+}
+
+/* ------------------------------------------------------------------ */
+/* Atomic mutations                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Credit `amount` rupees to the user's wallet and log a ledger entry.
+ *
+ *   @param {object} params
+ *   @param {string|ObjectId} params.userId
+ *   @param {number}          params.amount        rupees (positive)
+ *   @param {string}          params.source        WALLET_TXN_SOURCE.*
+ *   @param {string}          [params.description]
+ *   @param {string}          [params.refType]
+ *   @param {string|ObjectId} [params.refId]
+ *   @param {object}          [params.razorpay]    top-up metadata
+ *   @param {string|ObjectId} [params.initiatedBy] admin id (if applicable)
+ *
+ * Returns the persisted WalletTransaction document.
+ */
+export async function creditWalletService({
+  userId,
+  amount,
+  source,
+  description = '',
+  refType = '',
+  refId = '',
+  razorpay = null,
+  initiatedBy = null,
+}) {
+  const amt = ensurePositive(amount, 'amount');
+  if (!Object.values(WALLET_TXN_SOURCE).includes(source)) {
+    throw new ApiError(400, 'Invalid wallet transaction source');
+  }
+
+  // Atomic + race-safe: increment balance and lifetime credit counter.
+  const updated = await User.findOneAndUpdate(
+    { _id: userId, isDeleted: false },
+    { $inc: { 'wallet.balance': amt, 'wallet.totalCredited': amt } },
+    { new: true, projection: { wallet: 1 } },
+  );
+  if (!updated) throw new ApiError(404, 'User not found');
+
+  return WalletTransaction.create({
+    userId,
+    direction: WALLET_TXN_DIRECTION.CREDIT,
+    amountRupees: amt,
+    balanceAfter: round2(updated.wallet?.balance || 0),
+    source,
+    description: description ? String(description).slice(0, 280) : '',
+    refType: refType || '',
+    refId: refId ? String(refId) : '',
+    razorpay: razorpay || undefined,
+    status: WALLET_TXN_STATUS.SUCCESS,
+    initiatedBy: initiatedBy || null,
+  });
+}
+
+/**
+ * Debit `amount` rupees from the user's wallet if and only if the
+ * balance covers it. Returns the persisted WalletTransaction document.
+ *
+ * Throws `ApiError(402, 'Insufficient wallet balance', { ... })` with
+ * `{ requiredAmount, walletBalance, shortBy }` in `data` when the
+ * balance is too low — the FE uses this to prompt a top-up of exactly
+ * the right amount.
+ */
+export async function debitWalletService({
+  userId,
+  amount,
+  source,
+  description = '',
+  refType = '',
+  refId = '',
+  initiatedBy = null,
+}) {
+  const amt = ensurePositive(amount, 'amount');
+  if (!Object.values(WALLET_TXN_SOURCE).includes(source)) {
+    throw new ApiError(400, 'Invalid wallet transaction source');
+  }
+
+  // Atomic guard: only debit if balance >= amount. If the filter fails
+  // we re-read the latest balance to give the FE an accurate shortfall.
+  const updated = await User.findOneAndUpdate(
+    {
+      _id: userId,
+      isDeleted: false,
+      'wallet.balance': { $gte: amt },
+    },
+    { $inc: { 'wallet.balance': -amt, 'wallet.totalSpent': amt } },
+    { new: true, projection: { wallet: 1 } },
+  );
+
+  if (!updated) {
+    const wallet = await getWalletService(userId).catch(() => null);
+    const balance = wallet?.balance || 0;
+    throw new ApiError(402, 'Insufficient wallet balance', {
+      requiredAmount: amt,
+      walletBalance: round2(balance),
+      shortBy: round2(Math.max(0, amt - balance)),
+    });
+  }
+
+  return WalletTransaction.create({
+    userId,
+    direction: WALLET_TXN_DIRECTION.DEBIT,
+    amountRupees: amt,
+    balanceAfter: round2(updated.wallet?.balance || 0),
+    source,
+    description: description ? String(description).slice(0, 280) : '',
+    refType: refType || '',
+    refId: refId ? String(refId) : '',
+    status: WALLET_TXN_STATUS.SUCCESS,
+    initiatedBy: initiatedBy || null,
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Razorpay top-up                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Create a Razorpay order so the user can top-up the wallet by `amount`
+ * rupees. Logs a PENDING transaction we'll flip to SUCCESS the moment
+ * `verifyTopupPaymentService` validates the signature.
+ *
+ * The pending row lets us reconcile via the Razorpay dashboard if the
+ * client never returns — the admin can complete the top-up later.
+ */
+export async function createTopupOrderService(userId, amount) {
+  const amt = ensurePositive(amount, 'amount');
+  if (amt < MIN_TOPUP_RUPEES) {
+    throw new ApiError(400, `Minimum top-up is \u20B9${MIN_TOPUP_RUPEES}`);
+  }
+  if (amt > MAX_TOPUP_RUPEES) {
+    throw new ApiError(400, `Maximum top-up is \u20B9${MAX_TOPUP_RUPEES}`);
+  }
+
+  const user = await User.findById(userId).select('name email phone_no').lean();
+  if (!user) throw new ApiError(404, 'User not found');
+
+  const amountPaise = toPaise(amt);
+  const order = await createRazorpayOrder({
+    amountPaise,
+    receipt: `wt_${String(userId).slice(-12)}_${Date.now().toString(36).slice(-4)}`,
+    notes: {
+      userId: String(userId),
+      purpose: 'wallet_topup',
+    },
+  });
+
+  // Persist the intent so we can re-credit reliably on verify. We do
+  // NOT touch the balance here — only verifyTopupPaymentService does.
+  await WalletTransaction.create({
+    userId,
+    direction: WALLET_TXN_DIRECTION.CREDIT,
+    amountRupees: amt,
+    balanceAfter: 0, // unknown until the credit lands
+    source: WALLET_TXN_SOURCE.TOPUP,
+    description: `Wallet top-up \u2014 Razorpay order ${order.id}`,
+    refType: 'RazorpayOrder',
+    refId: order.id,
+    razorpay: {
+      orderId: order.id,
+      amountPaise,
+    },
+    status: WALLET_TXN_STATUS.PENDING,
+  });
+
+  return {
+    keyId: getRazorpayKeyId(),
+    orderId: order.id,
+    amount: amountPaise,
+    currency: 'INR',
+    name: 'SpareDriver',
+    description: `Wallet top-up \u20B9${amt}`,
+    prefill: {
+      name: user.name || '',
+      email: user.email || '',
+      contact: user.phone_no ? String(user.phone_no) : '',
+    },
+  };
+}
+
+/**
+ * Validate a Razorpay payment signature, mark the matching PENDING
+ * transaction as SUCCESS, and atomically credit the wallet for the
+ * amount on the order.
+ *
+ * Idempotent: if the order has already been credited (matching SUCCESS
+ * row exists) we no-op and return the latest balance.
+ */
+export async function verifyTopupPaymentService(userId, { orderId, paymentId, signature }) {
+  if (!orderId || !paymentId || !signature) {
+    throw new ApiError(400, 'orderId, paymentId and signature are required');
+  }
+
+  const ok = verifyRazorpayPaymentSignature({ orderId, paymentId, signature });
+  if (!ok) {
+    await WalletTransaction.updateOne(
+      { userId, 'razorpay.orderId': orderId, status: WALLET_TXN_STATUS.PENDING },
+      { $set: { status: WALLET_TXN_STATUS.FAILED, description: 'Signature verification failed' } },
+    );
+    throw new ApiError(400, 'Payment signature verification failed');
+  }
+
+  const pending = await WalletTransaction.findOne({
+    userId,
+    'razorpay.orderId': orderId,
+    source: WALLET_TXN_SOURCE.TOPUP,
+  }).sort({ createdAt: -1 });
+
+  if (!pending) {
+    throw new ApiError(404, 'Top-up order not found');
+  }
+
+  // Already credited? Just return the current balance.
+  if (pending.status === WALLET_TXN_STATUS.SUCCESS) {
+    const wallet = await getWalletService(userId);
+    return { wallet, transaction: pending.toObject(), alreadyCredited: true };
+  }
+
+  // Atomically credit. We re-use the lifetime-credit increment from
+  // the helper above but write directly so we can keep the same row.
+  const amt = round2(pending.amountRupees);
+  const updated = await User.findOneAndUpdate(
+    { _id: userId, isDeleted: false },
+    { $inc: { 'wallet.balance': amt, 'wallet.totalCredited': amt } },
+    { new: true, projection: { wallet: 1 } },
+  );
+  if (!updated) throw new ApiError(404, 'User not found');
+
+  pending.status = WALLET_TXN_STATUS.SUCCESS;
+  pending.balanceAfter = round2(updated.wallet?.balance || 0);
+  pending.razorpay = {
+    ...(pending.razorpay?.toObject?.() || pending.razorpay || {}),
+    paymentId,
+    signature,
+  };
+  await pending.save();
+
+  return {
+    wallet: {
+      balance: round2(updated.wallet?.balance || 0),
+      totalCredited: round2(updated.wallet?.totalCredited || 0),
+      totalSpent: round2(updated.wallet?.totalSpent || 0),
+      currency: updated.wallet?.currency || 'INR',
+    },
+    transaction: pending.toObject(),
+    alreadyCredited: false,
+  };
+}
+
+export const WALLET_LIMITS = Object.freeze({
+  MIN_TOPUP_RUPEES,
+  MAX_TOPUP_RUPEES,
+});

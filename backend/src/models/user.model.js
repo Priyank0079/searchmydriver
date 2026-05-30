@@ -120,6 +120,24 @@ const userSchema = new mongoose.Schema(
         message: 'You can save up to 20 favourite locations',
       },
     },
+
+    /**
+     * In-app wallet. All currency values are rupees (paise are only used
+     * at the Razorpay boundary). Mutations MUST go through
+     * services/wallet.service.js so the ledger (WalletTransaction)
+     * stays in sync with the running balance.
+     *
+     *   balance        — current usable balance (₹)
+     *   totalCredited  — lifetime credits (top-ups + refunds)
+     *   totalSpent     — lifetime debits (booking payments + retained fees)
+     *   currency       — kept for forward-compat; INR is the only value today
+     */
+    wallet: {
+      balance: { type: Number, default: 0, min: 0 },
+      totalCredited: { type: Number, default: 0, min: 0 },
+      totalSpent: { type: Number, default: 0, min: 0 },
+      currency: { type: String, default: 'INR', trim: true },
+    },
   },
   {
     timestamps: true,

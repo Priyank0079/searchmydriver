@@ -36,6 +36,7 @@ import {
   getDriverHomeSummary,
   getDriverTripsList,
   getDriverEarnings,
+  getDriverEarningsLedger,
 } from '../controllers/driverTrips.controller.js';
 import {
   getDriverActiveBooking,
@@ -89,6 +90,7 @@ router.put('/online', protectDriver, setOnlineStatus);
 router.get('/home/summary', protectDriver, getDriverHomeSummary);
 router.get('/trips', protectDriver, getDriverTripsList);
 router.get('/earnings', protectDriver, getDriverEarnings);
+router.get('/earnings/ledger', protectDriver, getDriverEarningsLedger);
 
 // Booking lifecycle for the driver (Phase 4)
 router.get('/bookings/active', protectDriver, getDriverActiveBooking);

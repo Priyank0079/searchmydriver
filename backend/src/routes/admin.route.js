@@ -94,6 +94,7 @@ import {
   listRefunds,
   updateRefundStatus,
 } from '../controllers/refund.controller.js';
+import { listPlatformRevenue } from '../controllers/revenue.controller.js';
 
 const router = express.Router();
 const { ALL_STAFF, OPERATIONS, SUPER_ADMIN } = ROUTE_ROLES;
@@ -195,5 +196,12 @@ router.patch('/kit-orders/:id/deliver', protectStaff, restrictTo(...ALL_STAFF), 
 // driven and the PATCH is the authoritative state-transition.
 router.get('/refunds', protectStaff, restrictTo(...SUPER_ADMIN), listRefunds);
 router.patch('/refunds/:id', protectStaff, restrictTo(...SUPER_ADMIN), updateRefundStatus);
+
+/* ---- Account → Revenue ----------------------------------------------- */
+// Read-only paginated view over the `PlatformRevenue` ledger. Each row
+// represents a rupee event the platform kept (trip-completion
+// commission, company share of a cancellation fee, etc.) — writes are
+// done by the booking pipelines, not here.
+router.get('/revenue', protectStaff, restrictTo(...SUPER_ADMIN), listPlatformRevenue);
 
 export default router;

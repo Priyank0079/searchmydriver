@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import toast from 'react-hot-toast';
 import {
   ArrowLeft,
   MapPin,
@@ -14,7 +13,6 @@ import Card from '../../../../components/Card';
 import Button from '../../../../components/Button';
 import api from '../../../../utils/api';
 import useBookingDraftStore from '../../../../store/user/useBookingDraftStore';
-import useUserActiveBookingStore from '../../../../store/user/useUserActiveBookingStore';
 import { SERVICE_TYPES, SERVICE_TYPE_LABELS } from '../../../../constants/serviceTypes';
 import { getCarBrandName, getCarModelName } from '../../../../utils/vehicleCatalog';
 
@@ -22,11 +20,9 @@ const ReviewBookingPage = () => {
   const navigate = useNavigate();
   const draft = useBookingDraftStore();
   const setFareEstimate = useBookingDraftStore((s) => s.setFareEstimate);
-  const createBooking = useUserActiveBookingStore((s) => s.createBooking);
 
   const [estimate, setEstimate] = useState(draft.fareEstimate);
   const [estimating, setEstimating] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [selectedCar, setSelectedCar] = useState(null);
 
@@ -41,6 +37,7 @@ const ReviewBookingPage = () => {
   useEffect(() => {
     let cancelled = false;
     if (!draft.carId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing on carId removal
       setSelectedCar(null);
       return undefined;
     }
@@ -116,20 +113,10 @@ const ReviewBookingPage = () => {
 
   const total = estimate?.fareBreakdown?.totalPayable ?? 0;
 
-  const handleConfirm = async () => {
-    if (submitting) return;
-    setSubmitting(true);
-    try {
-      const payload = draft.buildCreatePayload();
-      const { booking } = await createBooking(payload);
-      if (booking) {
-        navigate('/user/book/searching');
-      }
-    } catch (err) {
-      toast.error(err?.response?.data?.message || 'Could not place booking');
-    } finally {
-      setSubmitting(false);
-    }
+  // No booking creation here — that lives on /user/book/confirm where we
+  // also surface the wallet balance and pay-from-wallet CTA.
+  const handleConfirm = () => {
+    navigate('/user/book/confirm');
   };
 
   return (
@@ -150,18 +137,17 @@ const ReviewBookingPage = () => {
         <TripSummary draft={draft} car={selectedCar} />
         <FareCard estimate={estimate} estimating={estimating} error={error} />
         <p className="text-[11px] text-text-muted text-center">
-          You'll pick how to pay (now or after the ride) once a driver accepts.
+          Next: pay from your wallet to lock in the booking.
         </p>
       </div>
 
       <div className="p-4 bg-white border-t border-border-light">
         <Button
           fullWidth
-          loading={submitting}
           disabled={!estimate || estimating}
           onClick={handleConfirm}
         >
-          {`Confirm booking · ₹${total}`}
+          {`Continue · ₹${total}`}
         </Button>
       </div>
     </div>

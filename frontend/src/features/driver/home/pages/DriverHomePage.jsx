@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Card from '../../../../components/Card';
 import Badge from '../../../../components/Badge';
@@ -13,6 +13,10 @@ import {
   ShieldAlert,
   ChevronRight,
   Car,
+  Clock,
+  ShieldCheck,
+  Phone,
+  Flag,
 } from 'lucide-react';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
@@ -68,6 +72,7 @@ const DriverHomePage = () => {
   const activeBooking = summary?.activeBooking || null;
   const hasActiveBooking =
     activeBooking && ACTIVE_BOOKING_STATUSES.includes(activeBooking.status);
+  const cancellationChances = summary?.cancellationChances || null;
 
   const { setOnline, toggling, blocked, clearBlocked } = useDriverOnlineToggle();
 
@@ -162,8 +167,13 @@ const DriverHomePage = () => {
         {hasActiveBooking && (
           <ActiveTripCard
             booking={activeBooking}
+            chance={cancellationChances}
             onResume={() => navigate(`/driver/trip/${activeBooking._id}`)}
           />
+        )}
+
+        {!hasActiveBooking && cancellationChances && (
+          <CancellationChancesCard chance={cancellationChances} />
         )}
 
         <Card className="animate-fade-in-up">
@@ -278,19 +288,27 @@ const DriverHomePage = () => {
 /* ------------------------------------------------------------------ */
 
 /**
- * Compact "resume your trip" tile shown on home whenever the driver has a
- * booking in any active status. Tapping anywhere on the card jumps back
- * to the live trip page so the driver can never lose context after closing
- * the app or switching tabs.
+ * "Resume your trip" tile shown on home whenever the driver has a
+ * booking in any active status. Tapping anywhere on the card jumps
+ * back to the live trip page so the driver can never lose context
+ * after closing the app or switching tabs.
+ *
+ * Rich layout: shows pickup + drop, customer name + phone, fare,
+ * duration, and a live "free cancel: 1m 24s left" countdown when the
+ * driver is still inside the grace window.
  */
-function ActiveTripCard({ booking, onResume }) {
+function ActiveTripCard({ booking, chance, onResume }) {
   const status = booking?.status;
-  const subtitle =
-    ACTIVE_STATUS_COPY[status] || 'Trip in progress';
-  const fare = booking?.fareSnapshot?.total;
+  const subtitle = ACTIVE_STATUS_COPY[status] || 'Trip in progress';
+  const fare = booking?.fareSnapshot?.driverEarning;
   const serviceLabel =
     SERVICE_TYPE_LABELS[booking?.serviceType] || booking?.serviceType || 'Trip';
   const pickup = booking?.pickup?.address;
+  const drop = booking?.dropoff?.address;
+  const customer =
+    booking?.userId && typeof booking.userId === 'object' ? booking.userId : null;
+  const customerName = customer?.name || 'Customer';
+  const customerPhone = customer?.phone_no || customer?.phone || null;
   const hours =
     booking?.serviceType === SERVICE_TYPES.HOURLY
       ? booking?.hourly?.durationHours
@@ -300,30 +318,194 @@ function ActiveTripCard({ booking, onResume }) {
     <Card
       hoverable
       onClick={onResume}
-      className="animate-fade-in-up border-l-4 border-l-primary"
+      className="animate-fade-in-up border-l-4 border-l-primary !p-0 overflow-hidden"
     >
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
+      {/* Top strip: service + earning */}
+      <div className="flex items-center justify-between px-4 pt-3.5 pb-2">
+        <div className="flex items-center gap-2 min-w-0">
           <Badge variant="primary">{serviceLabel}</Badge>
           {hours && (
             <span className="text-[11px] text-text-muted">{hours} h booked</span>
           )}
         </div>
         {fare > 0 && (
-          <span className="text-sm font-bold text-text">{formatCurrency(fare)}</span>
+          <div className="text-right shrink-0">
+            <p className="text-[10px] uppercase tracking-wide text-text-muted font-semibold leading-none">
+              Your earning
+            </p>
+            <p className="text-sm font-bold text-emerald-700 leading-tight">
+              {formatCurrency(fare)}
+            </p>
+          </div>
         )}
       </div>
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center shrink-0">
-          <Car className="w-5 h-5 text-primary" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-text truncate">{subtitle}</p>
-          {pickup && (
-            <p className="text-xs text-text-muted truncate mt-0.5">{pickup}</p>
+
+      {/* Status line */}
+      <div className="px-4 pb-2 flex items-center gap-2 text-sm font-semibold text-text">
+        <Car className="w-4 h-4 text-primary shrink-0" />
+        <span className="truncate">{subtitle}</span>
+      </div>
+
+      {/* Pickup + drop */}
+      <div className="px-4 pb-2 space-y-1.5">
+        {pickup && (
+          <RouteLine
+            tone="text-primary bg-primary/10"
+            label="Pickup"
+            text={pickup}
+          />
+        )}
+        {drop && (
+          <RouteLine
+            tone="text-rose-700 bg-rose-100"
+            label="Drop"
+            text={drop}
+          />
+        )}
+      </div>
+
+      {/* Customer line */}
+      {(customerName || customerPhone) && (
+        <div className="px-4 pb-2 flex items-center gap-2 text-xs text-text-muted">
+          <Phone className="w-3.5 h-3.5" />
+          <span className="font-medium text-text">{customerName}</span>
+          {customerPhone && (
+            <>
+              <span>{'\u00B7'}</span>
+              <span className="font-mono">{customerPhone}</span>
+            </>
           )}
         </div>
-        <ChevronRight className="w-4 h-4 text-text-muted shrink-0" />
+      )}
+
+      {/* Live grace countdown when applicable */}
+      <ActiveTripGraceFooter chance={chance} />
+
+      {/* Resume CTA strip */}
+      <div className="px-4 py-2.5 bg-primary/5 border-t border-primary/10 flex items-center justify-between text-xs font-semibold text-primary">
+        <span>Resume trip</span>
+        <ChevronRight className="w-4 h-4" />
+      </div>
+    </Card>
+  );
+}
+
+function RouteLine({ tone, label, text }) {
+  return (
+    <div className="flex items-start gap-2 text-xs">
+      <span
+        className={`mt-0.5 px-1.5 py-0.5 rounded-md font-semibold text-[10px] uppercase tracking-wide shrink-0 ${tone}`}
+      >
+        {label}
+      </span>
+      <span className="text-text leading-snug line-clamp-2">{text}</span>
+    </div>
+  );
+}
+
+/**
+ * Footer strip on the active-trip card that ticks down the remaining
+ * grace-window minutes once per second. Hidden when the booking is
+ * past grace OR the driver has no free chances left today (in those
+ * cases the cancel modal handles all the messaging).
+ */
+function ActiveTripGraceFooter({ chance }) {
+  const [, setHeartbeat] = useState(0);
+  useEffect(() => {
+    if (!chance?.inGrace) return undefined;
+    const id = setInterval(() => setHeartbeat((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [chance?.inGrace]);
+
+  if (!chance) return null;
+  const dailyLimit = Number(chance.dailyLimit) || 0;
+  const chancesLeft = Math.max(0, Number(chance.chancesLeft) || 0);
+  const inGrace = !!chance.inGrace;
+  const graceMinutes = Math.max(0, Number(chance.graceMinutes) || 0);
+
+  if (!inGrace || chancesLeft <= 0 || graceMinutes <= 0) return null;
+
+  // Live recompute from the server-provided `remainingMinutes` snapshot
+  // (which was already in-grace) decremented by client wall-clock since
+  // mount. Without this the countdown would freeze at fetch time.
+  const remainingMinutes = Math.max(
+    0,
+    Number(chance.remainingMinutes) || 0,
+  );
+  if (remainingMinutes <= 0) return null;
+
+  const totalSec = Math.max(0, Math.floor(remainingMinutes * 60));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  const display = m > 0 ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`;
+
+  return (
+    <div className="mx-4 mb-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center gap-2">
+      <Clock className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+      <p className="text-[11px] text-emerald-800 leading-snug">
+        Free cancel window:{' '}
+        <strong className="font-semibold">{display}</strong> left ·{' '}
+        {chancesLeft} of {dailyLimit} free cancellation
+        {dailyLimit === 1 ? '' : 's'} today
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Standalone cancellation-chances tile rendered when the driver has
+ * NO active trip — gives them a daily-budget summary at a glance so
+ * they don't have to enter a ride to discover how many cancels they
+ * have left.
+ */
+function CancellationChancesCard({ chance }) {
+  const dailyLimit = Number(chance?.dailyLimit) || 0;
+  const chancesLeft = Math.max(0, Number(chance?.chancesLeft) || 0);
+  const used = Number(chance?.usedToday) || 0;
+  const grace = Number(chance?.graceMinutes) || 0;
+  if (dailyLimit <= 0) return null;
+
+  const exhausted = chancesLeft <= 0;
+  const lowAlert = !exhausted && chancesLeft === 1;
+  const tone = exhausted
+    ? 'border-l-rose-500 bg-rose-50/40'
+    : lowAlert
+      ? 'border-l-amber-500 bg-amber-50/40'
+      : 'border-l-success bg-success/5';
+  const icon = exhausted ? Flag : ShieldCheck;
+  const Icon = icon;
+  const iconTone = exhausted
+    ? 'text-rose-700 bg-rose-100'
+    : lowAlert
+      ? 'text-amber-700 bg-amber-100'
+      : 'text-emerald-700 bg-emerald-100';
+
+  return (
+    <Card className={`animate-fade-in-up border-l-4 ${tone}`}>
+      <div className="flex items-start gap-3">
+        <div
+          className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${iconTone}`}
+        >
+          <Icon className="w-5 h-5" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-text">
+            {exhausted
+              ? 'No free cancellations left today'
+              : `${chancesLeft} of ${dailyLimit} free cancellation${
+                  dailyLimit === 1 ? '' : 's'
+                } left today`}
+          </p>
+          <p className="text-[11px] text-text-muted mt-0.5 leading-snug">
+            {exhausted
+              ? 'Cancelling now will deduct the configured penalty from your wallet. Counter resets at midnight.'
+              : grace > 0
+                ? `Cancel within ${grace} min of accepting to skip the penalty. ${
+                    used > 0 ? `Used ${used} today.` : ''
+                  }`
+                : 'Cancellations may attract a penalty.'}
+          </p>
+        </div>
       </div>
     </Card>
   );

@@ -32,10 +32,14 @@ const PaymentStatusPage = () => {
         statusLabel: 'Pending',
       };
     }
+    // Drivers only ever see their own earning. `payment` and the
+    // customer-facing `fareSnapshot.total` are stripped on the
+    // backend for driver bookings, so we read the driver payout first
+    // and fall back to `fareSnapshot.driverEarning` which the backend
+    // always exposes.
     const total =
       booking.driverPayout?.totalRupees ??
-      booking.payment?.amountPaidRupees ??
-      booking.fareSnapshot?.total ??
+      booking.fareSnapshot?.driverEarning ??
       null;
 
     const paymentMode = booking.paymentMode || 'online';

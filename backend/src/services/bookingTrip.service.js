@@ -1,6 +1,11 @@
 import Booking from '../models/booking.model.js';
 import { Driver } from '../models/driverModels/driver.model.js';
+import ServicePricing from '../models/servicePricing.model.js';
 import { ApiError } from '../utils/apiError.js';
+import {
+  schedulePromptTimer,
+  cancelNoShowSchedule,
+} from './bookingNoShowTimeout.service.js';
 import {
   BOOKING_STATUS,
   ACTIVE_BOOKING_STATUSES,
@@ -22,12 +27,18 @@ import {
   loadCancellationPolicy,
   computeDriverCancellation,
   computeUserCancellation,
+  evaluateDriverCancelChance,
+  todayKey,
 } from './bookingCancellation.service.js';
 import {
   issueBookingRefundService,
   REFUND_INITIATED_BY,
 } from './refund.service.js';
 import { dispatchNextDriverService } from './bookingDispatch.service.js';
+import {
+  recordPlatformRevenue,
+  PLATFORM_REVENUE_SOURCE,
+} from './platformRevenue.service.js';
 
 /**
  * Generate a numeric OTP of the configured length. We zero-pad so codes that
@@ -196,26 +207,151 @@ export async function markDriverEnRouteService(driverId, bookingId) {
 }
 
 /**
+ * Maximum distance (metres) between the driver's reported location and
+ * the booking pickup at which we accept an "I have arrived" tap. Keeps
+ * drivers honest — they can't flip the booking to ARRIVED from across
+ * town to harvest the post-arrival cancellation fee. Tuned generously
+ * enough to swallow GPS jitter on phones with a fix.
+ */
+export const ARRIVAL_PROXIMITY_METERS = 100;
+
+const EARTH_RADIUS_METERS = 6371000;
+
+function toRadians(deg) {
+  return (deg * Math.PI) / 180;
+}
+
+/**
+ * Haversine distance in metres between two `{ lat, lng }` points. Lives
+ * here to keep the trip service self-contained — the FE has its own
+ * mirror in `utils/geo.js`.
+ */
+function haversineMeters(a, b) {
+  if (
+    !a ||
+    !b ||
+    typeof a.lat !== 'number' ||
+    typeof a.lng !== 'number' ||
+    typeof b.lat !== 'number' ||
+    typeof b.lng !== 'number'
+  ) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const dLat = toRadians(b.lat - a.lat);
+  const dLng = toRadians(b.lng - a.lng);
+  const lat1 = toRadians(a.lat);
+  const lat2 = toRadians(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
+  return 2 * EARTH_RADIUS_METERS * Math.asin(Math.sqrt(h));
+}
+
+/**
  * en_route → arrived
  *
  * Generates a fresh ride-start OTP at the same time and emits it to the user
  * only. The driver simultaneously receives `otpRequired: true` so their UI
  * swaps the Start CTA for an OTP input. Regenerating on every arrival means
  * a flaky network won't leave a stale code lying around.
+ *
+ * Proximity guard: the driver must report a location within
+ * `ARRIVAL_PROXIMITY_METERS` of the pickup. The FE also disables the
+ * CTA outside the radius; this is the server-side enforcement so a
+ * scripted request can't bypass it.
  */
-export async function markDriverArrivedService(driverId, bookingId) {
+export async function markDriverArrivedService(driverId, bookingId, { driverCoords } = {}) {
   const booking = await loadDriverBooking(driverId, bookingId);
   assertStatus(booking, [BOOKING_STATUS.EN_ROUTE], 'mark arrival');
 
+  const pickupCoords = (() => {
+    const c = booking.pickup?.location?.coordinates;
+    if (!Array.isArray(c) || c.length !== 2) return null;
+    return { lat: c[1], lng: c[0] };
+  })();
+
+  if (!pickupCoords) {
+    throw new ApiError(500, 'Pickup coordinates missing from booking');
+  }
+  if (
+    !driverCoords ||
+    typeof driverCoords.lat !== 'number' ||
+    typeof driverCoords.lng !== 'number'
+  ) {
+    throw new ApiError(
+      400,
+      'Driver location is required to mark arrival — enable location and try again',
+    );
+  }
+
+  const distance = haversineMeters(driverCoords, pickupCoords);
+  if (distance > ARRIVAL_PROXIMITY_METERS) {
+    throw new ApiError(
+      409,
+      `You're too far from the pickup (${Math.round(distance)} m). Move within ${ARRIVAL_PROXIMITY_METERS} m to mark arrival.`,
+      { distanceMeters: Math.round(distance), maxDistanceMeters: ARRIVAL_PROXIMITY_METERS },
+    );
+  }
+
+  const arrivedAt = new Date();
   booking.status = BOOKING_STATUS.ARRIVED;
-  booking.timeline.arrivedAt = new Date();
+  booking.timeline.arrivedAt = arrivedAt;
   booking.rideStartOtp = {
     code: generateRideOtp(),
-    generatedAt: new Date(),
+    generatedAt: arrivedAt,
     verifiedAt: null,
     attempts: 0,
   };
+  // Reset any prior no-show state — every fresh ARRIVED transition
+  // starts a clean window. (Possible if the booking was bounced
+  // back via re-dispatch.)
+  booking.noShow = {
+    promptSentAt: null,
+    promptDeadlineAt: null,
+    customerResponse: '',
+    respondedAt: null,
+    firedFor: 0,
+  };
+  // Snapshot the active waiting-charge policy so the live driver UI
+  // can render a "free wait 15:00 → ₹2/min after" ticker without
+  // having to fetch pricing separately. The actual `chargeRupees`
+  // stays 0 until Start; these knobs just communicate the policy.
+  try {
+    const pricing = await ServicePricing.findOne({
+      serviceType: booking.serviceType,
+      isActive: true,
+    })
+      .select('waitingCharge')
+      .lean();
+    booking.waiting = booking.waiting || {};
+    Object.assign(booking.waiting, {
+      waitedMinutes: 0,
+      billableMinutes: 0,
+      chargeRupees: 0,
+      freeMinutes: Math.max(
+        0,
+        Number(pricing?.waitingCharge?.freeWaitingMinutes) || 0,
+      ),
+      perMinuteRupees: Math.max(
+        0,
+        Number(pricing?.waitingCharge?.chargePerMinute) || 0,
+      ),
+      noShow: false,
+    });
+  } catch (err) {
+    console.warn(
+      '[bookingTrip] waiting policy snapshot on arrival failed:',
+      err?.message,
+    );
+  }
   await booking.save();
+
+  // Kick off the "are you coming?" prompt schedule. Failure here is
+  // non-fatal — the arrival itself is fine, the customer just won't
+  // get the gentle nudge after 30 min.
+  schedulePromptTimer(booking._id, arrivedAt).catch((err) =>
+    console.warn('[bookingTrip] no-show schedule failed:', err?.message),
+  );
 
   broadcastUpdate(booking);
   return booking.toObject();
@@ -259,13 +395,94 @@ export async function startTripService(driverId, bookingId, { otp } = {}) {
     );
   }
 
+  const startedAt = new Date();
   booking.status = BOOKING_STATUS.STARTED;
-  booking.timeline.startedAt = new Date();
-  booking.rideStartOtp.verifiedAt = new Date();
+  booking.timeline.startedAt = startedAt;
+  booking.rideStartOtp.verifiedAt = startedAt;
+
+  // Compute the waiting charge accrued between ARRIVED → STARTED so
+  // completion has the final number to add to the customer's bill.
+  // Best-effort: a missing pricing config just leaves waiting at 0.
+  await applyWaitingChargeOnStart(booking, startedAt);
+
+  // Once the trip has actually started, no-show flow is no longer
+  // relevant. Clear any pending prompt deadline so the scheduler
+  // doesn't auto-complete a ride that's now in progress.
+  cancelNoShowSchedule(booking._id);
+  if (booking.noShow) {
+    booking.noShow.promptDeadlineAt = null;
+  }
+
   await booking.save();
 
   broadcastUpdate(booking);
   return booking.toObject();
+}
+
+/**
+ * Snapshot the waiting charge onto `booking.waiting` based on how long
+ * the driver waited at pickup. Uses the admin-configured
+ * `waitingCharge.{freeWaitingMinutes, chargePerMinute}` policy.
+ *
+ * The math:
+ *   waitedMinutes   = (startedAt − arrivedAt) in minutes
+ *   billableMinutes = max(0, waitedMinutes − freeWaitingMinutes)
+ *   chargeRupees    = billableMinutes × chargePerMinute
+ *
+ * The function is async because it has to look up the pricing doc;
+ * the result is stamped on the booking POJO. Callers should `save()`
+ * the booking afterwards.
+ *
+ * `flags.noShow` lets the no-show auto-complete path mark the row so
+ * the audit knows this wait was unilateral.
+ */
+async function applyWaitingChargeOnStart(booking, startedAt, flags = {}) {
+  const arrivedAt = booking.timeline?.arrivedAt;
+  if (!arrivedAt) {
+    booking.waiting = booking.waiting || {};
+    Object.assign(booking.waiting, {
+      waitedMinutes: 0,
+      billableMinutes: 0,
+      chargeRupees: 0,
+      freeMinutes: 0,
+      perMinuteRupees: 0,
+      noShow: !!flags.noShow,
+    });
+    return;
+  }
+  let freeMinutes = 0;
+  let perMinute = 0;
+  try {
+    const pricing = await ServicePricing.findOne({
+      serviceType: booking.serviceType,
+      isActive: true,
+    }).lean();
+    freeMinutes = Math.max(
+      0,
+      Number(pricing?.waitingCharge?.freeWaitingMinutes) || 0,
+    );
+    perMinute = Math.max(
+      0,
+      Number(pricing?.waitingCharge?.chargePerMinute) || 0,
+    );
+  } catch (err) {
+    console.warn('[bookingTrip] waiting-charge pricing lookup failed:', err?.message);
+  }
+
+  const waitedMs = Math.max(0, startedAt.getTime() - new Date(arrivedAt).getTime());
+  const waitedMinutes = Math.ceil(waitedMs / 60000);
+  const billableMinutes = Math.max(0, waitedMinutes - freeMinutes);
+  const chargeRupees = Math.round(billableMinutes * perMinute * 100) / 100;
+
+  booking.waiting = booking.waiting || {};
+  Object.assign(booking.waiting, {
+    waitedMinutes,
+    billableMinutes,
+    chargeRupees,
+    freeMinutes,
+    perMinuteRupees: perMinute,
+    noShow: !!flags.noShow,
+  });
 }
 
 /**
@@ -303,6 +520,36 @@ export async function completeTripService(driverId, bookingId) {
     );
   }
 
+  // Book the platform's commission as revenue. Same fareSnapshot the
+  // booking was created with — guaranteed in lockstep with what the
+  // customer paid. Best-effort: a failure here logs but never wedges
+  // trip completion.
+  const commission = Number(booking.fareSnapshot?.breakdown?.platformCommission) || 0;
+  if (commission > 0) {
+    recordPlatformRevenue({
+      source: PLATFORM_REVENUE_SOURCE.COMMISSION,
+      amountRupees: commission,
+      bookingId: booking._id,
+      bookingNumber: booking.bookingNumber || '',
+      serviceType: booking.serviceType || '',
+      userId: booking.userId,
+      driverId: booking.driverId || null,
+      meta: {
+        commissionPercent:
+          Number(booking.fareSnapshot?.breakdown?.platformCommissionPercent) || 0,
+        driverEarning:
+          Number(booking.fareSnapshot?.breakdown?.driverEarning) || 0,
+        totalPayable:
+          Number(booking.fareSnapshot?.breakdown?.totalPayable) || 0,
+      },
+    }).catch((err) =>
+      console.warn(
+        '[bookingTrip] failed to log commission revenue:',
+        err?.message,
+      ),
+    );
+  }
+
   broadcastUpdate(booking);
   return booking.toObject();
 }
@@ -312,11 +559,19 @@ export async function completeTripService(driverId, bookingId) {
 /* ------------------------------------------------------------------ */
 
 /**
- * Debit the driver's wallet for a cancellation penalty. Non-fatal — we
- * log instead of throwing so the booking transition itself never wedges
- * on a wallet write.
+ * Debit the driver's wallet for a cancellation penalty AND book the
+ * same rupee as platform revenue. The penalty + revenue write are
+ * paired so the platform-revenue ledger always matches the sum of
+ * driver-wallet deductions — easy reconciliation for accounting.
+ *
+ * Non-fatal — we log instead of throwing so the booking transition
+ * itself never wedges on a wallet write.
+ *
+ * `booking` is required (not just `bookingId`) so we can tag the
+ * revenue row with the bookingNumber + serviceType, matching the
+ * shape `recordPlatformRevenue` uses for the other revenue sources.
  */
-async function applyDriverPenalty(driverId, penaltyRupees) {
+async function applyDriverPenalty(driverId, penaltyRupees, booking) {
   if (!penaltyRupees || penaltyRupees <= 0) return;
   try {
     await Driver.updateOne(
@@ -326,6 +581,59 @@ async function applyDriverPenalty(driverId, penaltyRupees) {
   } catch (err) {
     console.warn(
       '[bookingTrip] failed to debit driver wallet on cancel:',
+      err?.message,
+    );
+  }
+  // The full penalty goes to the platform. Best-effort: a failed
+  // revenue write just means the audit lags — the wallet was already
+  // debited, so we never want this to throw.
+  if (booking?._id) {
+    recordPlatformRevenue({
+      source: PLATFORM_REVENUE_SOURCE.DRIVER_PENALTY,
+      amountRupees: penaltyRupees,
+      bookingId: booking._id,
+      bookingNumber: booking.bookingNumber || '',
+      serviceType: booking.serviceType || '',
+      userId: booking.userId || null,
+      driverId,
+      meta: {
+        reason: booking.cancellation?.reason || 'cancelled_by_driver',
+        status: booking.status || '',
+      },
+    }).catch((err) =>
+      console.warn(
+        '[bookingTrip] failed to record driver-penalty revenue:',
+        err?.message,
+      ),
+    );
+  }
+}
+
+/**
+ * Spend one cancellation chance for the driver, rolling the day-key
+ * over if this is the first cancel of a new calendar day. Best-effort;
+ * a failure here just means the audit counter lags — never blocks the
+ * cancellation itself.
+ */
+async function spendDriverCancelChance(driverId, dateKey) {
+  if (!driverId || !dateKey) return;
+  try {
+    const driver = await Driver.findById(driverId).select('cancellationChances').lean();
+    const sameDay = driver?.cancellationChances?.dateKey === dateKey;
+    if (sameDay) {
+      await Driver.updateOne(
+        { _id: driverId },
+        { $inc: { 'cancellationChances.used': 1 } },
+      );
+    } else {
+      await Driver.updateOne(
+        { _id: driverId },
+        { $set: { cancellationChances: { dateKey, used: 1 } } },
+      );
+    }
+  } catch (err) {
+    console.warn(
+      '[bookingTrip] failed to record driver cancellation chance:',
       err?.message,
     );
   }
@@ -341,8 +649,8 @@ async function applyDriverPenalty(driverId, penaltyRupees) {
  * `dispatchNextDriverService` will eventually call
  * `adminMarkNoDriversFoundService`, which fires the refund.
  */
-async function redispatchAfterDriverCancel(booking, driverId, policy) {
-  const { driverPenalty } = computeDriverCancellation(booking, policy);
+async function redispatchAfterDriverCancel(booking, driverId, policy, chance) {
+  const { driverPenalty } = computeDriverCancellation(booking, policy, chance);
 
   // Stamp this driver's cancellation onto the dispatch history so the
   // admin/dispatch audit shows why we're searching again. We reuse the
@@ -383,8 +691,9 @@ async function redispatchAfterDriverCancel(booking, driverId, policy) {
   // Kill the Pay Now timer (irrelevant now — booking is back in
   // SEARCHING and the payment is already locked in).
   cancelPaymentTimeout(booking._id);
+  cancelNoShowSchedule(booking._id);
 
-  await applyDriverPenalty(driverId, driverPenalty);
+  await applyDriverPenalty(driverId, driverPenalty, booking);
 
   // Free the cancelling driver so the dispatcher can hand them their
   // next offer, then start a fresh dispatch wave.
@@ -428,12 +737,12 @@ async function terminateBookingByDriver(
   booking,
   driverId,
   policy,
-  { reason, tripStarted },
+  { reason, tripStarted, chance },
 ) {
   const {
     driverPenalty,
     refundAmount,
-  } = computeDriverCancellation(booking, policy);
+  } = computeDriverCancellation(booking, policy, chance);
 
   // Re-use the user-side breakdown for the refund ledger so the
   // cancellation fee field on the Refund document matches the customer
@@ -457,7 +766,8 @@ async function terminateBookingByDriver(
   await booking.save();
 
   cancelPaymentTimeout(booking._id);
-  await applyDriverPenalty(driverId, driverPenalty);
+  cancelNoShowSchedule(booking._id);
+  await applyDriverPenalty(driverId, driverPenalty, booking);
 
   Driver.updateOne({ _id: driverId }, { $set: { isOnTrip: false } }).catch((err) =>
     console.warn(
@@ -538,15 +848,30 @@ export async function cancelBookingByDriverService(driverId, bookingId, reason =
   const tripStarted = booking.status === BOOKING_STATUS.STARTED;
   const wasPaid = booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID;
 
+  // Snapshot the driver's daily cancel budget BEFORE we mutate it so
+  // the grace decision matches what the FE saw in its confirm prompt.
+  const driverSnap = await Driver.findById(driverId)
+    .select('cancellationChances')
+    .lean();
+  const chance = evaluateDriverCancelChance(driverSnap, booking, policy);
+
+  let result;
   // Paid + pre-STARTED → re-dispatch so the customer's payment isn't
   // wasted on a driver who bailed. Mid-ride cancellations can't be
   // re-dispatched (the customer is in a car) so they terminate.
   if (wasPaid && !tripStarted) {
-    return redispatchAfterDriverCancel(booking, driverId, policy);
+    result = await redispatchAfterDriverCancel(booking, driverId, policy, chance);
+  } else {
+    result = await terminateBookingByDriver(booking, driverId, policy, {
+      reason,
+      tripStarted,
+      chance,
+    });
   }
 
-  return terminateBookingByDriver(booking, driverId, policy, {
-    reason,
-    tripStarted,
-  });
+  // Always spend a chance — the counter tracks "I bailed on a job" and
+  // is independent of whether the penalty was actually charged.
+  await spendDriverCancelChance(driverId, chance.dateKey || todayKey());
+
+  return result;
 }

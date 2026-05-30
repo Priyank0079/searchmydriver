@@ -96,6 +96,14 @@ export const S2C_EVENTS = Object.freeze({
   /** Phase 5: user responded to extension; driver hears about it here. */
   BOOKING_EXTENSION_RESOLVED: 'booking:extension:resolved',
 
+  /**
+   * No-show flow: driver has been at pickup past `noShowPromptMinutes`
+   * without the trip starting. User app shows a modal asking "are you
+   * coming?". Payload carries `{ bookingId, promptDeadlineAt }` so the
+   * UI can render a countdown matching the server-side timer.
+   */
+  BOOKING_NOSHOW_PROMPT: 'booking:noshow:prompt',
+
   /** Generic toast / in-app notification. */
   NOTIFICATION: 'notification:new',
 

@@ -1,6 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MapPin, Clock, SkipForward, Loader2, IndianRupee, Navigation } from 'lucide-react';
+import {
+  MapPin,
+  Clock,
+  SkipForward,
+  Loader2,
+  IndianRupee,
+  Navigation,
+  User as UserIcon,
+  Phone as PhoneIcon,
+  Car as CarIcon,
+} from 'lucide-react';
 import useDriverIncomingOfferStore from '../../../../store/driver/useDriverIncomingOfferStore';
 import { useSocketEvent } from '../../../../hooks/useSocket';
 import { useNotificationSound } from '../../../../hooks/useNotificationSound';
@@ -138,6 +148,56 @@ const BookingOfferModal = () => {
         </div>
 
         <div className="p-5 space-y-4">
+          {offer.customer && (offer.customer.name || offer.customer.phone) && (
+            <div className="flex items-start gap-3 rounded-2xl bg-bg/60 p-3">
+              {offer.customer.profilePicture ? (
+                <img
+                  src={offer.customer.profilePicture}
+                  alt=""
+                  className="w-9 h-9 rounded-xl object-cover shrink-0"
+                />
+              ) : (
+                <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                  <UserIcon className="w-4 h-4 text-primary-dark" />
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] text-text-muted">Customer</p>
+                <p className="text-sm font-semibold text-text truncate">
+                  {offer.customer.name || 'Customer'}
+                </p>
+                {offer.customer.phone && (
+                  <p className="text-[11px] text-text-secondary inline-flex items-center gap-1 mt-0.5">
+                    <PhoneIcon className="w-3 h-3" />
+                    {offer.customer.phone}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {offer.car && (offer.car.vehicleNumber || offer.car.carTypeName) && (
+            <div className="flex items-start gap-3 rounded-2xl bg-bg/60 p-3">
+              <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
+                <CarIcon className="w-4 h-4 text-text-secondary" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] text-text-muted">Vehicle</p>
+                <p className="text-sm font-semibold text-text truncate">
+                  {[offer.car.brandName, offer.car.modelName].filter(Boolean).join(' ') ||
+                    offer.car.carTypeName ||
+                    'Vehicle'}
+                </p>
+                <p className="text-[11px] text-text-secondary">
+                  {[offer.car.carTypeName, offer.car.transmission, offer.car.fuelTypeName]
+                    .filter(Boolean)
+                    .join(' · ')}
+                  {offer.car.vehicleNumber ? ` · ${offer.car.vehicleNumber}` : ''}
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-start gap-3">
             <MapPin className="w-4 h-4 text-success mt-0.5 shrink-0" />
             <div className="min-w-0">
@@ -175,12 +235,23 @@ const BookingOfferModal = () => {
             </div>
           )}
 
-          <div className="flex items-center justify-between bg-bg rounded-2xl p-3">
+          {/* The driver only ever sees their own earning — the customer's
+              gross fare and the platform commission are never sent to
+              the driver app. Server has already subtracted the commission
+              for us in `offer.fare.driverEarning`. */}
+          <div className="flex items-center justify-between bg-emerald-50 rounded-2xl p-3">
             <div className="flex items-center gap-2">
-              <IndianRupee className="w-4 h-4 text-text-muted" />
+              <IndianRupee className="w-4 h-4 text-emerald-700" />
               <div>
-                <p className="text-[11px] text-text-muted">Estimated fare</p>
-                <p className="text-base font-bold text-text">₹{offer.fare?.total || 0}</p>
+                <p className="text-[11px] text-emerald-700 font-semibold uppercase tracking-wide">
+                  Your earning
+                </p>
+                <p className="text-base font-bold text-text">
+                  {'\u20B9'}{offer.fare?.driverEarning ?? 0}
+                </p>
+                <p className="text-[10px] text-text-muted mt-0.5">
+                  After platform commission
+                </p>
               </div>
             </div>
             {offer.offerExpiresAt && <CountdownBar expiresAt={offer.offerExpiresAt} />}

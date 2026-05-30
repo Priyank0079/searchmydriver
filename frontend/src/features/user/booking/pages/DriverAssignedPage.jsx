@@ -2,9 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
-  Phone,
-  MessageSquare,
-  Star,
   MapPin,
   CreditCard,
   Wallet,
@@ -18,9 +15,10 @@ import {
 } from 'lucide-react';
 import Card from '../../../../components/Card';
 import Button from '../../../../components/Button';
-import Avatar from '../../../../components/Avatar';
+import PersonContactCard from '../../../../components/PersonContactCard';
 import TripTrackingMap from '../../../../components/maps/TripTrackingMap';
 import useUserActiveBookingStore from '../../../../store/user/useUserActiveBookingStore';
+import useUserWalletStore from '../../../../store/user/useUserWalletStore';
 import { useSocket, useSocketEvent } from '../../../../hooks/useSocket';
 import { useFirebaseDriverLocations } from '../../../../hooks/useFirebaseDriverLocations';
 import { useFareEstimate } from '../hooks/useFareEstimate';
@@ -91,6 +89,7 @@ const DriverAssignedPage = () => {
   const cancelBooking = useUserActiveBookingStore((s) => s.cancelBooking);
   const createExtension = useUserActiveBookingStore((s) => s.createExtension);
   const draftReset = useBookingDraftStore((s) => s.reset);
+  const fetchWallet = useUserWalletStore((s) => s.fetchWallet);
   const { emit, isConnected } = useSocket();
 
   const [cancelling, setCancelling] = useState(false);
@@ -116,6 +115,62 @@ const DriverAssignedPage = () => {
   useSocketEvent(S2C_EVENTS.BOOKING_UPDATED, (payload) => {
     applyUpdate(payload);
   });
+
+  // No-show prompt: backend pings us when the driver has been at the
+  // pickup for `noShowPromptMinutes` without the trip starting. We
+  // open a modal asking the customer if they're still coming, with a
+  // deadline matching the server-side auto-complete timer.
+  const [noShowPrompt, setNoShowPrompt] = useState(null);
+  useSocketEvent(S2C_EVENTS.BOOKING_NOSHOW_PROMPT, (payload) => {
+    if (!payload?.bookingId) return;
+    if (booking?._id && String(booking._id) !== String(payload.bookingId)) {
+      return;
+    }
+    setNoShowPrompt({
+      promptDeadlineAt: payload.promptDeadlineAt,
+      graceMinutes: payload.graceMinutes,
+    });
+  });
+  // Re-attach the prompt on page reload — backend already stamped the
+  // booking with `noShow.promptDeadlineAt` so we can rehydrate the
+  // modal without waiting for a fresh socket event.
+  useEffect(() => {
+    const deadline = booking?.noShow?.promptDeadlineAt;
+    const response = booking?.noShow?.customerResponse;
+    if (!deadline || response) {
+      // Customer already answered → hide.
+      if (response && noShowPrompt) setNoShowPrompt(null);
+      return;
+    }
+    const remaining = new Date(deadline).getTime() - Date.now();
+    if (remaining <= 0) {
+      // Deadline already passed; backend will auto-complete momentarily.
+      setNoShowPrompt(null);
+      return;
+    }
+    if (!noShowPrompt) {
+      setNoShowPrompt({ promptDeadlineAt: deadline, graceMinutes: null });
+    }
+  }, [booking?.noShow?.promptDeadlineAt, booking?.noShow?.customerResponse]);
+
+  const respondToNoShow = useUserActiveBookingStore((s) => s.respondToNoShow);
+  const handleNoShowAnswer = async (answer) => {
+    try {
+      await respondToNoShow(answer);
+      setNoShowPrompt(null);
+      if (answer === 'on_my_way') {
+        toast.success('Thanks — we let your driver know.');
+      } else {
+        toast('Trip closed out. Driver has been paid for waiting.', {
+          icon: '\u26A0\uFE0F',
+        });
+      }
+    } catch (err) {
+      toast.error(
+        err?.response?.data?.message || err?.message || 'Could not send response',
+      );
+    }
+  };
 
   const bookingStatus = booking?.status;
   const cancellationReason = booking?.cancellation?.reason;
@@ -146,6 +201,10 @@ const DriverAssignedPage = () => {
           toast('Driver cancelled the ride.', { icon: 'ℹ️', duration: 5000 });
         }
       }
+      // Cancellation refund (wallet) settles on the backend the moment
+      // the booking flips — pull a fresh wallet snapshot so the home /
+      // wallet pages render the new balance without a manual refresh.
+      fetchWallet().catch(() => {});
       draftReset();
       navigate('/user/home', { replace: true });
     }
@@ -163,7 +222,7 @@ const DriverAssignedPage = () => {
       // reason.
       navigate('/user/book/searching', { replace: true });
     }
-  }, [bookingStatus, cancellationReason, refundSummary, navigate, draftReset]);
+  }, [bookingStatus, cancellationReason, refundSummary, navigate, draftReset, fetchWallet]);
 
   const driver = booking?.driverId;
   const driverId = typeof driver === 'object' ? driver?._id : driver;
@@ -187,6 +246,26 @@ const DriverAssignedPage = () => {
     if (!driverPoint || !pickupPoint) return null;
     return haversineMeters(driverPoint, pickupPoint);
   }, [driverPoint, pickupPoint]);
+
+  /**
+   * Driver vehicle expertise we want to surface as the "Drives:" line
+   * on the driver card. Merges `vehicleExperience` (specific cars the
+   * driver has logged) with `carTypeExperience` (broader categories)
+   * and de-dupes, then caps to 3 entries to keep the line tight.
+   */
+  const driverExpertise = useMemo(() => {
+    const ve = Array.isArray(driver?.vehicleExperience)
+      ? driver.vehicleExperience
+      : [];
+    const cte = Array.isArray(driver?.carTypeExperience)
+      ? driver.carTypeExperience
+      : [];
+    const fromVehicles = ve
+      .map((v) => v?.modelName || v?.brandName || v?.categoryName)
+      .filter(Boolean);
+    const fromTypes = cte.map((c) => c?.name).filter(Boolean);
+    return [...new Set([...fromVehicles, ...fromTypes])].slice(0, 3);
+  }, [driver]);
 
   // Ride duration timer + extension prompt (only active once STARTED).
   const rideTimer = useRideTimer(booking);
@@ -321,38 +400,24 @@ const DriverAssignedPage = () => {
           <RideStartOtpCard code={booking.rideStartOtp.code} />
         )}
 
-        <Card>
-          <div className="flex items-start gap-4">
-            <Avatar name={driver?.name || 'Driver'} size="xl" online={!!liveDriver} />
-            <div className="flex-1 min-w-0">
-              <h3 className="text-lg font-bold text-text">{driver?.name || 'Your driver'}</h3>
-              <div className="flex items-center gap-2 mt-0.5">
-                {driver?.rating && (
-                  <>
-                    <Star className="w-4 h-4 text-primary fill-primary" />
-                    <span className="text-sm font-medium">{driver.rating}</span>
-                    <span className="text-text-muted text-xs">·</span>
-                  </>
-                )}
-                <span className="text-xs text-text-muted">
-                  {liveDriver
-                    ? `${formatDistance(distanceMeters)} away`
-                    : firebaseDisabled
-                      ? 'Awaiting driver location…'
-                      : 'Locating driver…'}
-                </span>
-              </div>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3 mt-4">
-            <Button variant="secondary" size="md" icon={Phone}>
-              Call
-            </Button>
-            <Button variant="secondary" size="md" icon={MessageSquare}>
-              Message
-            </Button>
-          </div>
-        </Card>
+        <PersonContactCard
+          src={driver?.profilePicture}
+          name={driver?.name || 'Your driver'}
+          roleLabel="Driver"
+          online={!!liveDriver}
+          rating={driver?.rating}
+          experienceYears={driver?.experienceYears}
+          expertise={driverExpertise}
+          metaLine={
+            liveDriver
+              ? `${formatDistance(distanceMeters)} away`
+              : firebaseDisabled
+                ? 'Awaiting driver location\u2026'
+                : 'Locating driver\u2026'
+          }
+          phone={driver?.phone_no || driver?.phone}
+          showMessageButton
+        />
 
         <Card>
           <h3 className="text-sm font-semibold text-text mb-3">Trip</h3>
@@ -485,6 +550,13 @@ const DriverAssignedPage = () => {
         minHours={1}
         maxHours={8}
       />
+
+      <NoShowPromptModal
+        open={Boolean(noShowPrompt)}
+        deadline={noShowPrompt?.promptDeadlineAt}
+        onYes={() => handleNoShowAnswer('on_my_way')}
+        onNo={() => handleNoShowAnswer('not_coming')}
+      />
     </div>
   );
 };
@@ -500,6 +572,8 @@ function cancelPreviewMessage(preview) {
   if (!preview) return 'Are you sure you want to cancel?';
   const fee = Number(preview.feeCharged) || 0;
   const refund = Number(preview.refundAmount) || 0;
+  alert(fee);
+  alert(refund);
   if (fee > 0) {
     return refund > 0
       ? `A cancellation fee of \u20B9${fee} will be deducted. You\u2019ll be refunded \u20B9${refund}.`
@@ -507,7 +581,7 @@ function cancelPreviewMessage(preview) {
   }
   return preview.tripStarted
     ? 'This trip is in progress. Cancelling now will end the ride.'
-    : 'You won\u2019t be charged — the driver will be released.';
+    : 'You will not be charged — the driver will be released.';
 }
 
 function paymentSummary({ isPaid, isAwaitingPayment, total, payNowAmount }) {
@@ -534,6 +608,75 @@ function formatRideClock(seconds) {
   const minutes = Math.floor(total / 60);
   const secs = total % 60;
   return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+/**
+ * "Are you coming?" modal. Fires when the driver has been at the
+ * pickup past the no-show prompt minutes. Shows a live countdown to
+ * the auto-complete deadline so the customer understands the
+ * urgency, and forces an explicit Yes / No answer (no overlay-click
+ * dismiss — silence is what triggers auto-complete).
+ */
+function NoShowPromptModal({ open, deadline, onYes, onNo }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!open) return undefined;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [open]);
+
+  if (!open) return null;
+
+  const remainingMs = deadline
+    ? Math.max(0, new Date(deadline).getTime() - now)
+    : null;
+  const remainingSec = remainingMs != null ? Math.floor(remainingMs / 1000) : null;
+  const m = remainingSec != null ? Math.floor(remainingSec / 60) : null;
+  const s = remainingSec != null ? remainingSec % 60 : null;
+  const countdown =
+    remainingSec != null
+      ? `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+      : '—';
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+      <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl animate-fade-in-up">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center">
+            <Clock className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-base font-bold text-text">Are you on your way?</p>
+            <p className="text-xs text-text-muted mt-0.5">
+              Your driver has been waiting at the pickup.
+            </p>
+          </div>
+        </div>
+        <p className="text-sm text-text-secondary leading-snug">
+          If you don&rsquo;t respond, the trip will be closed out as a no-show
+          and you&rsquo;ll be charged the full fare including the waiting time.
+        </p>
+        {remainingSec != null && (
+          <div className="mt-4 rounded-2xl bg-amber-50 border border-amber-200 px-4 py-3 flex items-center justify-between">
+            <span className="text-xs text-amber-800 font-medium">
+              Auto-close in
+            </span>
+            <span className="text-xl font-bold text-amber-700 tabular-nums">
+              {countdown}
+            </span>
+          </div>
+        )}
+        <div className="mt-5 flex flex-col gap-2">
+          <Button variant="primary" onClick={onYes} className="w-full">
+            Yes, I&rsquo;m on my way
+          </Button>
+          <Button variant="ghost" onClick={onNo} className="w-full">
+            No, I&rsquo;m not coming
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default DriverAssignedPage;

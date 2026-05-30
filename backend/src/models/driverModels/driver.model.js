@@ -281,6 +281,17 @@ const driverSchema = new mongoose.Schema(
       },
     },
 
+    // Per-day driver cancellation budget. `dateKey` is rolled over (and
+    // `used` reset to 0) the first time the driver tries to cancel on a
+    // new local-day. While `used < policy.driverDailyFreeCancellations`
+    // AND the cancel happens within `policy.driverGraceMinutes` of the
+    // accept timestamp, no rupee penalty is applied. Counter always
+    // increments on every cancel.
+    cancellationChances: {
+      dateKey: { type: String, default: '', trim: true },
+      used: { type: Number, default: 0, min: 0 },
+    },
+
     // ── Referral ──────────────────────────────────────────────────────────────
     referralCode: {
       type: String,

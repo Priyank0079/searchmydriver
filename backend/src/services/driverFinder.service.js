@@ -62,6 +62,7 @@ function shapeDriverHit(raw) {
     isOnline: !!raw.isOnline,
     vehicleType: primaryCarType?.name || '',
     vehicleTypeId: primaryCarType?._id ? String(primaryCarType._id) : null,
+    experienceYears: Number(raw.experienceYears) || 0,
     lat,
     lng,
     lastLocationAt: raw.lastLocationAt || null,
@@ -118,6 +119,12 @@ export async function findDriversWithinRadius({
     if (carTypeOids.length) match.carTypeExperience = { $in: carTypeOids };
   }
 
+  // We sort by experienceYears DESC then distance ASC. `$geoNear`'s
+  // default ordering is distance ASC, so we over-fetch (3x the limit,
+  // capped at 50) within the radius and re-sort in-memory so the most
+  // experienced drivers get the offer first while still preferring
+  // nearby drivers as the tie-breaker.
+  const overFetch = Math.min(50, safeLimit * 3);
   const pipeline = [
     {
       $geoNear: {
@@ -129,7 +136,7 @@ export async function findDriversWithinRadius({
         query: match,
       },
     },
-    { $limit: safeLimit },
+    { $limit: overFetch },
     {
       $lookup: {
         from: 'cartypes',
@@ -139,6 +146,8 @@ export async function findDriversWithinRadius({
         pipeline: [{ $project: { name: 1 } }],
       },
     },
+    { $sort: { experienceYears: -1, distanceMeters: 1 } },
+    { $limit: safeLimit },
     {
       $project: {
         _id: 1,
@@ -151,6 +160,7 @@ export async function findDriversWithinRadius({
         lastLocationAt: 1,
         distanceMeters: 1,
         carTypes: 1,
+        experienceYears: 1,
       },
     },
   ];
