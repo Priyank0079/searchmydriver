@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
@@ -100,9 +100,17 @@ const DriverAssignedPage = () => {
   const [extensionPromptOpen, setExtensionPromptOpen] = useState(false);
   const [extensionPromptDismissedAt, setExtensionPromptDismissedAt] = useState(null);
 
+  // Always fetch the full booking from the server on mount. The store
+  // may already hold a booking object set by createBooking or a socket
+  // patch, but those don't include `cancellationPreview.policy` (only
+  // the GET /active endpoint hydrates it). Without it the cancel dialog
+  // shows stale / zero-fee messages until the user manually reloads.
+  const didHydrate = useRef(false);
   useEffect(() => {
-    if (!booking) fetchActive().catch(() => {});
-  }, [booking, fetchActive]);
+    if (didHydrate.current) return;
+    didHydrate.current = true;
+    fetchActive().catch(() => {});
+  }, [fetchActive]);
 
   // Join the booking room so the driver, user, and any admin watching get the
   // same trip-room broadcasts (Phase 5 will lean on this for live ETA).
@@ -572,16 +580,35 @@ function cancelPreviewMessage(preview) {
   if (!preview) return 'Are you sure you want to cancel?';
   const fee = Number(preview.feeCharged) || 0;
   const refund = Number(preview.refundAmount) || 0;
-  alert(fee);
-  alert(refund);
-  if (fee > 0) {
-    return refund > 0
-      ? `A cancellation fee of \u20B9${fee} will be deducted. You\u2019ll be refunded \u20B9${refund}.`
-      : `A cancellation fee of \u20B9${fee} will be deducted.`;
+
+  // Trip already started — override everything.
+  if (preview.tripStarted) {
+    if (fee > 0) {
+      const parts = [`This trip is in progress. A cancellation fee of \u20B9${fee} will be deducted.`];
+      if (refund > 0) parts.push(`You\u2019ll be refunded \u20B9${refund}.`);
+      return parts.join(' ');
+    }
+    return 'This trip is in progress. Cancelling now will end the ride.';
   }
-  return preview.tripStarted
-    ? 'This trip is in progress. Cancelling now will end the ride.'
-    : 'You will not be charged — the driver will be released.';
+
+  // Driver has reached pickup.
+  if (preview.driverArrived) {
+    if (fee > 0) {
+      const parts = [`The driver has arrived at the pickup location. A cancellation fee of \u20B9${fee} will be deducted.`];
+      if (refund > 0) parts.push(`You\u2019ll be refunded \u20B9${refund}.`);
+      return parts.join(' ');
+    }
+    return 'The driver has arrived at the pickup. You can cancel, but a fee may apply once processed.';
+  }
+
+  // Driver assigned / en route (pre-arrival).
+  if (fee > 0) {
+    const parts = [`The driver is already assigned and on the way. A cancellation fee of \u20B9${fee} will be deducted.`];
+    if (refund > 0) parts.push(`You\u2019ll be refunded \u20B9${refund}.`);
+    return parts.join(' ');
+  }
+
+  return 'No cancellation fee will be charged. The driver will be released.';
 }
 
 function paymentSummary({ isPaid, isAwaitingPayment, total, payNowAmount }) {

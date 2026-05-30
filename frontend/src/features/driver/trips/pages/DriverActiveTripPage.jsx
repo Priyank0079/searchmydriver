@@ -603,7 +603,7 @@ const DriverActiveTripPage = () => {
         onClose={() => !cancelling && setCancelOpen(false)}
         onConfirm={handleCancelConfirm}
         title={cancelPreview.tripStarted ? 'Cancel this active trip?' : 'Cancel this trip?'}
-        description={buildCancelDialogCopy(cancelPreview)}
+        description={buildCancelDialogCopy(cancelPreview, booking)}
         confirmLabel="Cancel trip"
         cancelLabel="Keep trip"
         variant="danger"
@@ -626,7 +626,7 @@ const DriverActiveTripPage = () => {
  * Copy is intentionally explicit about chances remaining so drivers
  * can budget their daily allowance.
  */
-function buildCancelDialogCopy(preview) {
+function buildCancelDialogCopy(preview, booking) {
   const penalty = Number(preview?.driverPenalty) || 0;
   const fullPenalty = Number(preview?.fullPenalty) || 0;
   const chance = preview?.chance || null;
@@ -634,35 +634,64 @@ function buildCancelDialogCopy(preview) {
   const dailyLimit = Math.max(0, Number(chance?.dailyLimit) || 0);
   const grace = Math.max(0, Number(chance?.graceMinutes) || 0);
   const remainingMinutes = Number(chance?.remainingMinutes) || 0;
+  const status = booking?.status;
 
+  // ── Mid-trip cancel ──────────────────────────────────────────────
   if (preview?.tripStarted) {
-    return penalty > 0
-      ? `\u20B9${penalty} will be deducted from your wallet as a mid-trip cancellation penalty.`
-      : 'You are about to cancel a trip in progress. This may affect your rating.';
+    if (penalty > 0) {
+      return `The trip is in progress with the customer. Cancelling now will deduct \u20B9${penalty} from your wallet as a mid-trip penalty. The customer will be refunded.`;
+    }
+    return 'The trip is in progress with the customer. Cancelling now may affect your rating.';
   }
 
-  // Inside the grace window AND chances remaining → free cancel. Show
-  // the live countdown so the driver sees how long they have left.
+  // ── Grace-window waiver (pre-trip) ───────────────────────────────
   if (preview?.penaltyWaived) {
     const remainingAfter = Math.max(0, chancesLeft - 1);
     const countdown = formatGraceRemaining(remainingMinutes);
     const window = `${countdown} left in the ${grace}-min grace window`;
+
+    // Context line based on current status
+    let context = '';
+    if (status === BOOKING_STATUS.ARRIVED) {
+      context = 'You are at the pickup location. ';
+    } else if (status === BOOKING_STATUS.EN_ROUTE) {
+      context = 'You are on the way to pickup. ';
+    } else if (status === BOOKING_STATUS.AWAITING_PAYMENT) {
+      context = 'The customer is still making payment. ';
+    }
+
     return remainingAfter > 0
-      ? `No penalty \u2014 ${window}. ${remainingAfter} of ${dailyLimit} free cancellation${remainingAfter === 1 ? '' : 's'} will remain today.`
-      : `No penalty \u2014 ${window}. This is your last free cancellation today; further cancellations will charge \u20B9${fullPenalty}.`;
+      ? `${context}No penalty \u2014 ${window}. ${remainingAfter} of ${dailyLimit} free cancel${remainingAfter === 1 ? '' : 's'} will remain today.`
+      : `${context}No penalty \u2014 ${window}. This is your last free cancellation today; after this, each cancel will cost \u20B9${fullPenalty}.`;
   }
 
+  // ── Penalty applies (pre-trip) ───────────────────────────────────
   if (penalty > 0) {
+    let statusLine = '';
+    if (status === BOOKING_STATUS.ARRIVED) {
+      statusLine = 'You have arrived at the pickup. ';
+    } else if (status === BOOKING_STATUS.EN_ROUTE) {
+      statusLine = 'You are heading to the pickup. ';
+    } else if (status === BOOKING_STATUS.AWAITING_PAYMENT) {
+      statusLine = 'The customer is completing payment. ';
+    } else if (status === BOOKING_STATUS.DRIVER_ASSIGNED) {
+      statusLine = 'You have been assigned to this trip. ';
+    }
+
     if (chancesLeft <= 0 && dailyLimit > 0) {
-      return `Daily free cancellations used up \u2014 \u20B9${penalty} will be deducted from your wallet.`;
+      return `${statusLine}Your ${dailyLimit} free daily cancel${dailyLimit === 1 ? '' : 's'} ${dailyLimit === 1 ? 'has' : 'have'} been used. \u20B9${penalty} will be deducted from your wallet.`;
     }
     if (grace > 0) {
-      return `Grace window of ${grace} minute${grace === 1 ? '' : 's'} has passed \u2014 \u20B9${penalty} will be deducted from your wallet.`;
+      return `${statusLine}The ${grace}-minute grace window has passed. \u20B9${penalty} will be deducted from your wallet.`;
     }
-    return `\u20B9${penalty} will be deducted from your wallet as a cancellation penalty.`;
+    return `${statusLine}\u20B9${penalty} will be deducted from your wallet as a cancellation penalty.`;
   }
 
-  return 'Repeated cancellations may affect your rating.';
+  // ── No penalty, no grace info (fallback) ─────────────────────────
+  if (status === BOOKING_STATUS.AWAITING_PAYMENT) {
+    return 'The customer hasn\u2019t paid yet. You can cancel without a penalty, but repeated cancellations may affect your rating.';
+  }
+  return 'No penalty will be charged, but repeated cancellations may affect your rating.';
 }
 
 /**
