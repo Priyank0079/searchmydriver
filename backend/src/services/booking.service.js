@@ -738,3 +738,63 @@ export async function adminMarkNoDriversFoundService(bookingId) {
 /* prepay-discount window; the user pays the full fare upfront via the */
 /* /pay endpoint or cancels.                                           */
 /* ------------------------------------------------------------------ */
+
+export async function listAdminBookingsService(query = {}) {
+  const { page = 1, limit = 20, search, status } = query;
+  const skip = (Math.max(1, parseInt(page, 10)) - 1) * parseInt(limit, 10);
+
+  const filter = { isDeleted: false };
+  if (status) {
+    filter.status = status;
+  }
+  if (search) {
+    const isObjectId = /^[0-9a-fA-F]{24}$/.test(search);
+    if (isObjectId) {
+      filter._id = search;
+    } else {
+      filter.bookingNumber = { $regex: search, $options: 'i' };
+    }
+  }
+
+  // Aggregate true stats for the dashboard across all bookings (ignoring current page filters)
+  const statsPromise = Booking.aggregate([
+    { $match: { isDeleted: false } },
+    {
+      $group: {
+        _id: '$status',
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+
+  const [bookings, total, statsRaw] = await Promise.all([
+    Booking.find(filter)
+      .populate('userId', 'name phone_no email')
+      .populate('driverId', 'name phone_no email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit, 10))
+      .lean(),
+    Booking.countDocuments(filter),
+    statsPromise,
+  ]);
+
+  const statusCounts = statsRaw.reduce((acc, curr) => {
+    acc[curr._id] = curr.count;
+    return acc;
+  }, {});
+
+  const stats = {
+    total: Object.values(statusCounts).reduce((a, b) => a + b, 0),
+    searching: statusCounts[BOOKING_STATUS.SEARCHING] || 0,
+    active:
+      (statusCounts[BOOKING_STATUS.DRIVER_ASSIGNED] || 0) +
+      (statusCounts[BOOKING_STATUS.EN_ROUTE] || 0) +
+      (statusCounts[BOOKING_STATUS.ARRIVED] || 0) +
+      (statusCounts[BOOKING_STATUS.STARTED] || 0),
+    completed: statusCounts[BOOKING_STATUS.COMPLETED] || 0,
+    cancelled: statusCounts[BOOKING_STATUS.CANCELLED] || 0,
+  };
+
+  return { bookings, total, page: parseInt(page, 10), pages: Math.ceil(total / limit), stats };
+}

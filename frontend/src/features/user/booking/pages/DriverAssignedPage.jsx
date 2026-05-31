@@ -367,10 +367,29 @@ const DriverAssignedPage = () => {
   const amountPaid = booking.payment?.amountPaidRupees || 0;
   const payNowAmount = Math.max(0, total - amountPaid);
 
-  // Cancel CTA is available at every active status now. The backend
-  // applies the admin-configured cancellation fee post-STARTED; the
-  // confirm dialog above warns the user about it before they commit.
-  const cancellable = true;
+  const [cancellable, setCancellable] = useState(true);
+
+  useEffect(() => {
+    if (!booking) return;
+    if (booking.status === BOOKING_STATUS.STARTED) {
+      setCancellable(false);
+      return;
+    }
+    if (booking.status === BOOKING_STATUS.ARRIVED && booking.timeline?.arrivedAt) {
+      const freeWaitMinutes = booking.waiting?.freeMinutes ?? 15;
+      const arrivedAtMs = new Date(booking.timeline.arrivedAt).getTime();
+      
+      const checkCancellable = () => {
+        const elapsedMinutes = (Date.now() - arrivedAtMs) / 60000;
+        setCancellable(elapsedMinutes <= freeWaitMinutes);
+      };
+      
+      checkCancellable();
+      const interval = setInterval(checkCancellable, 10000);
+      return () => clearInterval(interval);
+    }
+    setCancellable(true);
+  }, [booking?.status, booking?.timeline?.arrivedAt, booking?.waiting?.freeMinutes]);
   const view = STATUS_VIEW[booking.status] || STATUS_VIEW[BOOKING_STATUS.DRIVER_ASSIGNED];
 
   return (

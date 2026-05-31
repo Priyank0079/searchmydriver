@@ -1,75 +1,175 @@
-import DataTable from '../components/DataTable';
+import { useState, useMemo, useEffect } from 'react';
 import Badge from '../../../components/Badge';
-import { ADMIN_MOCK_BOOKINGS } from '../../../utils/constants';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { buildCacheKey } from '../../../store/lib/buildCacheKey';
+import { useAdminBookingsStore } from '../../../store/admin/useAdminBookingsStore';
+import ServerPaginatedTable from '../components/ServerPaginatedTable';
+import BookingDetailsModal from '../components/ManageBookings/BookingDetailsModal';
+import BookingFilters from '../components/ManageBookings/BookingFilters';
+import BookingStats from '../components/ManageBookings/BookingStats';
 
 const ManageBookings = () => {
-  const columns = [
-    {
-      key: 'id',
-      label: 'Booking ID',
-      width: '15%',
-      render: (val) => <span className="font-mono font-medium text-xs bg-gray-100 px-2 py-1 rounded">{val}</span>,
-    },
-    {
-      key: 'user',
-      label: 'Customer',
-      width: '20%',
-      render: (val) => <span className="font-semibold text-sm">{val}</span>,
-    },
-    {
-      key: 'driver',
-      label: 'Assigned Driver',
-      width: '20%',
-      render: (val) => val ? (
-        <span className="text-sm">{val}</span>
-      ) : (
-        <span className="text-xs text-text-muted italic">Unassigned</span>
-      ),
-    },
-    {
-      key: 'serviceType',
-      label: 'Service',
-      width: '15%',
-    },
-    {
-      key: 'fare',
-      label: 'Est. Fare',
-      width: '10%',
-      render: (val) => <span className="font-medium text-success">₹{val}</span>,
-    },
-    {
-      key: 'status',
-      label: 'Status',
-      width: '10%',
-      render: (val) => {
-        const variants = {
-          completed: 'success',
-          in_progress: 'primary',
-          pending: 'warning',
-          cancelled: 'danger',
-        };
-        return <Badge variant={variants[val]} text={val.replace('_', ' ')} />;
+  const [page, setPage] = useState(1);
+  const [limit] = useState(10);
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [selectedBooking, setSelectedBooking] = useState(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const queryParams = useMemo(
+    () => ({ page, limit, search: debouncedSearch, status: statusFilter }),
+    [page, limit, debouncedSearch, statusFilter],
+  );
+
+  const cacheKey = buildCacheKey('admin-bookings', queryParams);
+
+  const { data, loading, error, refetch } = useCachedQuery(
+    useAdminBookingsStore,
+    cacheKey,
+    queryParams,
+  );
+
+  const bookings = data?.bookings ?? [];
+  const pagination = data?.pagination ?? { total: 0, pages: 1 };
+
+  const columns = useMemo(
+    () => [
+      {
+        key: 'id',
+        label: 'Booking ID',
+        width: '15%',
+        render: (val, row) => (
+          <span className="font-mono font-medium text-xs bg-gray-100 px-2 py-1 rounded">
+            {row.bookingNumber || row._id.slice(-6)}
+          </span>
+        ),
       },
-    },
-    {
-      key: 'date',
-      label: 'Date',
-      width: '10%',
-      render: (val) => new Date(val).toLocaleDateString(),
-    },
-  ];
+      {
+        key: 'user',
+        label: 'Customer',
+        width: '20%',
+        render: (val, row) => (
+          <span className="font-semibold text-sm">
+            {row.userId ? row.userId.name : 'Unknown'}
+          </span>
+        ),
+      },
+      {
+        key: 'driver',
+        label: 'Assigned Driver',
+        width: '20%',
+        render: (val, row) =>
+          row.driverId ? (
+            <span className="text-sm">{row.driverId.name}</span>
+          ) : (
+            <span className="text-xs text-slate-400 italic">Unassigned</span>
+          ),
+      },
+      {
+        key: 'serviceType',
+        label: 'Service',
+        width: '15%',
+        render: (val, row) => <span className="capitalize">{row.serviceType}</span>,
+      },
+      {
+        key: 'fare',
+        label: 'Est. Fare',
+        width: '10%',
+        render: (val, row) => (
+          <span className="font-medium text-emerald-600">
+            ₹{row.fareSnapshot?.total || 0}
+          </span>
+        ),
+      },
+      {
+        key: 'status',
+        label: 'Status',
+        width: '10%',
+        render: (val, row) => {
+          const variants = {
+            completed: 'success',
+            started: 'primary',
+            driver_assigned: 'primary',
+            arrived: 'primary',
+            searching: 'warning',
+            cancelled: 'danger',
+          };
+          return (
+            <Badge variant={variants[row.status] || 'default'} className="capitalize">
+              {row.status?.replace(/_/g, ' ')}
+            </Badge>
+          );
+        },
+      },
+      {
+        key: 'createdAt',
+        label: 'Date',
+        width: '10%',
+        render: (val, row) => (
+          <span className="text-sm text-slate-500">
+            {new Date(row.createdAt).toLocaleDateString()}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
+
+  const stats = data?.stats ?? {
+    total: 0,
+    searching: 0,
+    active: 0,
+    completed: 0,
+    cancelled: 0,
+  };
 
   return (
-    <div className="space-y-4 animate-fade-in-up">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-text">Booking History</h2>
-      </div>
+    <div className="min-h-screen bg-slate-50 space-y-6 animate-fade-in-up">
+      <BookingFilters
+        search={search}
+        onSearchChange={(val) => {
+          setSearch(val);
+          setPage(1);
+        }}
+        statusFilter={statusFilter}
+        onStatusChange={(val) => {
+          setStatusFilter(val);
+          setPage(1);
+        }}
+        onRefresh={refetch}
+        refreshing={loading}
+      />
 
-      <DataTable
+      <BookingStats {...stats} />
+
+      {error && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </div>
+      )}
+
+      <ServerPaginatedTable
         columns={columns}
-        data={ADMIN_MOCK_BOOKINGS}
-        searchPlaceholder="Search by ID, user, or driver..."
-        pageSize={10}
+        data={bookings}
+        loading={loading}
+        limit={limit}
+        page={page}
+        pagination={pagination}
+        onPageChange={setPage}
+        onRowClick={(row) => setSelectedBooking(row)}
+        entityLabel="bookings"
+        emptyMessage="No bookings found"
+      />
+
+      <BookingDetailsModal
+        isOpen={!!selectedBooking}
+        onClose={() => setSelectedBooking(null)}
+        booking={selectedBooking}
       />
     </div>
   );

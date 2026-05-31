@@ -95,6 +95,7 @@ import {
   updateRefundStatus,
 } from '../controllers/refund.controller.js';
 import { listPlatformRevenue } from '../controllers/revenue.controller.js';
+import { getAdminBookings, getAdminBookingById } from '../controllers/booking.controller.js';
 
 const router = express.Router();
 const { ALL_STAFF, OPERATIONS, SUPER_ADMIN } = ROUTE_ROLES;
@@ -113,6 +114,9 @@ router.post('/tasks/assign', protectStaff, restrictTo(...OPERATIONS), assignTask
 router.post('/tasks/sync', protectStaff, restrictTo(...OPERATIONS), syncReviewTasks);
 router.patch('/tasks/:id/assign', protectStaff, restrictTo(...OPERATIONS), assignTask);
 router.post('/tasks/:id/claim', protectStaff, restrictTo(...OPERATIONS), claimTask);
+
+router.get('/bookings', protectStaff, restrictTo(...ALL_STAFF), getAdminBookings);
+router.get('/bookings/:id', protectStaff, restrictTo(...ALL_STAFF), getAdminBookingById);
 
 router.get('/drivers', protectStaff, restrictTo(...ALL_STAFF), getDrivers);
 router.get('/drivers/live', protectStaff, restrictTo(...ALL_STAFF), getLiveDriversSnapshot);

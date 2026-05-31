@@ -8,6 +8,7 @@ import {
   getBookingByIdService,
   cancelBookingByUserService,
   sanitizeBookingForDriver,
+  listAdminBookingsService,
 } from '../services/booking.service.js';
 import {
   createExtensionService,
@@ -209,4 +210,18 @@ export const respondToNoShowPrompt = asyncHandler(async (req, res) => {
   return res
     .status(200)
     .json(new ApiResponse(200, { response }, 'Response recorded'));
+});
+
+/* ------------------------------------------------------------------ */
+/* Admin                                                               */
+/* ------------------------------------------------------------------ */
+
+export const getAdminBookings = asyncHandler(async (req, res) => {
+  const result = await listAdminBookingsService(req.query);
+  return res.status(200).json(new ApiResponse(200, result, 'Bookings fetched'));
+});
+
+export const getAdminBookingById = asyncHandler(async (req, res) => {
+  const booking = await getBookingByIdService(req.params.id);
+  return res.status(200).json(new ApiResponse(200, { booking }, 'Booking fetched'));
 });

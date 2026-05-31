@@ -138,11 +138,14 @@ const ConfirmAndPayPage = () => {
       toast.error('Please confirm you\u2019ll arrange the driver\u2019s meal');
       return;
     }
-    if (!canPay) {
-      setShortfall(Math.max(0, total - balance));
+    
+    const freshBalance = Number(useUserWalletStore.getState().wallet?.balance || 0);
+    if (freshBalance < total) {
+      setShortfall(Math.max(0, total - freshBalance));
       setTopupOpen(true);
       return;
     }
+    
     setSubmitting(true);
     try {
       const payload = useBookingDraftStore.getState().buildCreatePayload();
