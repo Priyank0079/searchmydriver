@@ -15,6 +15,9 @@ import {
   AlertTriangle,
   Utensils,
   Moon,
+  Pencil,
+  X,
+  CalendarClock,
 } from 'lucide-react';
 import Card from '../../../../components/Card';
 import Button from '../../../../components/Button';
@@ -55,10 +58,15 @@ const ConfirmAndPayPage = () => {
   const wallet = useUserWalletStore((s) => s.wallet);
   const fetchWallet = useUserWalletStore((s) => s.fetchWallet);
 
+  const setCarId = useBookingDraftStore((s) => s.setCarId);
+
   const [selectedCar, setSelectedCar] = useState(null);
+  const [allCars, setAllCars] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [topupOpen, setTopupOpen] = useState(false);
   const [shortfall, setShortfall] = useState(0);
+  const [carEditOpen, setCarEditOpen] = useState(false);
+  const [pickupEditOpen, setPickupEditOpen] = useState(false);
 
   // Guard: bounce back to the start of the flow if state is incomplete.
   useEffect(() => {
@@ -71,19 +79,15 @@ const ConfirmAndPayPage = () => {
     fetchWallet().catch(() => { });
   }, [fetchWallet]);
 
-  // Resolve the selected car for the summary block — tolerant on failure.
+  // Fetch car list once — used both for the summary and the edit sheet.
   useEffect(() => {
     let cancelled = false;
-    if (!draft.carId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing on carId removal
-      setSelectedCar(null);
-      return undefined;
-    }
     api
       .get('/auth/cars')
       .then((res) => {
         if (cancelled) return;
         const list = Array.isArray(res?.data?.data) ? res.data.data : [];
+        setAllCars(list);
         setSelectedCar(list.find((c) => c._id === draft.carId) || null);
       })
       .catch(() => {
@@ -92,7 +96,14 @@ const ConfirmAndPayPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [draft.carId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep selectedCar in sync when the draft carId changes (e.g. after edit).
+  useEffect(() => {
+    if (!allCars.length) return;
+    setSelectedCar(allCars.find((c) => c._id === draft.carId) || null);
+  }, [draft.carId, allCars]);
 
   // Live fare estimate — fully reuses the booking-flow hook so the wire
   // format stays in lockstep with the slab page.
@@ -240,7 +251,12 @@ const ConfirmAndPayPage = () => {
       </div>
 
       <div className="flex-1 p-4 space-y-4">
-        <TripSummary draft={draft} car={selectedCar} />
+        <TripSummary
+          draft={draft}
+          car={selectedCar}
+          onEditCar={() => setCarEditOpen(true)}
+          onEditPickup={() => setPickupEditOpen(true)}
+        />
         <FareCard estimate={estimate} estimating={estimating} error={estimateError} />
         <FareNotices estimate={estimate} />
         {isHourly && foodRequired && (
@@ -297,6 +313,28 @@ const ConfirmAndPayPage = () => {
             : null
         }
         onSuccess={handleTopupSuccess}
+      />
+
+      {/* Edit car bottom-sheet */}
+      <EditCarSheet
+        open={carEditOpen}
+        cars={allCars}
+        selectedCarId={draft.carId}
+        onClose={() => setCarEditOpen(false)}
+        onSelect={(carId) => {
+          setCarId(carId);
+          setCarEditOpen(false);
+        }}
+      />
+
+      {/* Pickup time / hours change confirmation */}
+      <PickupTimeConfirmDialog
+        open={pickupEditOpen}
+        onClose={() => setPickupEditOpen(false)}
+        onConfirm={() => {
+          setPickupEditOpen(false);
+          navigate('/user/book/hourly/type');
+        }}
       />
     </div>
   );
@@ -520,7 +558,7 @@ function FoodAcknowledgement({ thresholdHours, checked, onChange }) {
   );
 }
 
-function TripSummary({ draft, car }) {
+function TripSummary({ draft, car, onEditCar, onEditPickup }) {
   const isHourly = draft.serviceType === SERVICE_TYPES.HOURLY;
   const schedule = isHourly ? draft.hourly?.scheduledStartAt : draft.outstation?.startDate;
   const dropAddress = draft.dropoff?.address || draft.outstation?.destinationAddress;
@@ -528,6 +566,7 @@ function TripSummary({ draft, car }) {
   return (
     <Card>
       <div className="space-y-4">
+        {/* Pickup address */}
         <div className="flex gap-3">
           <div className="flex flex-col items-center gap-1 pt-1">
             <CircleDot className="w-4 h-4 text-success" />
@@ -554,6 +593,7 @@ function TripSummary({ draft, car }) {
           </div>
         </div>
 
+        {/* Car row — with edit button */}
         {car && (
           <>
             <div className="h-px bg-border-light" />
@@ -574,43 +614,193 @@ function TripSummary({ draft, car }) {
                   {car.vehicleNumber}
                 </p>
               </div>
+              {onEditCar && (
+                <button
+                  type="button"
+                  onClick={onEditCar}
+                  className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 h-8 rounded-xl border border-border bg-gray-50 hover:bg-primary/5 hover:border-primary/30 text-text-muted hover:text-primary text-[11px] font-semibold transition"
+                >
+                  <Pencil className="w-3 h-3" />
+                  Edit
+                </button>
+              )}
             </div>
           </>
         )}
 
         <div className="h-px bg-border-light" />
 
-        <div className="grid grid-cols-2 gap-3">
-          <FactRow
-            icon={Calendar}
-            label={isHourly ? 'Pickup time' : 'Trip dates'}
-            value={
-              isHourly
-                ? formatPickupDateTime(schedule)
-                : `${formatDateShort(draft.outstation?.startDate)} \u2192 ${formatDateShort(draft.outstation?.endDate)}`
-            }
-          />
-          <FactRow
-            icon={Clock}
-            label={isHourly ? 'Duration' : 'Days'}
-            value={
-              isHourly
-                ? `${draft.hourly?.durationHours || 0} h`
-                : `${draft.outstation?.days || 1} day · ${draft.outstation?.nights || 0} night`
-            }
-          />
-          <FactRow icon={Car} label="Service" value={SERVICE_TYPE_LABELS[draft.serviceType]} />
-          {!isHourly && (
+        {/* Schedule / duration grid — with edit button for hourly */}
+        <div className="flex items-start gap-2">
+          <div className="flex-1 grid grid-cols-2 gap-3">
             <FactRow
-              icon={MapPin}
-              label="Driver stay/food"
-              value={`${draft.outstation?.needsStay ? 'We arrange stay' : 'Customer arranges'}, ${draft.outstation?.needsFood ? 'we arrange food' : 'customer arranges'
-                }`}
+              icon={Calendar}
+              label={isHourly ? 'Pickup time' : 'Trip dates'}
+              value={
+                isHourly
+                  ? formatPickupDateTime(schedule)
+                  : `${formatDateShort(draft.outstation?.startDate)} \u2192 ${formatDateShort(draft.outstation?.endDate)}`
+              }
             />
+            <FactRow
+              icon={Clock}
+              label={isHourly ? 'Duration' : 'Days'}
+              value={
+                isHourly
+                  ? `${draft.hourly?.durationHours || 0} h`
+                  : `${draft.outstation?.days || 1} day · ${draft.outstation?.nights || 0} night`
+              }
+            />
+            <FactRow icon={Car} label="Service" value={SERVICE_TYPE_LABELS[draft.serviceType]} />
+            {!isHourly && (
+              <FactRow
+                icon={MapPin}
+                label="Driver stay/food"
+                value={`${draft.outstation?.needsStay ? 'We arrange stay' : 'Customer arranges'}, ${
+                  draft.outstation?.needsFood ? 'we arrange food' : 'customer arranges'
+                }`}
+              />
+            )}
+          </div>
+          {isHourly && onEditPickup && (
+            <button
+              type="button"
+              onClick={onEditPickup}
+              className="flex-shrink-0 mt-0.5 inline-flex items-center gap-1.5 px-3 h-8 rounded-xl border border-border bg-gray-50 hover:bg-primary/5 hover:border-primary/30 text-text-muted hover:text-primary text-[11px] font-semibold transition"
+            >
+              <Pencil className="w-3 h-3" />
+              Edit
+            </button>
           )}
         </div>
       </div>
     </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Edit Car Sheet                                                       */
+/* ------------------------------------------------------------------ */
+
+function EditCarSheet({ open, cars, selectedCarId, onClose, onSelect }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end justify-center">
+      <div
+        className="bg-white w-full max-w-lg rounded-t-3xl shadow-2xl animate-fade-in-up max-h-[80dvh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-border-light">
+          <div>
+            <p className="text-base font-bold text-text">Select a car</p>
+            <p className="text-xs text-text-muted mt-0.5">Choose which car the driver will manage</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-8 h-8 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition"
+          >
+            <X className="w-4 h-4 text-text-muted" />
+          </button>
+        </div>
+
+        {/* Car list */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          {cars.length === 0 && (
+            <p className="text-sm text-text-muted text-center py-8">No cars found.</p>
+          )}
+          {cars.map((c) => {
+            const isActive = c._id === selectedCarId;
+            return (
+              <button
+                key={c._id}
+                type="button"
+                onClick={() => onSelect(c._id)}
+                className={`w-full flex items-center gap-3 rounded-2xl border p-3 text-left transition ${
+                  isActive
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border bg-white hover:bg-gray-50'
+                }`}
+              >
+                {/* Car thumbnail */}
+                <div className="w-12 h-12 rounded-xl bg-gray-100 overflow-hidden flex items-center justify-center shrink-0">
+                  {c.image ? (
+                    <img src={c.image} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <Car className="w-5 h-5 text-text-muted" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-text truncate">
+                    {getCarBrandName(c)} · {getCarModelName(c)}
+                  </p>
+                  <p className="text-[11px] font-mono text-text-secondary">{c.vehicleNumber}</p>
+                </div>
+                {/* Active check */}
+                <div
+                  className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition ${
+                    isActive ? 'border-primary bg-primary' : 'border-gray-300'
+                  }`}
+                >
+                  {isActive && <CheckCircle2 className="w-3 h-3 text-white" />}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Pickup Time Confirm Dialog                                           */
+/* ------------------------------------------------------------------ */
+
+function PickupTimeConfirmDialog({ open, onClose, onConfirm }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+      <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl animate-fade-in-up">
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-11 h-11 rounded-2xl bg-amber-100 flex items-center justify-center shrink-0">
+            <CalendarClock className="w-5 h-5 text-amber-700" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-base font-bold text-text">Change pickup time or hours?</p>
+            <p className="text-sm text-text-secondary mt-1 leading-snug">
+              You'll be taken back to select a new booking type, pickup time, and duration. Your
+              current pickup location and car will be kept.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-xl hover:bg-gray-100 text-text-muted shrink-0"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="space-y-2 mt-2">
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-primary text-white font-semibold py-3 text-sm hover:bg-primary-dark transition"
+          >
+            <CalendarClock className="w-4 h-4" />
+            Yes, change it
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full inline-flex items-center justify-center rounded-2xl border border-border bg-white text-text font-semibold py-3 text-sm hover:bg-gray-50 transition"
+          >
+            Keep current time
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
