@@ -168,7 +168,7 @@ const HourlySlabSelectionPage = () => {
     if (foodGateUnmet) return;
     // Stamp the final hourly picks into the draft so the confirm-and-pay
     // page reads consistent values. No backend call here — that happens
-    // on /user/book/confirm.
+    // on confirm.
     setHourly({
       durationHours: currentSelection.durationHours,
       slabId: currentSelection.isCustom ? null : currentSelection.slabId,
@@ -243,9 +243,8 @@ const HourlySlabSelectionPage = () => {
                     key={id}
                     active={selectedKey === id}
                     title={slab.label || `Up to ${slab.maxHours} hours`}
-                    subtitle={`Up to ${slab.maxHours} h${
-                      pricing.extraHourCharge ? ` · extra ₹${pricing.extraHourCharge}/hr` : ''
-                    }`}
+                    subtitle={`Up to ${slab.maxHours} h${pricing.extraHourCharge ? ` · extra ₹${pricing.extraHourCharge}/hr` : ''
+                      }`}
                     price={`₹${slab.price}`}
                     onClick={() => setSelectedKey(id)}
                   />
@@ -314,27 +313,24 @@ const HourlySlabSelectionPage = () => {
 function FoodRequiredCheckbox({ thresholdHours, checked, onChange }) {
   return (
     <label
-      className={`rounded-2xl border p-3 flex items-start gap-3 cursor-pointer transition ${
-        checked
-          ? 'border-emerald-200 bg-emerald-50'
-          : 'border-amber-300 bg-amber-50'
-      }`}
+      className={`rounded-2xl border p-3 flex items-start gap-3 cursor-pointer transition ${checked
+        ? 'border-emerald-200 bg-emerald-50'
+        : 'border-amber-300 bg-amber-50'
+        }`}
     >
       <div
-        className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-          checked
-            ? 'bg-emerald-100 text-emerald-700'
-            : 'bg-amber-100 text-amber-700'
-        }`}
+        className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${checked
+          ? 'bg-emerald-100 text-emerald-700'
+          : 'bg-amber-100 text-amber-700'
+          }`}
       >
         <Utensils className="w-4 h-4" />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <p
-            className={`text-sm font-bold ${
-              checked ? 'text-emerald-900' : 'text-amber-900'
-            }`}
+            className={`text-sm font-bold ${checked ? 'text-emerald-900' : 'text-amber-900'
+              }`}
           >
             I&apos;ll arrange the driver&apos;s meal
           </p>
@@ -346,9 +342,8 @@ function FoodRequiredCheckbox({ thresholdHours, checked, onChange }) {
           {checked && <Info className="w-3.5 h-3.5 text-emerald-700" />}
         </div>
         <p
-          className={`text-[12px] leading-snug mt-0.5 ${
-            checked ? 'text-emerald-800' : 'text-amber-800'
-          }`}
+          className={`text-[12px] leading-snug mt-0.5 ${checked ? 'text-emerald-800' : 'text-amber-800'
+            }`}
         >
           Bookings of {thresholdHours} hours or longer cross meal time. We
           don&apos;t add a food charge to your fare — please confirm you&apos;ll
@@ -402,14 +397,12 @@ function SlabRow({ active, title, subtitle, price, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className={`w-full text-left rounded-2xl border p-3 flex items-center gap-3 transition ${
-        active ? 'border-primary bg-primary/5' : 'border-border bg-white hover:bg-gray-50'
-      }`}
+      className={`w-full text-left rounded-2xl border p-3 flex items-center gap-3 transition ${active ? 'border-primary bg-primary/5' : 'border-border bg-white hover:bg-gray-50'
+        }`}
     >
       <div
-        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-          active ? 'border-primary bg-primary' : 'border-gray-300'
-        }`}
+        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${active ? 'border-primary bg-primary' : 'border-gray-300'
+          }`}
       >
         {active && <Check className="w-3 h-3 text-white" />}
       </div>
@@ -425,9 +418,8 @@ function SlabRow({ active, title, subtitle, price, onClick }) {
 function CustomRow({ active, label, rate, maxHours, hours, onSelect, onHoursChange }) {
   return (
     <div
-      className={`rounded-2xl border p-3 transition ${
-        active ? 'border-primary bg-primary/5' : 'border-border bg-white'
-      }`}
+      className={`rounded-2xl border p-3 transition ${active ? 'border-primary bg-primary/5' : 'border-border bg-white'
+        }`}
     >
       <button
         type="button"
@@ -435,9 +427,8 @@ function CustomRow({ active, label, rate, maxHours, hours, onSelect, onHoursChan
         className="w-full flex items-center gap-3 text-left"
       >
         <div
-          className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-            active ? 'border-primary bg-primary' : 'border-gray-300'
-          }`}
+          className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${active ? 'border-primary bg-primary' : 'border-gray-300'
+            }`}
         >
           {active && <Check className="w-3 h-3 text-white" />}
         </div>

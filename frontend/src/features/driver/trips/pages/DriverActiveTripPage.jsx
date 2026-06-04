@@ -164,7 +164,8 @@ const DriverActiveTripPage = () => {
       navigate('/driver/home', { replace: true });
     } else if (
       status === BOOKING_STATUS.CANCELLED ||
-      status === BOOKING_STATUS.NO_DRIVERS_FOUND
+      status === BOOKING_STATUS.NO_DRIVERS_FOUND ||
+      status === BOOKING_STATUS.SEARCHING
     ) {
       // Pick the right toast for why this booking ended. The reason
       // string is stamped onto `booking.cancellation` by the backend.

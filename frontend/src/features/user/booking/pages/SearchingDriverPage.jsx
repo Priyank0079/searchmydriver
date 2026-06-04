@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { MapPin, Loader2, X, AlertTriangle } from 'lucide-react';
 import Button from '../../../../components/Button';
+import ConfirmDialog from '../../../../components/ConfirmDialog';
 import { useSocketEvent } from '../../../../hooks/useSocket';
 import { S2C_EVENTS } from '../../../../constants/socketEvents';
 import useUserActiveBookingStore from '../../../../store/user/useUserActiveBookingStore';
@@ -22,6 +23,7 @@ const SearchingDriverPage = () => {
   const draftReset = useBookingDraftStore((s) => s.reset);
   const fetchWallet = useUserWalletStore((s) => s.fetchWallet);
   const [cancelling, setCancelling] = useState(false);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   // Surfaces the "driver bailed — searching again" popup the moment the
   // backend re-dispatches a previously-accepted booking. The popup is
   // dismissible; the underlying search continues regardless.
@@ -155,9 +157,11 @@ const SearchingDriverPage = () => {
       // the backend — pull the fresh balance now.
       fetchWallet().catch(() => {});
       draftReset();
+      setCancelConfirmOpen(false);
       navigate('/user/home', { replace: true });
     } catch (err) {
       toast.error(err?.response?.data?.message || 'Could not cancel');
+      setCancelConfirmOpen(false);
     } finally {
       setCancelling(false);
     }
@@ -196,18 +200,43 @@ const SearchingDriverPage = () => {
           <span className="text-xs">{booking?.bookingNumber || 'Preparing booking…'}</span>
         </div>
 
-        <div className="mt-10 w-full max-w-xs">
-          <Button
-            variant="ghost"
-            fullWidth
-            icon={X}
-            loading={cancelling}
-            onClick={handleCancel}
+        <div className="mt-10 w-full max-w-xs space-y-4">
+          {/* Ad Banner Space */}
+          <div className="w-full h-28 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col items-center justify-center relative overflow-hidden">
+            <span className="absolute top-2 right-3 text-[9px] font-bold tracking-widest uppercase text-slate-400">
+              Sponsored
+            </span>
+            <div className="flex flex-col items-center opacity-60 mt-2">
+              <div className="w-10 h-10 bg-slate-200 rounded-xl mb-1 flex items-center justify-center">
+                <span className="text-lg">🎉</span>
+              </div>
+              <p className="text-[11px] font-medium text-slate-500">Promotional Banner</p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            disabled={cancelling}
+            onClick={() => setCancelConfirmOpen(true)}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 text-red-600 font-semibold py-3 text-sm disabled:opacity-60 hover:bg-red-100 transition"
           >
-            Cancel booking
-          </Button>
+            <X className="w-4 h-4" />
+            {cancelling ? 'Cancelling…' : 'Cancel booking'}
+          </button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={cancelConfirmOpen}
+        onClose={() => !cancelling && setCancelConfirmOpen(false)}
+        onConfirm={handleCancel}
+        title="Cancel search?"
+        description="Are you sure you want to cancel? We are actively looking for the nearest available driver for you."
+        confirmLabel="Yes, cancel"
+        cancelLabel="Keep searching"
+        variant="danger"
+        loading={cancelling}
+      />
 
       {shouldShowReassign && (
         <DriverReassigningModal onClose={handleDismissReassign} />

@@ -244,14 +244,15 @@ const ScheduledConfirmedPage = () => {
       </div>
 
       <div className="bg-white border-t border-border-light px-4 py-3">
-        <Button
-          variant="ghost"
-          fullWidth
-          icon={X}
+        <button
+          type="button"
+          disabled={cancelling}
           onClick={() => setCancelOpen(true)}
+          className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 text-red-600 font-semibold py-3 text-sm disabled:opacity-60 hover:bg-red-100 transition"
         >
-          Cancel scheduled ride
-        </Button>
+          <X className="w-4 h-4" />
+          {cancelling ? 'Cancelling…' : 'Cancel scheduled ride'}
+        </button>
       </div>
 
       <ConfirmDialog

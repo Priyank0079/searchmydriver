@@ -68,7 +68,7 @@ const ConfirmAndPayPage = () => {
   }, [draft.serviceType, draft.pickup, draft.carId, navigate]);
 
   useEffect(() => {
-    fetchWallet().catch(() => {});
+    fetchWallet().catch(() => { });
   }, [fetchWallet]);
 
   // Resolve the selected car for the summary block — tolerant on failure.
@@ -140,14 +140,14 @@ const ConfirmAndPayPage = () => {
       toast.error('Please confirm you\u2019ll arrange the driver\u2019s meal');
       return;
     }
-    
+
     const freshBalance = Number(useUserWalletStore.getState().wallet?.balance || 0);
     if (freshBalance < total) {
       setShortfall(Math.max(0, total - freshBalance));
       setTopupOpen(true);
       return;
     }
-    
+
     setSubmitting(true);
     try {
       const payload = useBookingDraftStore.getState().buildCreatePayload();
@@ -156,7 +156,7 @@ const ConfirmAndPayPage = () => {
         // Optimistically pull a fresh wallet snapshot — the debit
         // already happened server-side; this keeps the bottom-nav badge
         // and the wallet page in sync without a manual refresh.
-        fetchWallet().catch(() => {});
+        fetchWallet().catch(() => { });
         // Long-lead scheduled bookings (`PENDING_ASSIGNMENT`) go to a
         // dedicated "ride scheduled" screen — the worker hasn't even
         // started searching yet, so the spinner page would be misleading.
@@ -188,7 +188,7 @@ const ConfirmAndPayPage = () => {
       ) {
         toast.error(
           err?.response?.data?.message ||
-            'This car is already booked for an overlapping time. Pick a different car or change the pickup time.',
+          'This car is already booked for an overlapping time. Pick a different car or change the pickup time.',
           { duration: 6000 },
         );
         return;
@@ -197,7 +197,7 @@ const ConfirmAndPayPage = () => {
       if (err?.response?.status === 422) {
         toast.error(
           err?.response?.data?.message ||
-            'Pick a later pickup time and try again.',
+          'Pick a later pickup time and try again.',
           { duration: 5000 },
         );
         return;
@@ -473,27 +473,24 @@ function FareNotices({ estimate }) {
 function FoodAcknowledgement({ thresholdHours, checked, onChange }) {
   return (
     <label
-      className={`rounded-2xl border p-3 flex items-start gap-3 cursor-pointer transition ${
-        checked
+      className={`rounded-2xl border p-3 flex items-start gap-3 cursor-pointer transition ${checked
           ? 'border-emerald-200 bg-emerald-50'
           : 'border-amber-300 bg-amber-50'
-      }`}
+        }`}
     >
       <div
-        className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-          checked
+        className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${checked
             ? 'bg-emerald-100 text-emerald-700'
             : 'bg-amber-100 text-amber-700'
-        }`}
+          }`}
       >
         <Utensils className="w-4 h-4" />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <p
-            className={`text-sm font-bold ${
-              checked ? 'text-emerald-900' : 'text-amber-900'
-            }`}
+            className={`text-sm font-bold ${checked ? 'text-emerald-900' : 'text-amber-900'
+              }`}
           >
             I&apos;ll arrange the driver&apos;s meal
           </p>
@@ -504,9 +501,8 @@ function FoodAcknowledgement({ thresholdHours, checked, onChange }) {
           )}
         </div>
         <p
-          className={`text-[12px] leading-snug mt-0.5 ${
-            checked ? 'text-emerald-800' : 'text-amber-800'
-          }`}
+          className={`text-[12px] leading-snug mt-0.5 ${checked ? 'text-emerald-800' : 'text-amber-800'
+            }`}
         >
           Bookings of {thresholdHours || 'this length'} hours or more cross
           meal time. We don&apos;t add a food charge to your fare &mdash;
@@ -608,9 +604,8 @@ function TripSummary({ draft, car }) {
             <FactRow
               icon={MapPin}
               label="Driver stay/food"
-              value={`${draft.outstation?.needsStay ? 'We arrange stay' : 'Customer arranges'}, ${
-                draft.outstation?.needsFood ? 'we arrange food' : 'customer arranges'
-              }`}
+              value={`${draft.outstation?.needsStay ? 'We arrange stay' : 'Customer arranges'}, ${draft.outstation?.needsFood ? 'we arrange food' : 'customer arranges'
+                }`}
             />
           )}
         </div>
