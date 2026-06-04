@@ -1,6 +1,7 @@
 /** Keep in sync with backend/src/constants/bookingStatus.js */
 
 export const BOOKING_STATUS = Object.freeze({
+  PENDING_ASSIGNMENT: 'pending_assignment',
   SEARCHING: 'searching',
   DRIVER_ASSIGNED: 'driver_assigned',
   AWAITING_PAYMENT: 'awaiting_payment',
@@ -10,17 +11,20 @@ export const BOOKING_STATUS = Object.freeze({
   COMPLETED: 'completed',
   CANCELLED: 'cancelled',
   NO_DRIVERS_FOUND: 'no_drivers_found',
+  IN_EMERGENCY_POOL: 'in_emergency_pool',
 });
 
 export const BOOKING_STATUS_LIST = Object.freeze(Object.values(BOOKING_STATUS));
 
 export const ACTIVE_BOOKING_STATUSES = Object.freeze([
+  BOOKING_STATUS.PENDING_ASSIGNMENT,
   BOOKING_STATUS.SEARCHING,
   BOOKING_STATUS.DRIVER_ASSIGNED,
   BOOKING_STATUS.AWAITING_PAYMENT,
   BOOKING_STATUS.EN_ROUTE,
   BOOKING_STATUS.ARRIVED,
   BOOKING_STATUS.STARTED,
+  BOOKING_STATUS.IN_EMERGENCY_POOL,
 ]);
 
 export const TERMINAL_BOOKING_STATUSES = Object.freeze([
@@ -90,4 +94,19 @@ export const PAYMENT_POLICY = Object.freeze({
   RIDE_OTP_LENGTH: 4,
   RIDE_OTP_MAX_ATTEMPTS: 5,
   EXTENSION_PROMPT_LEAD_SECONDS: 5 * 60,
+});
+
+/**
+ * Scheduled-ride policy mirror — keep in sync with backend's
+ * `SCHEDULED_BOOKING`. The UI uses these to gate the date/time picker
+ * (`MIN_SCHEDULED_LEAD_HOURS`) and to label the assignment window
+ * ("we start looking N hours before pickup").
+ */
+export const SCHEDULED_BOOKING = Object.freeze({
+  MORNING_START_HOUR: 6,
+  MORNING_END_HOUR: 10,
+  SHORT_WINDOW_HOURS: 6,
+  LONG_LEAD_HOURS: 4,
+  EMERGENCY_POOL_MINUTES: 120,
+  MIN_SCHEDULED_LEAD_HOURS: 2,
 });

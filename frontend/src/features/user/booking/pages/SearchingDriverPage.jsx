@@ -60,6 +60,15 @@ const SearchingDriverPage = () => {
           navigate('/user/book/payment');
         }
         break;
+      // Scheduled long-lead bookings can land here on a hard refresh
+      // before the worker has fired the `assign` job (status still
+      // PENDING_ASSIGNMENT) — bounce them to the scheduled-confirmed
+      // screen. Same for IN_EMERGENCY_POOL where an admin is in the
+      // loop — neither state has a live "searching" UI to render.
+      case BOOKING_STATUS.PENDING_ASSIGNMENT:
+      case BOOKING_STATUS.IN_EMERGENCY_POOL:
+        navigate('/user/book/scheduled', { replace: true });
+        break;
       case BOOKING_STATUS.NO_DRIVERS_FOUND: {
         // Drop the failed booking from the local store but keep the booking
         // draft intact so the user can tweak their selection and retry

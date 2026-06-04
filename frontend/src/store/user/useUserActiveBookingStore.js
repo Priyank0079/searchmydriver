@@ -87,6 +87,22 @@ const useUserActiveBookingStore = create((set, get) => ({
     }
     if (typeof patch.amountDue === 'number') merged.amountDue = patch.amountDue;
     if (typeof patch.effectiveTotal === 'number') merged.effectiveTotal = patch.effectiveTotal;
+    // Scheduled-ride metadata can change mid-flight (e.g. the worker
+    // stamps `assignmentStartedAt` when it flips PENDING_ASSIGNMENT →
+    // SEARCHING, or the escalator stamps `escalatedAt` + populates
+    // `emergencyPool` when the booking enters the manual queue).
+    if (patch.scheduled) {
+      merged.scheduled = { ...(current.scheduled || {}), ...patch.scheduled };
+    }
+    // The pickup-time field can land alone on the patch from reminders
+    // or escalation events; surface it so the UI countdown stays
+    // accurate if the server adjusts it.
+    if (patch.scheduledStartAt && merged.hourly) {
+      merged.hourly = {
+        ...(current.hourly || {}),
+        scheduledStartAt: patch.scheduledStartAt,
+      };
+    }
     set({ booking: merged });
   },
 

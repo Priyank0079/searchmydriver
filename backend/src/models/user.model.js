@@ -138,6 +138,19 @@ const userSchema = new mongoose.Schema(
       totalSpent: { type: Number, default: 0, min: 0 },
       currency: { type: String, default: 'INR', trim: true },
     },
+
+    /**
+     * Zones a `team_member` staff account is responsible for.
+     *
+     * Drives visibility on the admin "Emergency Pool" page: a team
+     * member only sees bookings whose pickup falls inside one of
+     * these zones. `admin` and `sub_admin` see everything regardless
+     * of this list, so it's safe to leave empty for them.
+     */
+    assignedZones: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Zone' }],
+      default: [],
+    },
   },
   {
     timestamps: true,

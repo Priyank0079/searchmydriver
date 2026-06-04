@@ -18,6 +18,13 @@
  */
 
 export const BOOKING_STATUS = Object.freeze({
+  /**
+   * Future-scheduled hourly bookings sit here until the worker fires
+   * `kickoffScheduledAssignment` (rideTime − LONG_LEAD_HOURS). At that
+   * point the status flips to SEARCHING and the standard wave dispatcher
+   * takes over. Instant bookings skip this state entirely.
+   */
+  PENDING_ASSIGNMENT: 'pending_assignment',
   SEARCHING: 'searching',
   DRIVER_ASSIGNED: 'driver_assigned',
   AWAITING_PAYMENT: 'awaiting_payment',
@@ -27,18 +34,28 @@ export const BOOKING_STATUS = Object.freeze({
   COMPLETED: 'completed',
   CANCELLED: 'cancelled',
   NO_DRIVERS_FOUND: 'no_drivers_found',
+  /**
+   * Scheduled booking that still has no driver
+   * `SCHEDULED_BOOKING.EMERGENCY_POOL_MINUTES` minutes before pickup.
+   * Surfaced on the admin/sub-admin "Emergency Pool" dashboard so a
+   * human can assign a driver by hand. Team members only see entries
+   * whose pickup is inside a zone they're assigned to.
+   */
+  IN_EMERGENCY_POOL: 'in_emergency_pool',
 });
 
 export const BOOKING_STATUS_LIST = Object.freeze(Object.values(BOOKING_STATUS));
 
 /** Statuses where a booking is still "live" (driver may have work to do). */
 export const ACTIVE_BOOKING_STATUSES = Object.freeze([
+  BOOKING_STATUS.PENDING_ASSIGNMENT,
   BOOKING_STATUS.SEARCHING,
   BOOKING_STATUS.DRIVER_ASSIGNED,
   BOOKING_STATUS.AWAITING_PAYMENT,
   BOOKING_STATUS.EN_ROUTE,
   BOOKING_STATUS.ARRIVED,
   BOOKING_STATUS.STARTED,
+  BOOKING_STATUS.IN_EMERGENCY_POOL,
 ]);
 
 export const TERMINAL_BOOKING_STATUSES = Object.freeze([
@@ -144,4 +161,46 @@ export const DISPATCH_RESPONSE = Object.freeze({
   REJECTED: 'rejected',
   TIMEOUT: 'timeout',
   CANCELLED: 'cancelled',
+});
+
+/**
+ * Scheduled-ride dispatcher policy.
+ *
+ * The user picks a future pickup time; the backend decides WHEN to start
+ * searching for a driver based on three tiers, in order:
+ *
+ *   1. "Morning rides" (start time in [MORNING_START_HOUR, MORNING_END_HOUR))
+ *      → search immediately so drivers can plan their day.
+ *
+ *   2. Short-window rides (hoursUntilStart ≤ SHORT_WINDOW_HOURS)
+ *      → search immediately — same UX as instant once we're close.
+ *
+ *   3. Everything else
+ *      → defer: enqueue an `assign` job that fires at
+ *        `scheduledStartAt − LONG_LEAD_HOURS`.
+ *
+ * Separately, every scheduled booking also gets an `escalate` job that
+ * fires at `scheduledStartAt − EMERGENCY_POOL_MINUTES`. If no driver is
+ * assigned by then the booking moves to `IN_EMERGENCY_POOL` and the
+ * admin assigns one manually.
+ *
+ * `REMINDER_OFFSETS_MINUTES` controls the in-app countdown toasts the
+ * user / driver receive ahead of the pickup. All knobs are overridable
+ * per-service via `ServicePricing.scheduledDispatch`.
+ */
+export const SCHEDULED_BOOKING = Object.freeze({
+  MORNING_START_HOUR: 6,
+  MORNING_END_HOUR: 10,
+  SHORT_WINDOW_HOURS: 6,
+  LONG_LEAD_HOURS: 4,
+  EMERGENCY_POOL_MINUTES: 120,
+  REMINDER_OFFSETS_MINUTES: Object.freeze([60, 15]),
+  /**
+   * Hard floor on how far in advance a scheduled booking can be created.
+   * The emergency-pool window opens `EMERGENCY_POOL_MINUTES` before
+   * pickup, so anything sooner than that has no safety net — we
+   * require ≥ 2h lead time to keep the dispatcher honest. Users
+   * needing a ride sooner should pick "Instant".
+   */
+  MIN_SCHEDULED_LEAD_HOURS: 2,
 });

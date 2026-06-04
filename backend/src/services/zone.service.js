@@ -233,3 +233,69 @@ export const findActiveZoneForPointService = async ({ lat, lng } = {}) => {
 
   return null;
 };
+
+/**
+ * List the IDs of every active zone (polygon OR circle) that contains
+ * the given point. Unlike `findActiveZoneForPointService` this does NOT
+ * stop at the first match — it returns every overlap so the caller can
+ * fan out to all responsible parties.
+ *
+ * Used at booking creation time to stamp `booking.zoneIds`, which then
+ * drives the admin emergency-pool list (a team_member sees a booking
+ * iff at least one of its `zoneIds` is in their `assignedZones`).
+ *
+ * Best-effort: bad coords return [], never throw.
+ *
+ * @param {{ lat:number; lng:number }} point
+ * @returns {Promise<string[]>} ObjectId strings of every matching zone
+ */
+export const findActiveZoneIdsForPointService = async ({ lat, lng } = {}) => {
+  if (
+    typeof lat !== 'number' ||
+    typeof lng !== 'number' ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng) ||
+    lat < -90 ||
+    lat > 90 ||
+    lng < -180 ||
+    lng > 180
+  ) {
+    return [];
+  }
+
+  const [polygonHits, circleHits] = await Promise.all([
+    Zone.find({
+      isActive: true,
+      shapeType: ZONE_SHAPE.POLYGON,
+      boundary: {
+        $geoIntersects: {
+          $geometry: { type: 'Point', coordinates: [lng, lat] },
+        },
+      },
+    }).select('_id'),
+    Zone.aggregate([
+      {
+        $geoNear: {
+          near: { type: 'Point', coordinates: [lng, lat] },
+          distanceField: 'distanceMeters',
+          spherical: true,
+          key: 'center',
+          query: { isActive: true, shapeType: ZONE_SHAPE.CIRCLE },
+        },
+      },
+      {
+        $match: {
+          $expr: {
+            $lte: ['$distanceMeters', { $multiply: ['$radiusKm', 1000] }],
+          },
+        },
+      },
+      { $project: { _id: 1 } },
+    ]),
+  ]);
+
+  const ids = new Set();
+  for (const hit of polygonHits) ids.add(String(hit._id));
+  for (const hit of circleHits) ids.add(String(hit._id));
+  return [...ids];
+};

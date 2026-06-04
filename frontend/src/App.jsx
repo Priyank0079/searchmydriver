@@ -50,6 +50,9 @@ const ConfirmAndPayPage = lazy(() => import('./features/user/booking/pages/Confi
 const PaymentPage = lazy(() => import('./features/user/booking/pages/PaymentPage'));
 const SearchingDriverPage = lazy(() => import('./features/user/booking/pages/SearchingDriverPage'));
 const DriverAssignedPage = lazy(() => import('./features/user/booking/pages/DriverAssignedPage'));
+const ScheduledConfirmedPage = lazy(
+  () => import('./features/user/booking/pages/ScheduledConfirmedPage'),
+);
 
 // User Wallet
 const WalletPage = lazy(() => import('./features/user/wallet/pages/WalletPage'));
@@ -120,6 +123,7 @@ const DriverProfilePage = lazy(() => import('./features/admin/pages/DriverProfil
 const ManageUsers = lazy(() => import('./features/admin/pages/ManageUsers'));
 const UserProfilePage = lazy(() => import('./features/admin/pages/UserProfilePage'));
 const ManageBookings = lazy(() => import('./features/admin/pages/ManageBookings'));
+const ManageEmergencyPool = lazy(() => import('./features/admin/pages/ManageEmergencyPool'));
 const PlatformSettings = lazy(() => import('./features/admin/pages/PlatformSettings'));
 const ManageTeam = lazy(() => import('./features/admin/pages/ManageTeam'));
 const ManageKits = lazy(() => import('./features/admin/pages/ManageKits'));
@@ -169,16 +173,19 @@ function App() {
             <Route element={<UserDashboardLayout />}>
               <Route path="/user/home" element={<UserHomePage />} />
               <Route path="/user/book" element={<Navigate to="/user/book/service" replace />} />
+              <Route path="/user/book/service" element={<SelectServicePage />} />
               <Route path="/user/activity" element={<ActivityPage />} />
               <Route path="/user/account" element={<UserAccountPage />} />
               <Route path="/user/subscriptions" element={<SubscriptionsPage />} />
               <Route path="/user/wallet" element={<WalletPage />} />
+              {/* Scheduled-ride parking lot: PENDING_ASSIGNMENT (worker hasn't
+                  fired yet) and IN_EMERGENCY_POOL (admin is in the loop). */}
+              <Route path="/user/book/scheduled" element={<ScheduledConfirmedPage />} />
             </Route>
           </Route>
 
           {/* ========== User Booking Flow ========== */}
           {/* Legacy / outstation flow */}
-          <Route path="/user/book/service" element={<SelectServicePage />} />
           <Route path="/user/book/variants" element={<SelectVariantPage />} />
           <Route path="/user/book/pickup" element={<SelectPickupPage />} />
           <Route path="/user/book/duration" element={<SelectDurationPage />} />
@@ -197,6 +204,7 @@ function App() {
           {/* Shared post-creation screens (used by both flows) */}
           <Route path="/user/book/searching" element={<SearchingDriverPage />} />
           <Route path="/user/book/assigned" element={<DriverAssignedPage />} />
+
           {/* ========== User Tracking Flow ========== */}
           <Route path="/user/tracking/on-way" element={<DriverOnWayPage />} />
           <Route path="/user/tracking/reached" element={<DriverReachedPage />} />
@@ -281,6 +289,7 @@ function App() {
             <Route path="/admin/kit-orders" element={<ManageKitOrders />} />
             <Route path="/admin/kit-orders/:orderId" element={<KitOrderDetailPage />} />
             <Route path="/admin/bookings" element={<ManageBookings />} />
+            <Route path="/admin/emergency-pool" element={<ManageEmergencyPool />} />
             <Route path="/admin/settings" element={<Navigate to="/admin/settings/platform" replace />} />
             <Route path="/admin/settings/platform" element={<PlatformSettings />} />
             <Route path="/admin/settings/kits" element={<ManageKits />} />

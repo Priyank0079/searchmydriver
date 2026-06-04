@@ -23,6 +23,8 @@ import useBookingDraftStore from '../../../../store/user/useBookingDraftStore';
 import useUserActiveBookingStore from '../../../../store/user/useUserActiveBookingStore';
 import useUserWalletStore from '../../../../store/user/useUserWalletStore';
 import { SERVICE_TYPES, SERVICE_TYPE_LABELS } from '../../../../constants/serviceTypes';
+import { BOOKING_STATUS } from '../../../../constants/bookingStatus';
+import { formatPickupDateTime, formatDateShort } from '../../../../utils/datetime';
 import { getCarBrandName, getCarModelName } from '../../../../utils/vehicleCatalog';
 import FareCard from '../components/FareCard';
 import useFareEstimate from '../hooks/useFareEstimate';
@@ -155,7 +157,16 @@ const ConfirmAndPayPage = () => {
         // already happened server-side; this keeps the bottom-nav badge
         // and the wallet page in sync without a manual refresh.
         fetchWallet().catch(() => {});
-        navigate('/user/book/searching');
+        // Long-lead scheduled bookings (`PENDING_ASSIGNMENT`) go to a
+        // dedicated "ride scheduled" screen — the worker hasn't even
+        // started searching yet, so the spinner page would be misleading.
+        // Morning + short-window scheduled bookings come back as
+        // SEARCHING and use the existing flow.
+        if (booking.status === BOOKING_STATUS.PENDING_ASSIGNMENT) {
+          navigate('/user/book/scheduled');
+        } else {
+          navigate('/user/book/searching');
+        }
       }
     } catch (err) {
       // The wallet service throws ApiError(402) with `{ shortBy, ... }`
@@ -165,6 +176,30 @@ const ConfirmAndPayPage = () => {
       if (err?.response?.status === 402 && Number(data.shortBy) > 0) {
         setShortfall(Number(data.shortBy));
         setTopupOpen(true);
+        return;
+      }
+      // Per-car overlap: backend rejects when the selected car already
+      // has an active or overlapping booking. Surface a longer, more
+      // explanatory toast so the customer knows to pick a different car
+      // or pickup time — they can also book another car in parallel.
+      if (
+        err?.response?.status === 409 &&
+        (data.code === 'CAR_TIME_CONFLICT' || data.code === 'CAR_HAS_ACTIVE_BOOKING')
+      ) {
+        toast.error(
+          err?.response?.data?.message ||
+            'This car is already booked for an overlapping time. Pick a different car or change the pickup time.',
+          { duration: 6000 },
+        );
+        return;
+      }
+      // Scheduled rides require enough lead time for the safety window.
+      if (err?.response?.status === 422) {
+        toast.error(
+          err?.response?.data?.message ||
+            'Pick a later pickup time and try again.',
+          { duration: 5000 },
+        );
         return;
       }
       toast.error(err?.response?.data?.message || err?.message || 'Could not place booking');
@@ -555,10 +590,8 @@ function TripSummary({ draft, car }) {
             label={isHourly ? 'Pickup time' : 'Trip dates'}
             value={
               isHourly
-                ? schedule
-                  ? new Date(schedule).toLocaleString()
-                  : '—'
-                : `${formatDate(draft.outstation?.startDate)} → ${formatDate(draft.outstation?.endDate)}`
+                ? formatPickupDateTime(schedule)
+                : `${formatDateShort(draft.outstation?.startDate)} \u2192 ${formatDateShort(draft.outstation?.endDate)}`
             }
           />
           <FactRow
@@ -596,12 +629,6 @@ function FactRow({ icon: Icon, label, value }) {
       </div>
     </div>
   );
-}
-
-function formatDate(iso) {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
 export default ConfirmAndPayPage;

@@ -244,18 +244,28 @@ export async function dispatchNextDriverService(bookingId) {
 
 async function failBookingNoDrivers(bookingId) {
   clearWaveTimer(bookingId);
+  // For scheduled bookings this routes to the emergency pool instead
+  // of terminating with NO_DRIVERS_FOUND (see
+  // `adminMarkNoDriversFoundService`). The status on the returned doc
+  // is the source of truth for the broadcast payload below.
   const booking = await adminMarkNoDriversFoundService(bookingId);
+  const escalated = booking.status === BOOKING_STATUS.IN_EMERGENCY_POOL;
   emitToUser(booking.userId, S2C_EVENTS.BOOKING_UPDATED, {
     bookingId: String(booking._id),
     status: booking.status,
   });
   emitToAdmins(S2C_EVENTS.ADMIN_ALERT, {
-    kind: 'no_drivers_found',
+    kind: escalated ? 'emergency_pool_entered' : 'no_drivers_found',
     severity: 'warn',
-    message: `Booking ${booking.bookingNumber} could not find a driver`,
+    message: escalated
+      ? `Scheduled booking ${booking.bookingNumber} needs manual driver assignment`
+      : `Booking ${booking.bookingNumber} could not find a driver`,
     data: { bookingId: String(booking._id) },
   });
-  return { ok: false, reason: 'no_drivers_found' };
+  return {
+    ok: false,
+    reason: escalated ? 'in_emergency_pool' : 'no_drivers_found',
+  };
 }
 
 /** Driver accepts a live offer for a booking. First driver in the wave wins. */

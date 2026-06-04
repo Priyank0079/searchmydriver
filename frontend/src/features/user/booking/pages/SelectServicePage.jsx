@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import ServiceCard from '../../home/components/ServiceCard';
@@ -7,15 +6,12 @@ import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
 import { useUserServicePricingsStore } from '../../../../store/user/useUserPricingStore';
 import useBookingDraftStore from '../../../../store/user/useBookingDraftStore';
-import useUserActiveBookingStore from '../../../../store/user/useUserActiveBookingStore';
 import { SERVICE_TYPES } from '../../../../constants/serviceTypes';
 
 const SelectServicePage = () => {
   const navigate = useNavigate();
   const setServiceType = useBookingDraftStore((s) => s.setServiceType);
   const currentServiceType = useBookingDraftStore((s) => s.serviceType);
-  const activeBooking = useUserActiveBookingStore((s) => s.booking);
-  const fetchActive = useUserActiveBookingStore((s) => s.fetchActive);
 
   const { data, loading, error } = useCachedQuery(
     useUserServicePricingsStore,
@@ -23,19 +19,10 @@ const SelectServicePage = () => {
   );
   const services = Array.isArray(data) ? data : [];
 
-  // If a user lands here while a booking is already in-flight, jump back into it.
-  useEffect(() => {
-    if (!activeBooking) {
-      fetchActive().catch(() => {});
-    }
-  }, [activeBooking, fetchActive]);
-
-  useEffect(() => {
-    if (!activeBooking) return;
-    if (activeBooking.status === 'searching') navigate('/user/book/searching');
-    else if (activeBooking.status === 'awaiting_payment') navigate('/user/book/payment');
-    else navigate('/user/book/assigned');
-  }, [activeBooking, navigate]);
+  // Users with multiple cars are allowed to spin up parallel bookings,
+  // so we DON'T redirect into an existing active booking here anymore.
+  // Resume access lives on the home page + Activity tab; this screen is
+  // strictly the entry point for *starting a new ride*.
 
   const handleSelect = (serviceType) => {
     setServiceType(serviceType);
@@ -51,7 +38,7 @@ const SelectServicePage = () => {
   void currentServiceType;
 
   return (
-    <div className="flex-1 flex flex-col bg-bg min-h-dvh">
+    <div className="flex-1 flex flex-col bg-bg">
       <div className="bg-white px-4 pt-4 pb-4 shadow-sm">
         <div className="flex items-center gap-3">
           <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-xl hover:bg-gray-100">

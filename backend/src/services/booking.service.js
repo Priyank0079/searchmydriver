@@ -38,6 +38,7 @@ import {
   BOOKING_PAYMENT_STATUS,
   BOOKING_TYPE,
   BOOKING_TYPE_LIST,
+  SCHEDULED_BOOKING,
 } from '../constants/bookingStatus.js';
 import { SERVICE_TYPES, SERVICE_TYPE_LIST } from '../constants/serviceTypes.js';
 import { S2C_EVENTS } from '../constants/socketEvents.js';
@@ -47,12 +48,20 @@ import {
   emitToAdmins,
   emitToDriver,
 } from '../utils/socketEmitters.js';
+import { findActiveZoneIdsForPointService } from './zone.service.js';
+import { setupScheduledBooking, cancelScheduledBookingJobs } from './bookingScheduled.service.js';
 
 /**
  * Business rules:
- *  - A user can have at most ONE active booking at a time. Trying to create a
- *    second one returns the existing booking instead of erroring (so the
- *    frontend can resume from wherever the user left off).
+ *  - A user can have MANY active bookings concurrently, one per car. The
+ *    only constraint is that the same car cannot be on two bookings whose
+ *    time windows overlap (see {@link assertCarAvailableForWindow}). This
+ *    lets a customer with multiple cars line up trips in parallel without
+ *    being blocked by a single in-flight booking.
+ *  - Scheduled bookings must be created at least
+ *    `SCHEDULED_BOOKING.MIN_SCHEDULED_LEAD_HOURS` in the future. Anything
+ *    sooner has no safety net (the emergency-pool escalation needs at
+ *    least that window) — customers needing a ride sooner pick "Instant".
  *  - Fare is re-computed on the server. The client only sends inputs; the
  *    backend never trusts a client-supplied total.
  *  - Booking is created in `searching` status. Dispatch kicks off in the
@@ -233,21 +242,87 @@ const DRIVER_USER_FIELDS_WITH_LOC = `${DRIVER_USER_FIELDS} location`;
 /** Fields the driver-side views need on the customer. */
 const CUSTOMER_DRIVER_FIELDS = 'name phone_no profilePicture';
 
+/**
+ * Status priority for surfacing "the most relevant active booking" when
+ * a user has multiple in flight. In-trip statuses outrank pre-trip ones
+ * so the resume UX always lands on whatever is happening *now*, not on
+ * a long-lead scheduled ride that doesn't need any attention yet.
+ */
+const ACTIVE_STATUS_PRIORITY = Object.freeze({
+  [BOOKING_STATUS.STARTED]: 0,
+  [BOOKING_STATUS.ARRIVED]: 1,
+  [BOOKING_STATUS.EN_ROUTE]: 2,
+  [BOOKING_STATUS.AWAITING_PAYMENT]: 3,
+  [BOOKING_STATUS.DRIVER_ASSIGNED]: 4,
+  [BOOKING_STATUS.IN_EMERGENCY_POOL]: 5,
+  [BOOKING_STATUS.SEARCHING]: 6,
+  [BOOKING_STATUS.PENDING_ASSIGNMENT]: 7,
+});
+
+function rankActiveBooking(b) {
+  if (!b) return Number.POSITIVE_INFINITY;
+  const statusRank = ACTIVE_STATUS_PRIORITY[b.status] ?? 9;
+  const pickupAt =
+    b.hourly?.scheduledStartAt ||
+    b.outstation?.startDate ||
+    b.createdAt;
+  // Convert pickup to a tiny secondary key (ms) so two equal-status
+  // bookings sort by "closest pickup first".
+  return statusRank * 1e15 + new Date(pickupAt || 0).getTime();
+}
+
 export async function getActiveBookingForUserService(userId) {
   if (!userId) return null;
-  const booking = await Booking.findOne({
+  const candidates = await Booking.find({
     userId,
     status: { $in: ACTIVE_BOOKING_STATUSES },
     isDeleted: false,
   })
     .populate('driverId', DRIVER_USER_FIELDS)
     .lean();
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => rankActiveBooking(a) - rankActiveBooking(b));
+  const booking = candidates[0];
   // Cold-start safety: if the server restarted while a booking was
   // sitting at ARRIVED, the in-process no-show timer got dropped.
   // Re-attach it here so the prompt + auto-complete cycle never goes
   // missing for an active customer fetch.
   resumeNoShowScheduleIfNeeded(booking).catch(() => {});
   return attachCancellationPreview(booking, 'user');
+}
+
+/**
+ * Return every active booking for the user. The resume hook still
+ * focuses on the highest-priority one (via
+ * {@link getActiveBookingForUserService}), but the frontend can use
+ * this list to render an "Active rides" rail / let the user switch
+ * between simultaneous bookings.
+ */
+export async function listActiveBookingsForUserService(userId) {
+  if (!userId) return [];
+  const candidates = await Booking.find({
+    userId,
+    status: { $in: ACTIVE_BOOKING_STATUSES },
+    isDeleted: false,
+  })
+    .populate('driverId', DRIVER_USER_FIELDS)
+    .lean();
+  candidates.sort((a, b) => rankActiveBooking(a) - rankActiveBooking(b));
+  return candidates.map((b) => attachCancellationPreview(b, 'user'));
+}
+
+/**
+ * Return all bookings for a user (history + active).
+ */
+export async function listAllBookingsForUserService(userId) {
+  if (!userId) return [];
+  const bookings = await Booking.find({ userId, isDeleted: false })
+    .sort({ createdAt: -1 })
+    .populate('driverId', DRIVER_USER_FIELDS)
+    .lean();
+  
+  // Attach cancellation preview for consistency, even on history items.
+  return Promise.all(bookings.map((b) => attachCancellationPreview(b, 'user')));
 }
 
 export async function getBookingByIdService(bookingId, { userId, driverId } = {}) {
@@ -363,14 +438,154 @@ function shapePlace(place) {
   };
 }
 
+/**
+ * Compute the start + end Date for a booking-create payload. Used by
+ * the per-car overlap check so we can compare windows across booking
+ * types (instant vs scheduled hourly, outstation, etc.) without each
+ * caller re-implementing the rules.
+ *
+ *   - Hourly + scheduled  →  [scheduledStartAt, +durationHours]
+ *   - Hourly + instant    →  [now, +durationHours]
+ *   - Outstation          →  [startDate, endDate || startDate + days]
+ *
+ * Returns `null` if we don't have enough information to bound the
+ * window (treated as "no conflict possible").
+ */
+function windowFromCreatePayload(body) {
+  const { serviceType, bookingType, hourly, outstation } = body || {};
+  if (serviceType === SERVICE_TYPES.HOURLY) {
+    const durationMs = (Number(hourly?.durationHours) || 1) * 60 * 60 * 1000;
+    const start =
+      bookingType === BOOKING_TYPE.SCHEDULED && hourly?.scheduledStartAt
+        ? new Date(hourly.scheduledStartAt)
+        : new Date();
+    if (Number.isNaN(start.getTime())) return null;
+    return { start, end: new Date(start.getTime() + durationMs) };
+  }
+  if (serviceType === SERVICE_TYPES.OUTSTATION) {
+    if (!outstation?.startDate) return null;
+    const start = new Date(outstation.startDate);
+    const end = outstation.endDate
+      ? new Date(outstation.endDate)
+      : new Date(start.getTime() + (Number(outstation.days) || 1) * 24 * 60 * 60 * 1000);
+    if (Number.isNaN(start.getTime())) return null;
+    return { start, end };
+  }
+  return null;
+}
+
+/**
+ * Project an existing booking's [start, end] window so we can compare
+ * it against the requested booking. Mirrors `windowFromCreatePayload`
+ * for stored bookings.
+ */
+function windowFromExistingBooking(b) {
+  if (!b) return null;
+  if (b.serviceType === SERVICE_TYPES.HOURLY) {
+    const durationMs = (Number(b.hourly?.durationHours) || 1) * 60 * 60 * 1000;
+    const start =
+      b.hourly?.scheduledStartAt
+        ? new Date(b.hourly.scheduledStartAt)
+        : new Date(b.timeline?.createdAt || b.createdAt || Date.now());
+    if (Number.isNaN(start.getTime())) return null;
+    return { start, end: new Date(start.getTime() + durationMs) };
+  }
+  if (b.serviceType === SERVICE_TYPES.OUTSTATION) {
+    if (!b.outstation?.startDate) return null;
+    const start = new Date(b.outstation.startDate);
+    const end = b.outstation?.endDate
+      ? new Date(b.outstation.endDate)
+      : new Date(start.getTime() + (Number(b.outstation?.days) || 1) * 24 * 60 * 60 * 1000);
+    if (Number.isNaN(start.getTime())) return null;
+    return { start, end };
+  }
+  return null;
+}
+
+/**
+ * Guards a booking-create against overlapping the same car onto two
+ * concurrent trips. We intentionally key the conflict on `carId` (not
+ * `userId`) so a user with multiple cars can spin up parallel rides.
+ *
+ * Throws `ApiError(409, ..., { code, conflictBookingId })` so the
+ * frontend can pop a specific toast and deep-link to the conflicting
+ * booking if it wants to.
+ */
+async function assertCarAvailableForWindow({ userId, carId, body }) {
+  if (!carId) return;
+  const newWindow = windowFromCreatePayload(body);
+  // Without a bounded window we can't safely compare — fall back to a
+  // generic "this car already has an active booking" guard so we never
+  // accidentally double-book.
+  const candidates = await Booking.find({
+    carId,
+    status: { $in: ACTIVE_BOOKING_STATUSES },
+    isDeleted: false,
+  })
+    .select(
+      'serviceType hourly outstation timeline createdAt bookingNumber userId status',
+    )
+    .lean();
+
+  for (const b of candidates) {
+    if (!newWindow) {
+      const err = new ApiError(
+        409,
+        'This car already has an active booking. Pick a different car or wait until it finishes.',
+      );
+      err.data = {
+        code: 'CAR_HAS_ACTIVE_BOOKING',
+        conflictBookingId: String(b._id),
+        conflictBookingNumber: b.bookingNumber,
+      };
+      throw err;
+    }
+    const existingWindow = windowFromExistingBooking(b);
+    if (!existingWindow) continue;
+    const overlaps =
+      newWindow.start < existingWindow.end &&
+      newWindow.end > existingWindow.start;
+    if (overlaps) {
+      const err = new ApiError(
+        409,
+        `This car is already booked from ${existingWindow.start.toLocaleString('en-IN')} to ${existingWindow.end.toLocaleString('en-IN')}. Choose a different car or a non-overlapping time.`,
+      );
+      err.data = {
+        code: 'CAR_TIME_CONFLICT',
+        conflictBookingId: String(b._id),
+        conflictBookingNumber: b.bookingNumber,
+        conflictFrom: existingWindow.start.toISOString(),
+        conflictTo: existingWindow.end.toISOString(),
+        ownedByCurrentUser: String(b.userId) === String(userId),
+      };
+      throw err;
+    }
+  }
+}
+
 export async function createBookingService(userId, body) {
   validateCreateInput(body);
 
-  // Bail out early — one active booking per user at a time.
-  const existing = await getActiveBookingForUserService(userId);
-  if (existing) return { booking: existing, reused: true };
-
   const { serviceType, bookingType, carId, pickup, dropoff, hourly, outstation } = body;
+
+  // Scheduled rides must be created with enough lead time for the
+  // emergency-pool safety window to fire. Anything sooner is treated as
+  // a UX error — surface a clear 422 rather than letting the queue
+  // schedule a job in the past.
+  if (bookingType === BOOKING_TYPE.SCHEDULED && serviceType === SERVICE_TYPES.HOURLY) {
+    const minLeadMs = SCHEDULED_BOOKING.MIN_SCHEDULED_LEAD_HOURS * 60 * 60 * 1000;
+    const startMs = new Date(hourly.scheduledStartAt).getTime();
+    if (!Number.isFinite(startMs) || startMs - Date.now() < minLeadMs) {
+      throw new ApiError(
+        422,
+        `Scheduled rides must start at least ${SCHEDULED_BOOKING.MIN_SCHEDULED_LEAD_HOURS} hours from now. Pick a later pickup time or use Instant.`,
+      );
+    }
+  }
+
+  // The "one active booking per user" rule is gone — users can run
+  // bookings in parallel as long as no two collide on the same car.
+  await assertCarAvailableForWindow({ userId, carId, body });
 
   // Re-compute fare server-side. Client-supplied totals are never trusted.
   // Hourly bookings can now opt out of food / accommodation when their
@@ -412,6 +627,20 @@ export async function createBookingService(userId, body) {
     refId: bookingNumber, // _id isn't known yet; we patch refId below.
   });
 
+  // Best-effort lookup of every zone the pickup falls inside. Stamped
+  // on the booking so the admin emergency-pool filter (team_member only
+  // sees their `assignedZones`) doesn't pay a geo lookup per row. Skip
+  // failures — the booking flow must not block on zone resolution.
+  let zoneIds = [];
+  try {
+    zoneIds = await findActiveZoneIdsForPointService({
+      lat: pickup.location.coordinates[1],
+      lng: pickup.location.coordinates[0],
+    });
+  } catch (zoneErr) {
+    console.warn('[booking] zone resolution failed:', zoneErr?.message);
+  }
+
   let booking;
   try {
     booking = await Booking.create({
@@ -422,6 +651,7 @@ export async function createBookingService(userId, body) {
       bookingType,
       pickup: shapePlace(pickup),
       dropoff: dropoff ? shapePlace(dropoff) : null,
+      zoneIds,
       hourly:
         serviceType === SERVICE_TYPES.HOURLY
           ? {
@@ -493,7 +723,36 @@ export async function createBookingService(userId, body) {
     console.warn('[booking] failed to link wallet txn to booking:', linkErr?.message);
   }
 
-  return { booking: booking.toObject(), reused: false };
+  // Scheduled hourly bookings branch through the scheduled-ride
+  // dispatcher: short-window + morning rides search immediately (just
+  // like instant), longer-lead rides sit in PENDING_ASSIGNMENT until
+  // the BullMQ `assign` job fires. The emergency-pool `escalate` job
+  // is enqueued for every scheduled booking either way.
+  let shouldDispatchNow = true;
+  if (
+    bookingType === BOOKING_TYPE.SCHEDULED &&
+    serviceType === SERVICE_TYPES.HOURLY &&
+    booking.hourly?.scheduledStartAt
+  ) {
+    try {
+      const decision = await setupScheduledBooking(booking);
+      shouldDispatchNow = decision.immediate;
+    } catch (scheduleErr) {
+      console.error(
+        '[booking] scheduled setup failed — falling back to immediate dispatch:',
+        scheduleErr?.message,
+      );
+      // Best-effort fallback: behave like an instant booking so the
+      // user isn't stuck with a booking that never searches.
+      shouldDispatchNow = true;
+    }
+  }
+
+  return {
+    booking: booking.toObject(),
+    reused: false,
+    shouldDispatchNow,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -551,6 +810,9 @@ export async function cancelBookingByUserService(userId, bookingId, reason = '')
   // though they collected a (penalised) fare share elsewhere.
   cancelPaymentTimeout(bookingId);
   cancelNoShowSchedule(bookingId);
+  // Scheduled-ride safety: drop any BullMQ jobs (assign / escalate /
+  // reminders) so a cancelled booking never wakes back up.
+  cancelScheduledBookingJobs(bookingId).catch(() => {});
   await releaseDriverFromBooking(previouslyAssignedDriver);
 
   let refundRecord = null;
@@ -672,6 +934,17 @@ export async function adminMarkNoDriversFoundService(bookingId) {
   if (!booking) throw new ApiError(404, 'Booking not found');
   const wasPaid = booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID;
   const paidViaWallet = booking.paymentMethod === BOOKING_PAYMENT_METHOD.WALLET;
+
+  // Scheduled rides never auto-cancel into NO_DRIVERS_FOUND — they get
+  // routed to the emergency pool instead so a human can assign someone.
+  // Refund + cleanup only runs for instant bookings (which the user
+  // would otherwise be left waiting on indefinitely).
+  if (booking.bookingType === BOOKING_TYPE.SCHEDULED) {
+    const { escalateToEmergencyPool } = await import('./bookingEmergencyPool.service.js');
+    await escalateToEmergencyPool(booking._id);
+    return (await Booking.findById(booking._id)).toObject();
+  }
+  cancelScheduledBookingJobs(bookingId).catch(() => {});
 
   // When no driver was found (typical after a driver bailed mid-flight),
   // we don't apply a cancellation fee — the customer didn't choose to

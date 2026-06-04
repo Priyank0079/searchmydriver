@@ -1,17 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Zap, CalendarClock, ChevronRight, Check } from 'lucide-react';
 import Button from '../../../../../components/Button';
 import PageShell from '../../components/PageShell';
 import useBookingDraftStore from '../../../../../store/user/useBookingDraftStore';
-import useUserActiveBookingStore from '../../../../../store/user/useUserActiveBookingStore';
 import { SERVICE_TYPES } from '../../../../../constants/serviceTypes';
 import {
   BOOKING_TYPE,
   BOOKING_TYPE_LABELS,
   BOOKING_TYPE_DESCRIPTIONS,
-  BOOKING_STATUS,
+  SCHEDULED_BOOKING,
 } from '../../../../../constants/bookingStatus';
+import { formatPickupDateTime } from '../../../../../utils/datetime';
 
 /**
  * Step 1 of the hourly booking flow.
@@ -19,10 +19,13 @@ import {
  *   "Do you need a driver right now, or later?"
  *
  *   - Instant   → pickup time defaults to now + 15 minutes (dispatch buffer).
- *   - Scheduled → user picks a future date+time; minimum is now + 30 minutes.
+ *   - Scheduled → user picks a future date+time; minimum is now +
+ *     `SCHEDULED_BOOKING.MIN_SCHEDULED_LEAD_HOURS` so the emergency-pool
+ *     safety net has room to fire.
  *
- * Resumes mid-flow: if the user already has an active booking we deep-link
- * them onward so they never restart from step 1.
+ * Users with multiple cars can have parallel bookings, so we no longer
+ * redirect into an existing active booking here — the home page surfaces
+ * those as resume tiles instead.
  */
 const HourlyBookingTypePage = () => {
   const navigate = useNavigate();
@@ -30,8 +33,6 @@ const HourlyBookingTypePage = () => {
   const draftBookingType = useBookingDraftStore((s) => s.bookingType);
   const setBookingType = useBookingDraftStore((s) => s.setBookingType);
   const setHourly = useBookingDraftStore((s) => s.setHourly);
-  const activeBooking = useUserActiveBookingStore((s) => s.booking);
-  const fetchActive = useUserActiveBookingStore((s) => s.fetchActive);
 
   const [selected, setSelected] = useState(draftBookingType || null);
   const [scheduledAt, setScheduledAt] = useState(defaultScheduledValue());
@@ -43,17 +44,11 @@ const HourlyBookingTypePage = () => {
     setServiceType(SERVICE_TYPES.HOURLY);
   }, [setServiceType]);
 
-  // Resume an in-flight booking — never start a second one.
-  useEffect(() => {
-    if (!activeBooking) fetchActive().catch(() => {});
-  }, [activeBooking, fetchActive]);
-  useEffect(() => {
-    if (!activeBooking) return;
-    if (activeBooking.status === BOOKING_STATUS.SEARCHING) navigate('/user/book/searching');
-    else if (activeBooking.status === BOOKING_STATUS.AWAITING_PAYMENT) navigate('/user/book/assigned');
-    else if (activeBooking.status === BOOKING_STATUS.DRIVER_ASSIGNED) navigate('/user/book/assigned');
-  }, [activeBooking, navigate]);
-
+  const minScheduledDate = useMemo(
+    () => new Date(Date.now() + SCHEDULED_BOOKING.MIN_SCHEDULED_LEAD_HOURS * 60 * 60_000),
+    [],
+  );
+  const minScheduledInput = toDateTimeInputValue(minScheduledDate);
   const handleContinue = () => {
     if (!selected) return;
     setBookingType(selected);
@@ -68,10 +63,11 @@ const HourlyBookingTypePage = () => {
     navigate('/user/book/hourly/details');
   };
 
-  const minScheduled = toDateTimeInputValue(new Date(Date.now() + 30 * 60_000));
   const canContinue =
     selected === BOOKING_TYPE.INSTANT ||
-    (selected === BOOKING_TYPE.SCHEDULED && scheduledAt && new Date(scheduledAt) > new Date());
+    (selected === BOOKING_TYPE.SCHEDULED &&
+      scheduledAt &&
+      new Date(scheduledAt).getTime() >= minScheduledDate.getTime());
 
   return (
     <PageShell
@@ -108,12 +104,14 @@ const HourlyBookingTypePage = () => {
               <input
                 type="datetime-local"
                 value={scheduledAt}
-                min={minScheduled}
+                min={minScheduledInput}
                 onChange={(e) => setScheduledAt(e.target.value)}
                 className="w-full h-12 px-3 bg-white border border-border rounded-xl text-sm focus:outline-none focus:border-primary"
               />
               <p className="mt-1.5 text-[11px] text-text-muted">
-                Earliest available is {formatDateTime(minScheduled)}.
+                Earliest available is {formatPickupDateTime(minScheduledDate)} —
+                we need at least {SCHEDULED_BOOKING.MIN_SCHEDULED_LEAD_HOURS} hours
+                lead time for scheduled rides.
               </p>
             </div>
           )}
@@ -172,17 +170,6 @@ function defaultScheduledValue() {
 function toDateTimeInputValue(d) {
   const tzOffset = d.getTimezoneOffset() * 60_000;
   return new Date(d.getTime() - tzOffset).toISOString().slice(0, 16);
-}
-
-function formatDateTime(input) {
-  if (!input) return '';
-  return new Date(input).toLocaleString(undefined, {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
 }
 
 export default HourlyBookingTypePage;

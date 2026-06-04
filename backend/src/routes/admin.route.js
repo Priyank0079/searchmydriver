@@ -95,7 +95,13 @@ import {
   updateRefundStatus,
 } from '../controllers/refund.controller.js';
 import { listPlatformRevenue } from '../controllers/revenue.controller.js';
-import { getAdminBookings, getAdminBookingById } from '../controllers/booking.controller.js';
+import {
+  getAdminBookings,
+  getAdminBookingById,
+  getEmergencyPoolBookings,
+  getEmergencyPoolAvailableDrivers,
+  assignDriverToEmergencyPoolBooking,
+} from '../controllers/booking.controller.js';
 
 const router = express.Router();
 const { ALL_STAFF, OPERATIONS, SUPER_ADMIN } = ROUTE_ROLES;
@@ -117,6 +123,30 @@ router.post('/tasks/:id/claim', protectStaff, restrictTo(...OPERATIONS), claimTa
 
 router.get('/bookings', protectStaff, restrictTo(...ALL_STAFF), getAdminBookings);
 router.get('/bookings/:id', protectStaff, restrictTo(...ALL_STAFF), getAdminBookingById);
+
+/* ---- Emergency Pool (scheduled-ride manual assignment) ---------------- */
+// `ALL_STAFF` is used here because team_members must be able to view
+// the pool too — the service itself scopes by `assignedZones` for them.
+// Driver assignment is restricted to OPERATIONS (admin + sub_admin),
+// matching the "admin manually assigns" requirement.
+router.get(
+  '/emergency-pool',
+  protectStaff,
+  restrictTo(...ALL_STAFF),
+  getEmergencyPoolBookings,
+);
+router.get(
+  '/emergency-pool/:id/available-drivers',
+  protectStaff,
+  restrictTo(...OPERATIONS),
+  getEmergencyPoolAvailableDrivers,
+);
+router.post(
+  '/emergency-pool/:id/assign-driver',
+  protectStaff,
+  restrictTo(...OPERATIONS),
+  assignDriverToEmergencyPoolBooking,
+);
 
 router.get('/drivers', protectStaff, restrictTo(...ALL_STAFF), getDrivers);
 router.get('/drivers/live', protectStaff, restrictTo(...ALL_STAFF), getLiveDriversSnapshot);

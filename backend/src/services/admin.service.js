@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Driver } from '../models/driverModels/driver.model.js';
 import User from '../models/user.model.js';
 import Car from '../models/user/car.model.js';
@@ -303,8 +304,34 @@ async function assertSingleSuperAdmin(role, excludeUserId = null) {
   }
 }
 
+/**
+ * Normalise an `assignedZones` payload into an array of valid ObjectIds.
+ * Drops `null`/`undefined` and anything that can't be coerced. Used for
+ * both create + update so the team_member zone-scoped emergency-pool
+ * filter has a clean array to work with.
+ */
+function normalizeAssignedZones(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((id) => {
+      try {
+        return new mongoose.Types.ObjectId(String(id));
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
 export const addAdminMemberService = async (data) => {
-  const { name, email, phone_no, password, role: requestedRole } = data;
+  const {
+    name,
+    email,
+    phone_no,
+    password,
+    role: requestedRole,
+    assignedZones,
+  } = data;
 
   if (!name || !email || !phone_no || !password) {
     throw new ApiError(400, 'Missing required fields');
@@ -331,6 +358,10 @@ export const addAdminMemberService = async (data) => {
     phone_no,
     password: hashedPassword,
     role,
+    // Only team_member uses `assignedZones`; admin + sub_admin see all
+    // zones regardless. Empty array for other roles keeps schemas tidy.
+    assignedZones:
+      role === USER_ROLES.TEAM_MEMBER ? normalizeAssignedZones(assignedZones) : [],
   });
 
   await newAdmin.save();
@@ -372,7 +403,7 @@ export const getAdminTeamService = async (query) => {
 };
 
 export const updateAdminMemberService = async (id, data) => {
-  const { name, email, phone_no, role, isActive } = data;
+  const { name, email, phone_no, role, isActive, assignedZones } = data;
   const staff = await User.findById(id);
   
   if (!staff || !STAFF_ROLES.includes(staff.role)) {
@@ -392,6 +423,17 @@ export const updateAdminMemberService = async (id, data) => {
     staff.role = role;
   }
   if (isActive !== undefined) staff.isActive = isActive;
+  // Zone assignments only matter for team_members (the others see all
+  // emergency-pool entries regardless). Switching a member off of
+  // team_member clears the array so stale data doesn't linger.
+  if (assignedZones !== undefined) {
+    staff.assignedZones =
+      staff.role === USER_ROLES.TEAM_MEMBER
+        ? normalizeAssignedZones(assignedZones)
+        : [];
+  } else if (staff.role !== USER_ROLES.TEAM_MEMBER && staff.assignedZones?.length) {
+    staff.assignedZones = [];
+  }
 
   await staff.save();
   staff.password = undefined;

@@ -12,6 +12,7 @@ const routeTitles = {
   '/admin/settings/kits': 'Driver Kits',
   '/admin/kit-orders': 'Kit Orders',
   '/admin/bookings': 'Manage Bookings',
+  '/admin/emergency-pool': 'Emergency Pool',
   '/admin/settings': 'Settings',
   '/admin/account/revenue': 'Revenue',
   '/admin/account/refunds': 'Refunds',

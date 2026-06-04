@@ -282,6 +282,53 @@ const bookingSchema = new mongoose.Schema(
 
     status: { type: String, enum: BOOKING_STATUS_LIST, default: BOOKING_STATUS.SEARCHING, index: true },
 
+    /**
+     * Zones the pickup point falls inside at booking-creation time.
+     * Persisted (rather than recomputed) so the admin emergency-pool
+     * list can filter for team_member staff by `assignedZones` without
+     * a per-row geo lookup. Empty when no zone matched (or when the
+     * geo lookup failed — best-effort, never blocks creation).
+     */
+    zoneIds: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Zone' }],
+      default: [],
+      index: true,
+    },
+
+    /**
+     * Lifecycle metadata for the scheduled-ride dispatcher. Populated
+     * only when the booking is created with `bookingType = scheduled`.
+     *
+     *   tier             which branch of the schedule decision tree
+     *                    fired: 'morning' | 'short_window' | 'long_lead'
+     *   assignAt         server time at which `kickoffScheduledAssignment`
+     *                    is expected to run (null = "search immediately")
+     *   escalateAt       server time at which `escalateToEmergencyPool`
+     *                    will fire if no driver is assigned by then
+     *   assignmentStartedAt  set when the worker actually flips
+     *                    PENDING_ASSIGNMENT → SEARCHING
+     *   escalatedAt      set when the booking lands in the emergency pool
+     *   emergencyPool    audit + UI state for the manual-assignment
+     *                    queue (notes the admin who took it, etc.)
+     */
+    scheduled: {
+      tier: {
+        type: String,
+        enum: ['morning', 'short_window', 'long_lead', ''],
+        default: '',
+      },
+      assignAt: { type: Date, default: null },
+      escalateAt: { type: Date, default: null },
+      assignmentStartedAt: { type: Date, default: null },
+      escalatedAt: { type: Date, default: null },
+      emergencyPool: {
+        enteredAt: { type: Date, default: null },
+        assignedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+        assignedAt: { type: Date, default: null },
+        notes: { type: String, default: '' },
+      },
+    },
+
     dispatch: { type: dispatchSchema, default: () => ({}) },
     extensions: { type: [extensionSchema], default: [] },
     rideStartOtp: { type: rideStartOtpSchema, default: () => ({}) },
@@ -381,6 +428,8 @@ const bookingSchema = new mongoose.Schema(
 bookingSchema.index({ 'pickup.location': '2dsphere' });
 bookingSchema.index({ userId: 1, status: 1, createdAt: -1 });
 bookingSchema.index({ driverId: 1, status: 1, createdAt: -1 });
+/* Emergency-pool list: filter by status (+ optional zone) ordered by ride time. */
+bookingSchema.index({ status: 1, 'hourly.scheduledStartAt': 1 });
 
 const Booking = mongoose.models.Booking || mongoose.model('Booking', bookingSchema);
 export default Booking;

@@ -23,6 +23,7 @@ import {
   emitToDriver,
 } from '../utils/socketEmitters.js';
 import { cancelPaymentTimeout } from './bookingPaymentTimeout.service.js';
+import { cancelScheduledBookingJobs } from './bookingScheduled.service.js';
 import {
   loadCancellationPolicy,
   computeDriverCancellation,
@@ -767,6 +768,7 @@ async function terminateBookingByDriver(
 
   cancelPaymentTimeout(booking._id);
   cancelNoShowSchedule(booking._id);
+  cancelScheduledBookingJobs(booking._id).catch(() => {});
   await applyDriverPenalty(driverId, driverPenalty, booking);
 
   Driver.updateOne({ _id: driverId }, { $set: { isOnTrip: false } }).catch((err) =>

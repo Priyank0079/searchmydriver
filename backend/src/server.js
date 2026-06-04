@@ -7,6 +7,7 @@ import { connectDB } from './config/connectDB.js';
 import { initSuperAdmin } from './utils/initAdmin.js';
 import { initializeSocket } from './config/socket.js';
 import { initializeFirebase } from './config/firebase.js';
+import { startScheduledBookingWorker } from './queues/scheduledBooking.worker.js';
 import app from './app.js';
 
 const PORT = process.env.PORT || 9000;
@@ -18,6 +19,10 @@ async function bootstrap() {
 
   const httpServer = createServer(app);
   initializeSocket(httpServer);
+
+  // Scheduled-ride dispatcher + emergency-pool escalator. No-ops with
+  // a warning when REDIS_URL is unset so dev/CI boots without Redis.
+  await startScheduledBookingWorker();
 
   httpServer.listen(PORT, () => {
     console.log(`API listening on port ${PORT}`);

@@ -27,7 +27,9 @@ import {
 import { getNearbyDriversForUser } from '../controllers/driverLocation.controller.js';
 import {
   createBooking,
+  getMyBookings,
   getMyActiveBooking,
+  getMyActiveBookings,
   getBookingById,
   cancelBooking,
   createBookingPayment,
@@ -69,7 +71,9 @@ router.post('/bookings/estimate', estimateFare);
 
 // Booking lifecycle (Phase 4)
 router.post('/bookings', createBooking);
+router.get('/bookings', getMyBookings);
 router.get('/bookings/active', getMyActiveBooking);
+router.get('/bookings/active-list', getMyActiveBookings);
 router.get('/bookings/:id', getBookingById);
 router.post('/bookings/:id/cancel', cancelBooking);
 router.post('/bookings/:id/pay', createBookingPayment);

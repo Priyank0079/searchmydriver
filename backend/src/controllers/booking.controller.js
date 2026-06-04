@@ -4,6 +4,8 @@ import { ApiError } from '../utils/apiError.js';
 import {
   createBookingService,
   getActiveBookingForUserService,
+  listActiveBookingsForUserService,
+  listAllBookingsForUserService,
   getActiveBookingForDriverService,
   getBookingByIdService,
   cancelBookingByUserService,
@@ -34,6 +36,12 @@ import {
   completeTripService,
   cancelBookingByDriverService,
 } from '../services/bookingTrip.service.js';
+import {
+  listEmergencyPoolBookingsService,
+  adminAssignDriverToEmergencyPoolService,
+  listAvailableDriversForAssignmentService,
+  getBookingCarTypeIdService,
+} from '../services/bookingEmergencyPool.service.js';
 
 /* ------------------------------------------------------------------ */
 /* User                                                                */
@@ -42,26 +50,59 @@ import {
 /**
  * POST /auth/bookings
  *
- * Creates a booking (status: searching) and immediately kicks off dispatch.
- * If the user already has an active booking the existing one is returned;
- * the frontend should then resume the flow from wherever it left off.
+ * Creates a booking (status: searching for instant + immediate-tier
+ * scheduled; pending_assignment for long-lead scheduled). Users can
+ * have multiple concurrent bookings as long as no two of them collide
+ * on the same car — `assertCarAvailableForWindow` throws 409 when they
+ * do, with `{ code, conflictBookingId }` on the error data so the
+ * frontend can pop a specific toast.
  */
 export const createBooking = asyncHandler(async (req, res) => {
-  const { booking, reused } = await createBookingService(req.user._id, req.body);
-  if (!reused) {
-    // Fire-and-forget; the response doesn't wait for the offer.
+  const { booking, shouldDispatchNow } = await createBookingService(
+    req.user._id,
+    req.body,
+  );
+  // Scheduled (long-lead) bookings sit in PENDING_ASSIGNMENT until the
+  // queue's `assign` job fires (rideTime − LONG_LEAD_HOURS). Instant
+  // bookings + immediate-tier scheduled bookings (morning / ≤6h)
+  // dispatch right now exactly like before.
+  if (shouldDispatchNow !== false) {
     dispatchNextDriverService(booking._id).catch((err) => {
       console.warn('[booking] initial dispatch failed:', err.message);
     });
   }
-  return res.status(reused ? 200 : 201).json(
-    new ApiResponse(reused ? 200 : 201, { booking, reused }, reused ? 'Active booking returned' : 'Booking created'),
-  );
+  return res
+    .status(201)
+    .json(new ApiResponse(201, { booking, reused: false }, 'Booking created'));
 });
 
 export const getMyActiveBooking = asyncHandler(async (req, res) => {
   const booking = await getActiveBookingForUserService(req.user._id);
   return res.status(200).json(new ApiResponse(200, { booking }, 'Active booking'));
+});
+
+/**
+ * GET /auth/bookings/active-list
+ *
+ * Returns every active booking for the user (sorted by status priority
+ * then earliest pickup). Used by the frontend to show an "Active rides"
+ * rail when the customer has more than one in flight.
+ */
+export const getMyActiveBookings = asyncHandler(async (req, res) => {
+  const bookings = await listActiveBookingsForUserService(req.user._id);
+  return res
+    .status(200)
+    .json(new ApiResponse(200, { bookings }, 'Active bookings'));
+});
+
+/**
+ * GET /auth/bookings
+ *
+ * Returns all bookings for the user (active + completed/cancelled).
+ */
+export const getMyBookings = asyncHandler(async (req, res) => {
+  const bookings = await listAllBookingsForUserService(req.user._id);
+  return res.status(200).json(new ApiResponse(200, { bookings }, 'All bookings'));
 });
 
 export const getBookingById = asyncHandler(async (req, res) => {
@@ -224,4 +265,55 @@ export const getAdminBookings = asyncHandler(async (req, res) => {
 export const getAdminBookingById = asyncHandler(async (req, res) => {
   const booking = await getBookingByIdService(req.params.id);
   return res.status(200).json(new ApiResponse(200, { booking }, 'Booking fetched'));
+});
+
+/* ------------------------------------------------------------------ */
+/* Admin → Emergency Pool                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Scheduled bookings that have no driver within
+ * `SCHEDULED_BOOKING.EMERGENCY_POOL_MINUTES` of pickup escalate here.
+ *
+ *   - admin / sub_admin   see every entry
+ *   - team_member         see only entries whose pickup falls in a
+ *                         zone they're assigned to (`assignedZones`).
+ *
+ * Admin then picks a driver via POST /emergency-pool/:id/assign-driver.
+ */
+export const getEmergencyPoolBookings = asyncHandler(async (req, res) => {
+  const result = await listEmergencyPoolBookingsService({
+    staff: req.staff,
+    query: req.query,
+  });
+  return res
+    .status(200)
+    .json(new ApiResponse(200, result, 'Emergency-pool bookings fetched'));
+});
+
+export const getEmergencyPoolAvailableDrivers = asyncHandler(async (req, res) => {
+  const carTypeId =
+    req.query?.carTypeId ||
+    (await getBookingCarTypeIdService(req.params.id)) ||
+    null;
+  const drivers = await listAvailableDriversForAssignmentService({
+    carTypeId,
+    limit: req.query?.limit,
+  });
+  return res
+    .status(200)
+    .json(new ApiResponse(200, { drivers, carTypeId }, 'Available drivers fetched'));
+});
+
+export const assignDriverToEmergencyPoolBooking = asyncHandler(async (req, res) => {
+  const { driverId, notes } = req.body || {};
+  if (!driverId) throw new ApiError(400, 'driverId is required');
+  const result = await adminAssignDriverToEmergencyPoolService(
+    req.params.id,
+    driverId,
+    { staffId: req.staff?._id, notes },
+  );
+  return res
+    .status(200)
+    .json(new ApiResponse(200, result, 'Driver assigned to booking'));
 });

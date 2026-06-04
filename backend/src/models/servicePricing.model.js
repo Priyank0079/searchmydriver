@@ -225,6 +225,33 @@ const driverSearchSchema = new mongoose.Schema(
   { _id: false },
 );
 
+/**
+ * Per-service overrides for the scheduled-ride dispatcher policy.
+ * Defaults live in `constants/bookingStatus.js → SCHEDULED_BOOKING` and
+ * are used wherever a field on this sub-doc is left blank.
+ *
+ *   MORNING_*           — start/end hours of the "morning ride" window;
+ *                         rides starting inside the window dispatch
+ *                         immediately so drivers can plan their day.
+ *   SHORT_WINDOW_HOURS  — rides ≤ this many hours away also dispatch
+ *                         immediately (same UX as instant).
+ *   LONG_LEAD_HOURS     — for all other rides, search starts this many
+ *                         hours BEFORE `scheduledStartAt`.
+ *   EMERGENCY_POOL_MINUTES — if no driver is assigned this many minutes
+ *                         before pickup, the booking moves to the
+ *                         admin-managed emergency pool.
+ */
+const scheduledDispatchSchema = new mongoose.Schema(
+  {
+    MORNING_START_HOUR: { type: Number, default: 6, min: 0, max: 23 },
+    MORNING_END_HOUR: { type: Number, default: 10, min: 1, max: 24 },
+    SHORT_WINDOW_HOURS: { type: Number, default: 6, min: 0 },
+    LONG_LEAD_HOURS: { type: Number, default: 4, min: 0 },
+    EMERGENCY_POOL_MINUTES: { type: Number, default: 120, min: 5 },
+  },
+  { _id: false },
+);
+
 const servicePricingSchema = new mongoose.Schema(
   {
     // ── Service identity ──
@@ -265,6 +292,8 @@ const servicePricingSchema = new mongoose.Schema(
     // ── Policies (shared) ──
     cancellation: { type: cancellationSchema, default: () => ({}) },
     driverSearch: { type: driverSearchSchema, default: () => ({}) },
+    /** Hourly-only — overrides for the scheduled-ride dispatcher. */
+    scheduledDispatch: { type: scheduledDispatchSchema, default: () => ({}) },
 
     // ── Visibility ──
     isActive: { type: Boolean, default: true, index: true },

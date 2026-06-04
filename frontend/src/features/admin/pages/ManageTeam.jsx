@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { User, Mail, Phone, Lock, Loader2, Edit2, Trash2 } from 'lucide-react';
+import {
+  User, Mail, Phone, Lock, Edit2, Trash2, MapPin, Check,
+} from 'lucide-react';
 import RowActionsMenu from '../components/RowActionsMenu';
-import Card from '../../../components/Card';
 import Button from '../../../components/Button';
 import Input from '../../../components/Input';
 import Modal from '../../../components/Modal';
@@ -11,6 +12,7 @@ import api from '../../../utils/api';
 import TeamStats from '../components/ManageTeam/TeamStats';
 import TeamFilters from '../components/ManageTeam/TeamFilters';
 import { STAFF_ROLE_LABELS } from '../../../constants/staffRoles';
+import { useAdminZonesStore } from '../../../store/admin/useAdminZonesStore';
 
 const ASSIGNABLE_ROLES = ['team_member', 'sub_admin'];
 
@@ -34,7 +36,22 @@ const ManageTeam = () => {
     password: '',
     role: 'team_member',
     isActive: true,
+    assignedZones: [],
   });
+  // Lazy-loaded admin zones for the team_member zone picker. We only
+  // need them when the add/edit modal opens — fetching on mount would
+  // be wasteful for an infrequently-used page.
+  const fetchZones = useAdminZonesStore((s) => s.fetch);
+  const zonesEntry = useAdminZonesStore((s) => s.getEntry('admin-zones'));
+  const allZones = useMemo(
+    () => (Array.isArray(zonesEntry?.data) ? zonesEntry.data : []),
+    [zonesEntry?.data],
+  );
+
+  useEffect(() => {
+    if (!showAddModal) return;
+    fetchZones('admin-zones').catch(() => {});
+  }, [showAddModal, fetchZones]);
 
   const fetchTeam = useCallback(async () => {
     try {
@@ -76,6 +93,9 @@ const ManageTeam = () => {
       password: '', // Don't show password for edit
       role: member.role,
       isActive: member.isActive ?? true,
+      assignedZones: (member.assignedZones || []).map((z) =>
+        typeof z === 'string' ? z : z?._id,
+      ).filter(Boolean),
     });
     setShowAddModal(true);
   };
@@ -103,21 +123,34 @@ const ManageTeam = () => {
     e.preventDefault();
     setSubmitting(true);
     try {
+      // Only team_members carry zone assignments — backend already
+      // wipes them for other roles, but be tidy and don't send noise.
+      const zonesForPayload =
+        formData.role === 'team_member' ? formData.assignedZones || [] : [];
       if (selectedMember) {
         await api.put(`/admin/team/${selectedMember._id}`, {
           name: formData.name,
           email: formData.email,
           phone_no: formData.phone_no,
           role: formData.role,
-          isActive: formData.isActive
+          isActive: formData.isActive,
+          assignedZones: zonesForPayload,
         });
       } else {
-        await api.post('/admin/team', formData);
+        await api.post('/admin/team', { ...formData, assignedZones: zonesForPayload });
       }
       fetchTeam();
       setShowAddModal(false);
       setSelectedMember(null);
-      setFormData({ name: '', email: '', phone_no: '', password: '', role: 'team_member', isActive: true });
+      setFormData({
+        name: '',
+        email: '',
+        phone_no: '',
+        password: '',
+        role: 'team_member',
+        isActive: true,
+        assignedZones: [],
+      });
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to save member');
     } finally {
@@ -221,7 +254,15 @@ const ManageTeam = () => {
         }}
         onAddMember={() => {
           setSelectedMember(null);
-          setFormData({ name: '', email: '', phone_no: '', password: '', role: 'team_member', isActive: true });
+          setFormData({
+            name: '',
+            email: '',
+            phone_no: '',
+            password: '',
+            role: 'team_member',
+            isActive: true,
+            assignedZones: [],
+          });
           setShowAddModal(true);
         }}
       />
@@ -344,6 +385,21 @@ const ManageTeam = () => {
             )}
           </div>
 
+          {formData.role === 'team_member' && (
+            <AssignedZonesPicker
+              zones={allZones}
+              loading={!!zonesEntry?.loading}
+              selectedIds={formData.assignedZones}
+              onToggle={(zoneId) => {
+                const set = new Set(formData.assignedZones || []);
+                if (set.has(zoneId)) set.delete(zoneId);
+                else set.add(zoneId);
+                setFormData({ ...formData, assignedZones: [...set] });
+              }}
+              onClear={() => setFormData({ ...formData, assignedZones: [] })}
+            />
+          )}
+
           <div className="pt-4 flex gap-3">
             <Button variant="outline" fullWidth type="button" onClick={() => setShowAddModal(false)} disabled={submitting}>Cancel</Button>
             <Button fullWidth type="submit" loading={submitting}>{selectedMember ? 'Save Changes' : 'Create Account'}</Button>
@@ -382,5 +438,94 @@ const ManageTeam = () => {
     </div>
   );
 };
+
+/**
+ * Multi-select pill grid for assigning zones to a team_member. The
+ * server scopes the emergency-pool listing to these IDs — pick zero
+ * and the member sees an empty queue (intentional: they must be
+ * explicitly enrolled before getting access).
+ */
+function AssignedZonesPicker({ zones, loading, selectedIds, onToggle, onClear }) {
+  const selectedSet = useMemo(() => new Set(selectedIds || []), [selectedIds]);
+  const grouped = useMemo(() => {
+    const out = {};
+    (zones || []).forEach((z) => {
+      const city = z.city || 'Other';
+      if (!out[city]) out[city] = [];
+      out[city].push(z);
+    });
+    return out;
+  }, [zones]);
+  const cityKeys = Object.keys(grouped).sort();
+
+  return (
+    <div>
+      <div className="flex items-end justify-between mb-2">
+        <div>
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">
+            Assigned Zones
+          </label>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            Members only see emergency-pool bookings whose pickup falls in
+            one of these zones.
+          </p>
+        </div>
+        {(selectedSet.size > 0) && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="text-[11px] font-semibold text-rose-600 hover:text-rose-700"
+          >
+            Clear all
+          </button>
+        )}
+      </div>
+
+      {loading && !zones.length ? (
+        <div className="rounded-2xl border border-dashed border-slate-200 p-4 text-sm text-slate-500 text-center">
+          Loading zones…
+        </div>
+      ) : zones.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-slate-200 p-4 text-sm text-slate-500 text-center">
+          No active zones found. Create zones first in Settings → Service Zones.
+        </div>
+      ) : (
+        <div className="space-y-3 max-h-56 overflow-y-auto pr-1">
+          {cityKeys.map((city) => (
+            <div key={city}>
+              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                {city}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {grouped[city].map((z) => {
+                  const active = selectedSet.has(z._id);
+                  return (
+                    <button
+                      key={z._id}
+                      type="button"
+                      onClick={() => onToggle(z._id)}
+                      className={`inline-flex items-center gap-1.5 px-2.5 h-8 rounded-xl border text-xs font-semibold transition ${
+                        active
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                      }`}
+                    >
+                      {active ? (
+                        <Check className="w-3.5 h-3.5" />
+                      ) : (
+                        <MapPin className="w-3.5 h-3.5" />
+                      )}
+                      {z.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default ManageTeam;

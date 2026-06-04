@@ -4,6 +4,7 @@ import {
   LayoutDashboard, Users, Car, CalendarCheck, DollarSign, Settings,
   LogOut, X, ChevronRight, ChevronDown, ShieldCheck, Monitor, Package,
   CheckSquare, MapPin, Receipt, Sparkles, Navigation, Wallet, Banknote,
+  LifeBuoy,
 } from 'lucide-react';
 import { APP_NAME } from '../../../utils/constants';
 import useAdminAuthStore from '../../../store/useAdminAuthStore';
@@ -23,6 +24,14 @@ const navItems = [
   { path: '/admin/drivers/live', label: 'Live Map', icon: Navigation },
   { path: '/admin/kit-orders', label: 'Kit Orders', icon: Package },
   { path: '/admin/bookings', label: 'Bookings', icon: CalendarCheck, roles: ['admin'] },
+  {
+    path: '/admin/emergency-pool',
+    label: 'Emergency Pool',
+    icon: LifeBuoy,
+    // All staff can view; the page itself scopes team_members to their
+    // assigned zones and hides the "assign driver" CTA for them.
+    roles: ['admin', 'sub_admin', 'team_member'],
+  },
   {
     label: 'Account',
     icon: Wallet,
