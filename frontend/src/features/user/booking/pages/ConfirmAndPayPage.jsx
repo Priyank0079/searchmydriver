@@ -67,6 +67,7 @@ const ConfirmAndPayPage = () => {
   const [shortfall, setShortfall] = useState(0);
   const [carEditOpen, setCarEditOpen] = useState(false);
   const [pickupEditOpen, setPickupEditOpen] = useState(false);
+  const [conflictError, setConflictError] = useState(null); // { title, message, type: 'car'|'time' }
 
   // Guard: bounce back to the start of the flow if state is incomplete.
   useEffect(() => {
@@ -189,28 +190,29 @@ const ConfirmAndPayPage = () => {
         setTopupOpen(true);
         return;
       }
-      // Per-car overlap: backend rejects when the selected car already
-      // has an active or overlapping booking. Surface a longer, more
-      // explanatory toast so the customer knows to pick a different car
-      // or pickup time — they can also book another car in parallel.
+      // Per-car overlap: show a modal so the user has clear actions.
       if (
         err?.response?.status === 409 &&
         (data.code === 'CAR_TIME_CONFLICT' || data.code === 'CAR_HAS_ACTIVE_BOOKING')
       ) {
-        toast.error(
-          err?.response?.data?.message ||
-          'This car is already booked for an overlapping time. Pick a different car or change the pickup time.',
-          { duration: 6000 },
-        );
+        setConflictError({
+          title: 'Car already booked',
+          message:
+            err?.response?.data?.message ||
+            'This car is already booked for an overlapping time. Pick a different car or change the pickup time.',
+          type: 'car',
+        });
         return;
       }
-      // Scheduled rides require enough lead time for the safety window.
+      // Scheduled rides require enough lead time — show in a modal.
       if (err?.response?.status === 422) {
-        toast.error(
-          err?.response?.data?.message ||
-          'Pick a later pickup time and try again.',
-          { duration: 5000 },
-        );
+        setConflictError({
+          title: 'Pickup time too soon',
+          message:
+            err?.response?.data?.message ||
+            'We need more lead time for scheduled rides. Please pick a later pickup time.',
+          type: 'time',
+        });
         return;
       }
       toast.error(err?.response?.data?.message || err?.message || 'Could not place booking');
@@ -334,6 +336,20 @@ const ConfirmAndPayPage = () => {
         onConfirm={() => {
           setPickupEditOpen(false);
           navigate('/user/book/hourly/type');
+        }}
+      />
+
+      {/* Conflict / validation error modal */}
+      <ConflictErrorDialog
+        error={conflictError}
+        onClose={() => setConflictError(null)}
+        onChangeCar={() => {
+          setConflictError(null);
+          setCarEditOpen(true);
+        }}
+        onChangePickup={() => {
+          setConflictError(null);
+          setPickupEditOpen(true);
         }}
       />
     </div>
@@ -816,4 +832,92 @@ function FactRow({ icon: Icon, label, value }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Conflict Error Dialog                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Shown when the server rejects the booking due to a car time-conflict
+ * (409) or insufficient lead time (422). Surfaces a clear title,
+ * the server's exact message, and two context-aware action buttons so
+ * the user can fix the issue without hunting around the UI.
+ *
+ * `type === 'car'`  → primary CTA opens the car-picker sheet.
+ * `type === 'time'` → primary CTA opens the pickup-time confirm dialog.
+ */
+function ConflictErrorDialog({ error, onClose, onChangeCar, onChangePickup }) {
+  if (!error) return null;
+  const isCar = error.type === 'car';
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+      <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl animate-fade-in-up">
+        {/* Icon + title row */}
+        <div className="flex items-start gap-3 mb-1">
+          <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${isCar ? 'bg-red-100' : 'bg-amber-100'}`}>
+            <AlertTriangle className={`w-5 h-5 ${isCar ? 'text-red-600' : 'text-amber-700'}`} />
+          </div>
+          <div className="flex-1 min-w-0 pt-0.5">
+            <p className="text-base font-bold text-text">{error.title}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-xl hover:bg-gray-100 text-text-muted shrink-0"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Message */}
+        <p className="text-sm text-text-secondary leading-snug mb-5 pl-14">
+          {error.message}
+        </p>
+
+        {/* Actions */}
+        <div className="space-y-2">
+          {isCar ? (
+            <>
+              <button
+                type="button"
+                onClick={onChangeCar}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-primary text-white font-semibold py-3 text-sm hover:bg-primary-dark transition"
+              >
+                <Car className="w-4 h-4" />
+                Change car
+              </button>
+              <button
+                type="button"
+                onClick={onChangePickup}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-border bg-white text-text font-semibold py-3 text-sm hover:bg-gray-50 transition"
+              >
+                <CalendarClock className="w-4 h-4" />
+                Change pickup time instead
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={onChangePickup}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-primary text-white font-semibold py-3 text-sm hover:bg-primary-dark transition"
+              >
+                <CalendarClock className="w-4 h-4" />
+                Change pickup time
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="w-full inline-flex items-center justify-center rounded-2xl border border-border bg-white text-text font-semibold py-3 text-sm hover:bg-gray-50 transition"
+              >
+                Stay on this page
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default ConfirmAndPayPage;
+
