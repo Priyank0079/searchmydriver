@@ -237,9 +237,21 @@ const driverSearchSchema = new mongoose.Schema(
  *                         immediately (same UX as instant).
  *   LONG_LEAD_HOURS     — for all other rides, search starts this many
  *                         hours BEFORE `scheduledStartAt`.
+ *   LEAD_SCHEDULE_HOUR  — hour-of-day (0-23) at which morning rides
+ *                         that aren't "tomorrow" get their assignment
+ *                         job fired the evening BEFORE pickup. Default
+ *                         18 (= 6 PM) so drivers see them after their
+ *                         day winds down.
  *   EMERGENCY_POOL_MINUTES — if no driver is assigned this many minutes
  *                         before pickup, the booking moves to the
  *                         admin-managed emergency pool.
+ *   MIN_SCHEDULED_LEAD_HOURS — hard floor on how far in advance the
+ *                         customer can create a scheduled booking.
+ *                         The booking-create endpoint rejects anything
+ *                         sooner with a 422.
+ *   REMINDER_OFFSETS_MINUTES — list of minutes-before-pickup at which
+ *                         the worker emits an in-app reminder toast to
+ *                         the customer (and the driver once assigned).
  */
 const scheduledDispatchSchema = new mongoose.Schema(
   {
@@ -247,7 +259,13 @@ const scheduledDispatchSchema = new mongoose.Schema(
     MORNING_END_HOUR: { type: Number, default: 10, min: 1, max: 24 },
     SHORT_WINDOW_HOURS: { type: Number, default: 6, min: 0 },
     LONG_LEAD_HOURS: { type: Number, default: 4, min: 0 },
+    LEAD_SCHEDULE_HOUR: { type: Number, default: 18, min: 0, max: 23 },
     EMERGENCY_POOL_MINUTES: { type: Number, default: 120, min: 5 },
+    MIN_SCHEDULED_LEAD_HOURS: { type: Number, default: 2, min: 0 },
+    REMINDER_OFFSETS_MINUTES: {
+      type: [Number],
+      default: [60, 15],
+    },
   },
   { _id: false },
 );

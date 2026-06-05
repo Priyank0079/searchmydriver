@@ -14,6 +14,11 @@ const ManageBookings = () => {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [bookingTypeFilter, setBookingTypeFilter] = useState('');
+  const [serviceTypeFilter, setServiceTypeFilter] = useState('');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [selectedBooking, setSelectedBooking] = useState(null);
 
   useEffect(() => {
@@ -22,9 +27,40 @@ const ManageBookings = () => {
   }, [search]);
 
   const queryParams = useMemo(
-    () => ({ page, limit, search: debouncedSearch, status: statusFilter }),
-    [page, limit, debouncedSearch, statusFilter],
+    () => ({
+      page,
+      limit,
+      search: debouncedSearch,
+      status: statusFilter,
+      bookingType: bookingTypeFilter,
+      serviceType: serviceTypeFilter,
+      paymentStatus: paymentStatusFilter,
+      from: fromDate,
+      to: toDate,
+    }),
+    [
+      page,
+      limit,
+      debouncedSearch,
+      statusFilter,
+      bookingTypeFilter,
+      serviceTypeFilter,
+      paymentStatusFilter,
+      fromDate,
+      toDate,
+    ],
   );
+
+  const clearFilters = () => {
+    setSearch('');
+    setStatusFilter('');
+    setBookingTypeFilter('');
+    setServiceTypeFilter('');
+    setPaymentStatusFilter('');
+    setFromDate('');
+    setToDate('');
+    setPage(1);
+  };
 
   const cacheKey = buildCacheKey('admin-bookings', queryParams);
 
@@ -41,44 +77,83 @@ const ManageBookings = () => {
     () => [
       {
         key: 'id',
-        label: 'Booking ID',
+        label: 'Booking',
         width: '15%',
         render: (val, row) => (
-          <span className="font-mono font-medium text-xs bg-gray-100 px-2 py-1 rounded">
-            {row.bookingNumber || row._id.slice(-6)}
-          </span>
+          <div className="min-w-0">
+            <span className="font-mono font-medium text-xs bg-gray-100 px-2 py-1 rounded">
+              {row.bookingNumber || row._id.slice(-6)}
+            </span>
+            <div className="flex flex-wrap items-center gap-1 mt-1">
+              <span
+                className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                  row.bookingType === 'scheduled'
+                    ? 'bg-indigo-100 text-indigo-700'
+                    : 'bg-emerald-100 text-emerald-700'
+                }`}
+              >
+                {row.bookingType || 'instant'}
+              </span>
+              <span className="text-[10px] text-slate-400 capitalize">
+                {row.serviceType}
+              </span>
+            </div>
+          </div>
         ),
       },
       {
         key: 'user',
         label: 'Customer',
-        width: '20%',
+        width: '18%',
         render: (val, row) => (
-          <span className="font-semibold text-sm">
-            {row.userId ? row.userId.name : 'Unknown'}
-          </span>
+          <div className="min-w-0">
+            <p className="font-semibold text-sm text-slate-900 truncate">
+              {row.userId ? row.userId.name : 'Unknown'}
+            </p>
+            {row.userId?.phone_no && (
+              <p className="text-[11px] text-slate-500 truncate">
+                {row.userId.phone_no}
+              </p>
+            )}
+          </div>
         ),
       },
       {
         key: 'driver',
-        label: 'Assigned Driver',
-        width: '20%',
+        label: 'Driver',
+        width: '17%',
         render: (val, row) =>
           row.driverId ? (
-            <span className="text-sm">{row.driverId.name}</span>
+            <div className="min-w-0">
+              <p className="text-sm text-slate-800 truncate">
+                {row.driverId.name}
+              </p>
+              {row.driverId.phone_no && (
+                <p className="text-[11px] text-slate-500 truncate">
+                  {row.driverId.phone_no}
+                </p>
+              )}
+            </div>
           ) : (
             <span className="text-xs text-slate-400 italic">Unassigned</span>
           ),
       },
       {
-        key: 'serviceType',
-        label: 'Service',
-        width: '15%',
-        render: (val, row) => <span className="capitalize">{row.serviceType}</span>,
+        key: 'pickup',
+        label: 'Pickup',
+        width: '20%',
+        render: (val, row) => (
+          <p
+            className="text-xs text-slate-600 line-clamp-2"
+            title={row.pickup?.address}
+          >
+            {row.pickup?.address || '—'}
+          </p>
+        ),
       },
       {
         key: 'fare',
-        label: 'Est. Fare',
+        label: 'Fare',
         width: '10%',
         render: (val, row) => (
           <span className="font-medium text-emerald-600">
@@ -96,7 +171,12 @@ const ManageBookings = () => {
             started: 'primary',
             driver_assigned: 'primary',
             arrived: 'primary',
+            en_route: 'primary',
             searching: 'warning',
+            pending_assignment: 'info',
+            awaiting_payment: 'warning',
+            in_emergency_pool: 'danger',
+            no_drivers_found: 'danger',
             cancelled: 'danger',
           };
           return (
@@ -111,9 +191,17 @@ const ManageBookings = () => {
         label: 'Date',
         width: '10%',
         render: (val, row) => (
-          <span className="text-sm text-slate-500">
-            {new Date(row.createdAt).toLocaleDateString()}
-          </span>
+          <div>
+            <p className="text-xs text-slate-700">
+              {new Date(row.createdAt).toLocaleDateString()}
+            </p>
+            <p className="text-[10px] text-slate-400">
+              {new Date(row.createdAt).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </p>
+          </div>
         ),
       },
     ],
@@ -141,6 +229,32 @@ const ManageBookings = () => {
           setStatusFilter(val);
           setPage(1);
         }}
+        bookingTypeFilter={bookingTypeFilter}
+        onBookingTypeChange={(val) => {
+          setBookingTypeFilter(val);
+          setPage(1);
+        }}
+        serviceTypeFilter={serviceTypeFilter}
+        onServiceTypeChange={(val) => {
+          setServiceTypeFilter(val);
+          setPage(1);
+        }}
+        paymentStatusFilter={paymentStatusFilter}
+        onPaymentStatusChange={(val) => {
+          setPaymentStatusFilter(val);
+          setPage(1);
+        }}
+        fromDate={fromDate}
+        onFromDateChange={(val) => {
+          setFromDate(val);
+          setPage(1);
+        }}
+        toDate={toDate}
+        onToDateChange={(val) => {
+          setToDate(val);
+          setPage(1);
+        }}
+        onClear={clearFilters}
         onRefresh={refetch}
         refreshing={loading}
       />

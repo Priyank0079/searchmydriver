@@ -10,19 +10,57 @@ import {
   User as UserIcon,
   Phone as PhoneIcon,
   Car as CarIcon,
+  CalendarClock,
+  Zap,
 } from 'lucide-react';
 import useDriverIncomingOfferStore from '../../../../store/driver/useDriverIncomingOfferStore';
 import { useSocketEvent } from '../../../../hooks/useSocket';
 import { useNotificationSound } from '../../../../hooks/useNotificationSound';
 import { S2C_EVENTS } from '../../../../constants/socketEvents';
 import { SERVICE_TYPES, SERVICE_TYPE_LABELS } from '../../../../constants/serviceTypes';
+import { BOOKING_TYPE } from '../../../../constants/bookingStatus';
 import { formatDistance } from '../../../../utils/geo';
 import Button from '../../../../components/Button';
+
+/**
+ * Visual themes for the two offer flavours. Drivers were misreading
+ * scheduled offers as instant pings during testing — keeping the two
+ * shades far apart on the spectrum (orange-amber for instant urgency,
+ * indigo-violet for scheduled planning) makes it obvious at a glance.
+ */
+const OFFER_THEMES = {
+  [BOOKING_TYPE.INSTANT]: {
+    headerBg: 'bg-amber-50',
+    headerRing: 'ring-2 ring-amber-300',
+    headerText: 'text-amber-700',
+    headerHeading: 'text-amber-900',
+    pillBg: 'bg-amber-200/70',
+    pillText: 'text-amber-900',
+    badgeBg: 'bg-amber-500',
+    badgeText: 'text-white',
+    progressBar: 'bg-amber-500',
+    label: 'Instant ride',
+    Icon: Zap,
+  },
+  [BOOKING_TYPE.SCHEDULED]: {
+    headerBg: 'bg-indigo-50',
+    headerRing: 'ring-2 ring-indigo-300',
+    headerText: 'text-indigo-700',
+    headerHeading: 'text-indigo-900',
+    pillBg: 'bg-indigo-200/70',
+    pillText: 'text-indigo-900',
+    badgeBg: 'bg-indigo-500',
+    badgeText: 'text-white',
+    progressBar: 'bg-indigo-500',
+    label: 'Scheduled ride',
+    Icon: CalendarClock,
+  },
+};
 
 /** The asset that rings when a new offer arrives. Reused across the app. */
 const OFFER_ALERT_SRC = '/audio/alert_.mp3';
 
-function CountdownBar({ expiresAt }) {
+function CountdownBar({ expiresAt, barColorClass = 'bg-primary' }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 250);
@@ -41,7 +79,7 @@ function CountdownBar({ expiresAt }) {
       </div>
       <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
         <div
-          className="h-full bg-primary transition-[width] duration-200 ease-linear"
+          className={`h-full transition-[width] duration-200 ease-linear ${barColorClass}`}
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -126,19 +164,43 @@ const BookingOfferModal = () => {
       ? formatDistance(offer.distanceMeters)
       : null;
 
+  // Pick the colour scheme based on whether this is an instant or
+  // scheduled offer so drivers can identify the ride type at a glance.
+  // Falls back to the instant theme when bookingType is missing (older
+  // server payloads).
+  const theme =
+    OFFER_THEMES[offer.bookingType] || OFFER_THEMES[BOOKING_TYPE.INSTANT];
+  const ThemeIcon = theme.Icon;
+
   return (
     <div className="fixed inset-0 z-[90] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in">
-      <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden animate-slide-up">
-        <div className="relative bg-primary/10 px-5 py-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-primary-dark">
+      <div
+        className={`w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden animate-slide-up ${theme.headerRing}`}
+      >
+        <div className={`relative ${theme.headerBg} px-5 py-4`}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${theme.badgeBg} ${theme.badgeText}`}
+                >
+                  <ThemeIcon className="w-3 h-3" />
+                  {theme.label}
+                </span>
+              </div>
+              <p
+                className={`text-xs font-semibold uppercase tracking-wider mt-2 ${theme.headerText}`}
+              >
                 New booking offer
               </p>
-              <h2 className="text-xl font-bold text-text mt-1">{title}</h2>
+              <h2 className={`text-xl font-bold mt-1 ${theme.headerHeading}`}>
+                {title}
+              </h2>
             </div>
             {pickupDistanceLabel && (
-              <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase px-2 py-1 rounded-full bg-primary/15 text-primary-dark">
+              <span
+                className={`inline-flex items-center gap-1 text-[11px] font-bold uppercase px-2 py-1 rounded-full shrink-0 ${theme.pillBg} ${theme.pillText}`}
+              >
                 <Navigation className="w-3 h-3" />
                 {pickupDistanceLabel} to pickup
               </span>
@@ -254,7 +316,12 @@ const BookingOfferModal = () => {
                 </p>
               </div>
             </div>
-            {offer.offerExpiresAt && <CountdownBar expiresAt={offer.offerExpiresAt} />}
+            {offer.offerExpiresAt && (
+              <CountdownBar
+                expiresAt={offer.offerExpiresAt}
+                barColorClass={theme.progressBar}
+              />
+            )}
           </div>
 
           {error && (

@@ -119,17 +119,15 @@ export async function enqueueScheduledBookingJobs(booking) {
 
   const tasks = [];
 
-  // Three-tier assignment delay (mirrors decideScheduleTier).
-  const hoursUntilStart = (start - now) / 3_600_000;
-  const startHour = new Date(start).getHours();
-  const isMorning =
-    startHour >= config.MORNING_START_HOUR && startHour < config.MORNING_END_HOUR;
-
-  let assignDelay = 0;
-  if (!isMorning && hoursUntilStart > config.SHORT_WINDOW_HOURS) {
-    const assignAt = start - config.LONG_LEAD_HOURS * 3_600_000;
-    assignDelay = Math.max(0, assignAt - now);
-  }
+  // Reuse the single source of truth for the schedule decision so the
+  // queue and the booking flow can never disagree on assignAt.
+  const { decideScheduleTier } = await import(
+    '../services/bookingScheduled.service.js'
+  );
+  const decision = decideScheduleTier(new Date(start), new Date(now), config);
+  const assignDelay = decision.immediate
+    ? 0
+    : Math.max(0, new Date(decision.assignAt).getTime() - now);
 
   tasks.push(
     queue.add(
@@ -157,7 +155,13 @@ export async function enqueueScheduledBookingJobs(booking) {
     ),
   );
 
-  for (const minutesAhead of SCHEDULED_BOOKING.REMINDER_OFFSETS_MINUTES) {
+  // Reminder offsets come from the admin's per-service `scheduledDispatch`
+  // override (falling back to the constant) so admins can tune which
+  // pre-pickup nudges the customer/driver app receives.
+  const reminderOffsets = Array.isArray(config.REMINDER_OFFSETS_MINUTES)
+    ? config.REMINDER_OFFSETS_MINUTES
+    : SCHEDULED_BOOKING.REMINDER_OFFSETS_MINUTES;
+  for (const minutesAhead of reminderOffsets) {
     const fireAt = start - minutesAhead * 60_000;
     if (fireAt <= now) continue;
     tasks.push(
@@ -190,25 +194,138 @@ export async function enqueueScheduledBookingJobs(booking) {
 }
 
 /**
+ * Snapshot of every job in the scheduled-booking queue, grouped by
+ * BullMQ status. Used by the admin "Scheduled Jobs" dashboard so ops
+ * can see what's queued, what's running, what failed, and when the next
+ * one fires.
+ *
+ * Falls back to `{ enabled: false, ... }` when Redis isn't wired up so
+ * the admin UI can render a clear "queue disabled" empty state instead
+ * of a crash. Limits are intentionally generous (admins do paginate
+ * client-side) but capped so a huge queue doesn't OOM the API.
+ */
+export async function listScheduledBookingJobs({ limit = 200 } = {}) {
+  const queue = await getScheduledBookingQueue();
+  if (!queue) {
+    return {
+      enabled: false,
+      counts: {},
+      jobs: [],
+      total: 0,
+    };
+  }
+  const cap = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 500);
+  const states = ['delayed', 'waiting', 'active', 'failed', 'completed'];
+  try {
+    const counts = await queue.getJobCounts(...states);
+    // Pull jobs per state with a small cap each so a chatty queue
+    // doesn't blow up the response payload.
+    const perState = Math.min(cap, 100);
+    const buckets = await Promise.all(
+      states.map((state) => queue.getJobs([state], 0, perState - 1, true)),
+    );
+
+    const rows = [];
+    states.forEach((state, idx) => {
+      for (const job of buckets[idx]) {
+        const ts = job.timestamp || 0;
+        const delay = Number(job.delay || 0);
+        const nextRunAt = state === 'delayed' ? new Date(ts + delay) : null;
+        rows.push({
+          id: job.id,
+          name: job.name,
+          state,
+          bookingId: job.data?.bookingId || null,
+          minutesAhead: job.data?.minutesAhead ?? null,
+          scheduledStartAt: job.data?.scheduledStartAt || null,
+          createdAt: ts ? new Date(ts).toISOString() : null,
+          nextRunAt: nextRunAt ? nextRunAt.toISOString() : null,
+          processedOn: job.processedOn
+            ? new Date(job.processedOn).toISOString()
+            : null,
+          finishedOn: job.finishedOn
+            ? new Date(job.finishedOn).toISOString()
+            : null,
+          attemptsMade: job.attemptsMade || 0,
+          failedReason: job.failedReason || null,
+          delay,
+        });
+      }
+    });
+
+    rows.sort((a, b) => {
+      // delayed jobs first, ordered by next run; everything else by
+      // recency so failures don't push the live queue down.
+      if (a.state === 'delayed' && b.state === 'delayed') {
+        return new Date(a.nextRunAt || 0) - new Date(b.nextRunAt || 0);
+      }
+      if (a.state === 'delayed') return -1;
+      if (b.state === 'delayed') return 1;
+      const aT = new Date(a.finishedOn || a.processedOn || a.createdAt || 0).getTime();
+      const bT = new Date(b.finishedOn || b.processedOn || b.createdAt || 0).getTime();
+      return bT - aT;
+    });
+
+    return {
+      enabled: true,
+      counts: {
+        delayed: counts.delayed || 0,
+        waiting: counts.waiting || 0,
+        active: counts.active || 0,
+        failed: counts.failed || 0,
+        completed: counts.completed || 0,
+      },
+      jobs: rows.slice(0, cap),
+      total: rows.length,
+    };
+  } catch (err) {
+    console.warn(
+      '[scheduledBooking] failed to list jobs:',
+      err?.message || err,
+    );
+    return { enabled: true, counts: {}, jobs: [], total: 0, error: err.message };
+  }
+}
+
+/**
  * Remove every queued job for a booking. Called from every cancellation
  * path so a cancelled booking never wakes back up. Best-effort.
+ *
+ * We can't enumerate reminder offsets from the constant any more —
+ * admins can change them — so we scan the queue's pending buckets and
+ * drop anything tagged with this `bookingId` in `job.data`. The fixed
+ * `assign`/`escalate` IDs are still removed by hand so a reschedule
+ * that re-uses them stays idempotent.
  */
 export async function removeScheduledBookingJobs(bookingId) {
   const queue = await getScheduledBookingQueue();
   if (!queue || !bookingId) return false;
-  const ids = [
-    jobIdFor(SCHEDULED_JOB_NAMES.ASSIGN, bookingId),
-    jobIdFor(SCHEDULED_JOB_NAMES.ESCALATE, bookingId),
-    ...SCHEDULED_BOOKING.REMINDER_OFFSETS_MINUTES.map((m) =>
-      jobIdFor(SCHEDULED_JOB_NAMES.REMINDER, bookingId, m),
-    ),
-  ];
+  const bid = String(bookingId);
   try {
+    // Static IDs (assign / escalate) for fast removal.
+    const fixed = [
+      jobIdFor(SCHEDULED_JOB_NAMES.ASSIGN, bid),
+      jobIdFor(SCHEDULED_JOB_NAMES.ESCALATE, bid),
+    ];
     await Promise.all(
-      ids.map(async (id) => {
+      fixed.map(async (id) => {
         const job = await queue.getJob(id);
         if (job) await job.remove();
       }),
+    );
+
+    // Scan delayed/waiting/active for reminder jobs (their ID embeds
+    // the minutesAhead, which we can no longer predict).
+    const pending = await queue.getJobs(
+      ['delayed', 'waiting', 'active'],
+      0,
+      500,
+      true,
+    );
+    await Promise.all(
+      pending
+        .filter((j) => String(j?.data?.bookingId || '') === bid)
+        .map((j) => j.remove().catch(() => {})),
     );
     return true;
   } catch (err) {

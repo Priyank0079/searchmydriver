@@ -4,12 +4,14 @@ import { Zap, CalendarClock, ChevronRight, Check } from 'lucide-react';
 import Button from '../../../../../components/Button';
 import PageShell from '../../components/PageShell';
 import useBookingDraftStore from '../../../../../store/user/useBookingDraftStore';
+import { useCachedQuery } from '../../../../../hooks/useCachedQuery';
+import { useUserServicePricingsStore } from '../../../../../store/user/useUserPricingStore';
 import { SERVICE_TYPES } from '../../../../../constants/serviceTypes';
 import {
   BOOKING_TYPE,
   BOOKING_TYPE_LABELS,
   BOOKING_TYPE_DESCRIPTIONS,
-  SCHEDULED_BOOKING,
+  mergeScheduledDispatchConfig,
 } from '../../../../../constants/bookingStatus';
 import { formatPickupDateTime } from '../../../../../utils/datetime';
 
@@ -20,8 +22,10 @@ import { formatPickupDateTime } from '../../../../../utils/datetime';
  *
  *   - Instant   → pickup time defaults to now + 15 minutes (dispatch buffer).
  *   - Scheduled → user picks a future date+time; minimum is now +
- *     `SCHEDULED_BOOKING.MIN_SCHEDULED_LEAD_HOURS` so the emergency-pool
- *     safety net has room to fire.
+ *     hourly pricing's `scheduledDispatch.MIN_SCHEDULED_LEAD_HOURS` so the
+ *     emergency-pool safety net has room to fire. Reading the value from
+ *     the live ServicePricing keeps the UI in lockstep with whatever the
+ *     admin set in Settings → Service Pricing → Scheduled-ride dispatcher.
  *
  * Users with multiple cars can have parallel bookings, so we no longer
  * redirect into an existing active booking here — the home page surfaces
@@ -34,6 +38,20 @@ const HourlyBookingTypePage = () => {
   const setBookingType = useBookingDraftStore((s) => s.setBookingType);
   const setHourly = useBookingDraftStore((s) => s.setHourly);
 
+  // Pull the active service-pricing rows so we can use the admin's
+  // per-service `scheduledDispatch` knobs (min lead time, etc.) for the
+  // date-picker constraint. Cached across the whole booking flow.
+  const { data: pricingRows } = useCachedQuery(
+    useUserServicePricingsStore,
+    'user-pricing-services',
+  );
+  const dispatchConfig = useMemo(() => {
+    const hourly = (pricingRows || []).find(
+      (p) => p.serviceType === SERVICE_TYPES.HOURLY,
+    );
+    return mergeScheduledDispatchConfig(hourly?.scheduledDispatch);
+  }, [pricingRows]);
+
   const [selected, setSelected] = useState(draftBookingType || null);
   const [scheduledAt, setScheduledAt] = useState(defaultScheduledValue());
 
@@ -44,9 +62,10 @@ const HourlyBookingTypePage = () => {
     setServiceType(SERVICE_TYPES.HOURLY);
   }, [setServiceType]);
 
+  const minLeadHours = dispatchConfig.MIN_SCHEDULED_LEAD_HOURS;
   const minScheduledDate = useMemo(
-    () => new Date(Date.now() + SCHEDULED_BOOKING.MIN_SCHEDULED_LEAD_HOURS * 60 * 60_000),
-    [],
+    () => new Date(Date.now() + minLeadHours * 60 * 60_000),
+    [minLeadHours],
   );
   const minScheduledInput = toDateTimeInputValue(minScheduledDate);
   const handleContinue = () => {
@@ -110,7 +129,7 @@ const HourlyBookingTypePage = () => {
               />
               <p className="mt-1.5 text-[11px] text-text-muted">
                 Earliest available is {formatPickupDateTime(minScheduledDate)} —
-                we need at least {SCHEDULED_BOOKING.MIN_SCHEDULED_LEAD_HOURS} hours
+                we need at least {minLeadHours} hours
                 lead time for scheduled rides.
               </p>
             </div>

@@ -101,6 +101,7 @@ import {
   getEmergencyPoolBookings,
   getEmergencyPoolAvailableDrivers,
   assignDriverToEmergencyPoolBooking,
+  getScheduledJobs,
 } from '../controllers/booking.controller.js';
 
 const router = express.Router();
@@ -122,6 +123,16 @@ router.patch('/tasks/:id/assign', protectStaff, restrictTo(...OPERATIONS), assig
 router.post('/tasks/:id/claim', protectStaff, restrictTo(...OPERATIONS), claimTask);
 
 router.get('/bookings', protectStaff, restrictTo(...ALL_STAFF), getAdminBookings);
+/* ---- Scheduled Jobs (BullMQ snapshot) --------------------------------- */
+// Mounted under /bookings/* so it lives in the same admin sub-section as
+// the all-bookings table. Listed before /bookings/:id so the static
+// segment wins over the param route.
+router.get(
+  '/bookings/scheduled-jobs',
+  protectStaff,
+  restrictTo(...OPERATIONS),
+  getScheduledJobs,
+);
 router.get('/bookings/:id', protectStaff, restrictTo(...ALL_STAFF), getAdminBookingById);
 
 /* ---- Emergency Pool (scheduled-ride manual assignment) ---------------- */

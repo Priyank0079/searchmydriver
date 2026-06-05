@@ -49,7 +49,11 @@ import {
   emitToDriver,
 } from '../utils/socketEmitters.js';
 import { findActiveZoneIdsForPointService } from './zone.service.js';
-import { setupScheduledBooking, cancelScheduledBookingJobs } from './bookingScheduled.service.js';
+import {
+  setupScheduledBooking,
+  cancelScheduledBookingJobs,
+  loadScheduledDispatchConfig,
+} from './bookingScheduled.service.js';
 
 /**
  * Business rules:
@@ -572,13 +576,22 @@ export async function createBookingService(userId, body) {
   // emergency-pool safety window to fire. Anything sooner is treated as
   // a UX error — surface a clear 422 rather than letting the queue
   // schedule a job in the past.
+  //
+  // The minimum lead time is admin-tunable per service via
+  // `ServicePricing.scheduledDispatch.MIN_SCHEDULED_LEAD_HOURS`; the
+  // hard-coded constant is only used as a fallback when no override
+  // exists. This keeps the validation in lockstep with the rest of the
+  // scheduled-dispatcher knobs admins can change from the panel.
   if (bookingType === BOOKING_TYPE.SCHEDULED && serviceType === SERVICE_TYPES.HOURLY) {
-    const minLeadMs = SCHEDULED_BOOKING.MIN_SCHEDULED_LEAD_HOURS * 60 * 60 * 1000;
+    const cfg = await loadScheduledDispatchConfig(serviceType);
+    const minLeadHours =
+      cfg.MIN_SCHEDULED_LEAD_HOURS ?? SCHEDULED_BOOKING.MIN_SCHEDULED_LEAD_HOURS;
+    const minLeadMs = minLeadHours * 60 * 60 * 1000;
     const startMs = new Date(hourly.scheduledStartAt).getTime();
     if (!Number.isFinite(startMs) || startMs - Date.now() < minLeadMs) {
       throw new ApiError(
         422,
-        `Scheduled rides must start at least ${SCHEDULED_BOOKING.MIN_SCHEDULED_LEAD_HOURS} hours from now. Pick a later pickup time or use Instant.`,
+        `Scheduled rides must start at least ${minLeadHours} hours from now. Pick a later pickup time or use Instant.`,
       );
     }
   }
@@ -1013,13 +1026,43 @@ export async function adminMarkNoDriversFoundService(bookingId) {
 /* ------------------------------------------------------------------ */
 
 export async function listAdminBookingsService(query = {}) {
-  const { page = 1, limit = 20, search, status } = query;
+  const {
+    page = 1,
+    limit = 20,
+    search,
+    status,
+    bookingType,
+    serviceType,
+    paymentStatus,
+    from,
+    to,
+  } = query;
   const skip = (Math.max(1, parseInt(page, 10)) - 1) * parseInt(limit, 10);
 
   const filter = { isDeleted: false };
-  if (status) {
-    filter.status = status;
+  if (status) filter.status = status;
+  if (bookingType) filter.bookingType = bookingType;
+  if (serviceType) filter.serviceType = serviceType;
+  if (paymentStatus) filter.paymentStatus = paymentStatus;
+
+  // Date range over createdAt — admins typically want "show me bookings
+  // created on date X" rather than "scheduled for X" because the latter
+  // is null for instant bookings.
+  if (from || to) {
+    filter.createdAt = {};
+    const fromDate = from ? new Date(from) : null;
+    const toDate = to ? new Date(to) : null;
+    if (fromDate && !Number.isNaN(fromDate.getTime())) {
+      filter.createdAt.$gte = fromDate;
+    }
+    if (toDate && !Number.isNaN(toDate.getTime())) {
+      // Treat `to` as inclusive of the end-of-day.
+      toDate.setHours(23, 59, 59, 999);
+      filter.createdAt.$lte = toDate;
+    }
+    if (!Object.keys(filter.createdAt).length) delete filter.createdAt;
   }
+
   if (search) {
     const isObjectId = /^[0-9a-fA-F]{24}$/.test(search);
     if (isObjectId) {
@@ -1044,6 +1087,7 @@ export async function listAdminBookingsService(query = {}) {
     Booking.find(filter)
       .populate('userId', 'name phone_no email')
       .populate('driverId', 'name phone_no email')
+      .populate('zoneIds', 'name code city')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit, 10))

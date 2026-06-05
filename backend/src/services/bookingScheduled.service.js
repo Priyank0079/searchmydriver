@@ -65,11 +65,17 @@ export async function loadScheduledDispatchConfig(serviceType) {
  * Pure decision: should this scheduled ride search for a driver
  * immediately, or sit in PENDING_ASSIGNMENT until the assign-job fires?
  *
- *   morning      → start hour ∈ [MORNING_START_HOUR, MORNING_END_HOUR)
- *                  → search immediately
- *   short_window → hoursUntilStart ≤ SHORT_WINDOW_HOURS
- *                  → search immediately
- *   long_lead    → otherwise; defer to (start − LONG_LEAD_HOURS)
+ *   morning           → start hour ∈ [MORNING_START_HOUR, MORNING_END_HOUR)
+ *                       AND pickup is TODAY/TOMORROW (calendar-day
+ *                       diff ≤ 1)
+ *                       → search immediately so drivers can plan their day.
+ *   morning_lead      → morning ride scheduled for the day-after-tomorrow
+ *                       or later → defer to LEAD_SCHEDULE_HOUR (default
+ *                       6 PM) the EVENING BEFORE pickup so drivers see
+ *                       morning gigs the night before.
+ *   short_window      → hoursUntilStart ≤ SHORT_WINDOW_HOURS
+ *                       → search immediately.
+ *   long_lead         → otherwise; defer to (start − LONG_LEAD_HOURS).
  *
  * Returns `{ tier, immediate, assignAt, escalateAt }`.
  *
@@ -78,24 +84,57 @@ export async function loadScheduledDispatchConfig(serviceType) {
  * emergency-pool safety net runs even when the initial search fails.
  */
 export function decideScheduleTier(scheduledStartAt, now, config) {
-  const start = new Date(scheduledStartAt).getTime();
-  const nowMs = now instanceof Date ? now.getTime() : Number(now) || Date.now();
-  const hoursUntilStart = (start - nowMs) / 3_600_000;
-  const startHour = new Date(start).getHours();
+  const start = new Date(scheduledStartAt);
+  const startMs = start.getTime();
+  const nowDate = now instanceof Date ? now : new Date(Number(now) || Date.now());
+  const nowMs = nowDate.getTime();
+  const hoursUntilStart = (startMs - nowMs) / 3_600_000;
+  const startHour = start.getHours();
 
   const cfg = { ...SCHEDULED_BOOKING, ...(config || {}) };
-  const escalateAt = new Date(start - cfg.EMERGENCY_POOL_MINUTES * 60_000);
+  const escalateAt = new Date(startMs - cfg.EMERGENCY_POOL_MINUTES * 60_000);
 
-  if (
-    startHour >= cfg.MORNING_START_HOUR &&
-    startHour < cfg.MORNING_END_HOUR
-  ) {
-    return { tier: 'morning', immediate: true, assignAt: null, escalateAt };
+  // Whole-day diff between today and pickup day (local midnight buckets).
+  // Same day = 0, tomorrow = 1, day-after-tomorrow = 2 …
+  const startMidnight = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime();
+  const nowMidnight = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
+  const daysAhead = Math.round((startMidnight - nowMidnight) / 86_400_000);
+
+  const isMorning =
+    startHour >= cfg.MORNING_START_HOUR && startHour < cfg.MORNING_END_HOUR;
+
+  if (isMorning) {
+    // Morning ride for today or tomorrow → search now.
+    if (daysAhead <= 1) {
+      return { tier: 'morning', immediate: true, assignAt: null, escalateAt };
+    }
+    // Morning ride further out → fire the assign job at LEAD_SCHEDULE_HOUR
+    // (e.g. 6 PM) on the calendar day BEFORE pickup. Clamp into the
+    // future so a booking made past the deadline still gets a job.
+    const dayBefore = new Date(
+      start.getFullYear(),
+      start.getMonth(),
+      start.getDate() - 1,
+      cfg.LEAD_SCHEDULE_HOUR,
+      0,
+      0,
+      0,
+    );
+    let assignAt = dayBefore;
+    if (assignAt.getTime() <= nowMs) {
+      // The configured lead-hour has already passed today (e.g. user
+      // booked at 11 PM for a 7 AM pickup tomorrow morning, but
+      // somehow daysAhead > 1 ⇒ rare clock skew). Fall back to
+      // LONG_LEAD_HOURS as a safety net.
+      assignAt = new Date(startMs - cfg.LONG_LEAD_HOURS * 3_600_000);
+    }
+    return { tier: 'morning_lead', immediate: false, assignAt, escalateAt };
   }
+
   if (hoursUntilStart <= cfg.SHORT_WINDOW_HOURS) {
     return { tier: 'short_window', immediate: true, assignAt: null, escalateAt };
   }
-  const assignAt = new Date(start - cfg.LONG_LEAD_HOURS * 3_600_000);
+  const assignAt = new Date(startMs - cfg.LONG_LEAD_HOURS * 3_600_000);
   return { tier: 'long_lead', immediate: false, assignAt, escalateAt };
 }
 

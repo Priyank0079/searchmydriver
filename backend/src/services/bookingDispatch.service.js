@@ -74,6 +74,9 @@ function buildOfferPayload(booking, driver, { customer, car } = {}) {
     bookingId: String(booking._id),
     bookingNumber: booking.bookingNumber,
     serviceType: booking.serviceType,
+    // Drivers need to tell scheduled vs instant requests apart at a
+    // glance — the offer modal themes itself off this field.
+    bookingType: booking.bookingType,
     paymentMode: booking.paymentMode,
     pickup: booking.pickup,
     dropoff: booking.dropoff || null,

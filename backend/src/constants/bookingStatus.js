@@ -167,10 +167,14 @@ export const DISPATCH_RESPONSE = Object.freeze({
  * Scheduled-ride dispatcher policy.
  *
  * The user picks a future pickup time; the backend decides WHEN to start
- * searching for a driver based on three tiers, in order:
+ * searching for a driver based on the following tiers, in order:
  *
  *   1. "Morning rides" (start time in [MORNING_START_HOUR, MORNING_END_HOUR))
- *      → search immediately so drivers can plan their day.
+ *      a. pickup is TOMORROW (or today)  → search immediately so
+ *         drivers can plan their day.
+ *      b. pickup is the day-after-tomorrow or later → defer the
+ *         dispatcher to `LEAD_SCHEDULE_HOUR` of the evening BEFORE
+ *         pickup. Admins want morning rides assigned the night before.
  *
  *   2. Short-window rides (hoursUntilStart ≤ SHORT_WINDOW_HOURS)
  *      → search immediately — same UX as instant once we're close.
@@ -193,6 +197,12 @@ export const SCHEDULED_BOOKING = Object.freeze({
   MORNING_END_HOUR: 10,
   SHORT_WINDOW_HOURS: 6,
   LONG_LEAD_HOURS: 4,
+  /**
+   * Hour-of-day (0–23) at which the "morning ride scheduled for a
+   * future date" assignment job fires the evening BEFORE pickup.
+   * Default 18 (6 PM). Admin-tunable per service.
+   */
+  LEAD_SCHEDULE_HOUR: 18,
   EMERGENCY_POOL_MINUTES: 120,
   REMINDER_OFFSETS_MINUTES: Object.freeze([60, 15]),
   /**

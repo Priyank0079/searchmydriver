@@ -107,6 +107,22 @@ export const SCHEDULED_BOOKING = Object.freeze({
   MORNING_END_HOUR: 10,
   SHORT_WINDOW_HOURS: 6,
   LONG_LEAD_HOURS: 4,
+  LEAD_SCHEDULE_HOUR: 18,
   EMERGENCY_POOL_MINUTES: 120,
   MIN_SCHEDULED_LEAD_HOURS: 2,
+  REMINDER_OFFSETS_MINUTES: [60, 15],
 });
+
+/**
+ * Merge a per-service `scheduledDispatch` override (from
+ * `ServicePricing`) onto the platform defaults above. Use this anywhere
+ * the user-facing UI needs the SAME numbers the backend will apply
+ * when the booking is created — never read from `SCHEDULED_BOOKING`
+ * directly without merging the override.
+ */
+export function mergeScheduledDispatchConfig(override) {
+  if (!override || typeof override !== 'object') {
+    return { ...SCHEDULED_BOOKING };
+  }
+  return { ...SCHEDULED_BOOKING, ...override };
+}

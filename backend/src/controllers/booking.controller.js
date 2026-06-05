@@ -42,6 +42,8 @@ import {
   listAvailableDriversForAssignmentService,
   getBookingCarTypeIdService,
 } from '../services/bookingEmergencyPool.service.js';
+import { listScheduledBookingJobs } from '../queues/scheduledBooking.queue.js';
+import Booking from '../models/booking.model.js';
 
 /* ------------------------------------------------------------------ */
 /* User                                                                */
@@ -316,4 +318,58 @@ export const assignDriverToEmergencyPoolBooking = asyncHandler(async (req, res) 
   return res
     .status(200)
     .json(new ApiResponse(200, result, 'Driver assigned to booking'));
+});
+
+/* ------------------------------------------------------------------ */
+/* Admin → Scheduled Jobs                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * GET /admin/scheduled-jobs
+ *
+ * Live snapshot of the BullMQ scheduled-booking queue. Returns the
+ * queue counts + a list of jobs across `delayed | waiting | active |
+ * failed | completed` so admins can see what's coming, what's stuck,
+ * and what just ran. Each row is hydrated with a tiny booking summary
+ * (number / status / pickup time) when the bookingId resolves so the
+ * dashboard can link to the booking detail without a second fetch.
+ */
+export const getScheduledJobs = asyncHandler(async (req, res) => {
+  const snapshot = await listScheduledBookingJobs({ limit: req.query?.limit });
+
+  const bookingIds = [
+    ...new Set(
+      (snapshot.jobs || [])
+        .map((j) => j.bookingId)
+        .filter((id) => /^[0-9a-fA-F]{24}$/.test(String(id || ''))),
+    ),
+  ];
+  let bookingMap = {};
+  if (bookingIds.length) {
+    const bookings = await Booking.find({ _id: { $in: bookingIds } })
+      .select('bookingNumber status hourly.scheduledStartAt serviceType bookingType userId')
+      .populate('userId', 'name phone_no')
+      .lean();
+    bookingMap = bookings.reduce((acc, b) => {
+      acc[String(b._id)] = {
+        bookingNumber: b.bookingNumber,
+        status: b.status,
+        scheduledStartAt: b.hourly?.scheduledStartAt || null,
+        serviceType: b.serviceType,
+        bookingType: b.bookingType,
+        customerName: b.userId?.name || null,
+        customerPhone: b.userId?.phone_no || null,
+      };
+      return acc;
+    }, {});
+  }
+
+  const jobs = (snapshot.jobs || []).map((job) => ({
+    ...job,
+    booking: job.bookingId ? bookingMap[String(job.bookingId)] || null : null,
+  }));
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, { ...snapshot, jobs }, 'Scheduled jobs fetched'));
 });

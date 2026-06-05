@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Car, CalendarCheck, DollarSign, Settings,
   LogOut, X, ChevronRight, ChevronDown, ShieldCheck, Monitor, Package,
   CheckSquare, MapPin, Receipt, Sparkles, Navigation, Wallet, Banknote,
-  LifeBuoy,
+  LifeBuoy, ClipboardList, Timer,
 } from 'lucide-react';
 import { APP_NAME } from '../../../utils/constants';
 import useAdminAuthStore from '../../../store/useAdminAuthStore';
@@ -23,14 +23,35 @@ const navItems = [
   { path: '/admin/drivers', label: 'Drivers', icon: Car },
   { path: '/admin/drivers/live', label: 'Live Map', icon: Navigation },
   { path: '/admin/kit-orders', label: 'Kit Orders', icon: Package },
-  { path: '/admin/bookings', label: 'Bookings', icon: CalendarCheck, roles: ['admin'] },
   {
-    path: '/admin/emergency-pool',
-    label: 'Emergency Pool',
-    icon: LifeBuoy,
-    // All staff can view; the page itself scopes team_members to their
-    // assigned zones and hides the "assign driver" CTA for them.
+    label: 'Bookings',
+    icon: CalendarCheck,
     roles: ['admin', 'sub_admin', 'team_member'],
+    children: [
+      {
+        path: '/admin/bookings',
+        label: 'All Bookings',
+        icon: ClipboardList,
+        // `end` so this child doesn't stay highlighted while you're on
+        // a deeper /admin/bookings/* page (scheduled-jobs / emergency-pool).
+        end: true,
+        roles: ['admin'],
+      },
+      {
+        path: '/admin/bookings/scheduled-jobs',
+        label: 'Scheduled Jobs',
+        icon: Timer,
+        roles: ['admin', 'sub_admin'],
+      },
+      {
+        path: '/admin/bookings/emergency-pool',
+        label: 'Emergency Pool',
+        icon: LifeBuoy,
+        // All staff can view; the page itself scopes team_members to
+        // their assigned zones and hides the "assign driver" CTA.
+        roles: ['admin', 'sub_admin', 'team_member'],
+      },
+    ],
   },
   {
     label: 'Account',
@@ -112,7 +133,11 @@ const Sidebar = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { admin, logout } = useAdminAuthStore();
-  const [expandedItems, setExpandedItems] = useState(['Settings', 'Account']);
+  const [expandedItems, setExpandedItems] = useState([
+    'Settings',
+    'Account',
+    'Bookings',
+  ]);
 
   const filteredNavItems = filterNavByRole(navItems, admin?.role);
 
@@ -218,6 +243,7 @@ const Sidebar = ({ isOpen, onClose }) => {
                       <NavLink
                         key={child.path}
                         to={child.path}
+                        end={child.end}
                         onClick={onClose}
                         className={({ isActive: active }) =>
                           `flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200

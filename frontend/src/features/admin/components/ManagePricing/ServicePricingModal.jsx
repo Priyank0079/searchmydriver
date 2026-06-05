@@ -104,6 +104,19 @@ const buildDefaultForm = (serviceType) => ({
     driverGraceMinutes: 2,
     driverDailyFreeCancellations: 3,
   },
+  // Scheduled-ride dispatcher tuning. Mirrors `SCHEDULED_BOOKING` in
+  // backend constants. Hourly-only — the modal hides this section for
+  // outstation since outstation has no schedule queue today.
+  scheduledDispatch: {
+    MORNING_START_HOUR: 6,
+    MORNING_END_HOUR: 10,
+    SHORT_WINDOW_HOURS: 6,
+    LONG_LEAD_HOURS: 4,
+    LEAD_SCHEDULE_HOUR: 18,
+    EMERGENCY_POOL_MINUTES: 120,
+    MIN_SCHEDULED_LEAD_HOURS: 2,
+    REMINDER_OFFSETS_MINUTES: [60, 15],
+  },
   isActive: true,
   sortOrder: 0,
 });
@@ -120,6 +133,10 @@ const buildFormFromExisting = (existing) => {
     stayAllowance: { ...base.stayAllowance, ...(existing.stayAllowance || {}) },
     customHours: { ...base.customHours, ...(existing.customHours || {}) },
     cancellation: { ...base.cancellation, ...(existing.cancellation || {}) },
+    scheduledDispatch: {
+      ...base.scheduledDispatch,
+      ...(existing.scheduledDispatch || {}),
+    },
   };
 };
 
@@ -331,6 +348,129 @@ const ServicePricingModal = ({ isOpen, onClose, serviceType, existing, onSaved }
               </Section>
             </>
           )}
+
+          {/* {isHourly && (
+            <Section
+              title="Scheduled-ride dispatcher"
+              subtitle="When does the system start hunting for a driver for a future-scheduled hourly ride? Morning rides booked the day before fire immediately so drivers can plan; everything earlier gets queued until closer to pickup."
+            >
+              <div className="p-3 bg-slate-50 rounded-xl space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    Morning ride window
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Rides whose pickup hour falls inside this window are
+                    treated as &ldquo;morning&rdquo; rides. Tomorrow&rsquo;s
+                    morning rides search immediately; later mornings are
+                    held until the evening before pickup.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <Input
+                    label="Morning start hour (0–23)"
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={form.scheduledDispatch.MORNING_START_HOUR}
+                    onChange={(e) =>
+                      updateNested('scheduledDispatch', {
+                        MORNING_START_HOUR: Number(e.target.value),
+                      })
+                    }
+                  />
+                  <Input
+                    label="Morning end hour (1–24, exclusive)"
+                    type="number"
+                    min={1}
+                    max={24}
+                    value={form.scheduledDispatch.MORNING_END_HOUR}
+                    onChange={(e) =>
+                      updateNested('scheduledDispatch', {
+                        MORNING_END_HOUR: Number(e.target.value),
+                      })
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-xl space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    Lead-time for far-future morning rides
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    For a morning ride scheduled the day-after-tomorrow
+                    or later, the assignment job fires at this hour the
+                    evening BEFORE pickup (24-hour clock).
+                  </p>
+                </div>
+                <Input
+                  label="Evening trigger hour (0–23)"
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={form.scheduledDispatch.LEAD_SCHEDULE_HOUR}
+                  onChange={(e) =>
+                    updateNested('scheduledDispatch', {
+                      LEAD_SCHEDULE_HOUR: Number(e.target.value),
+                    })
+                  }
+                />
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-xl space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    Other scheduled-ride windows
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Short window = rides this close get the instant
+                    flow. Long lead = how many hours before pickup we
+                    fire the assignment job for non-morning rides.
+                    Emergency pool = if no driver yet this many minutes
+                    before pickup, the booking goes to admin manual
+                    assignment.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <Input
+                    label="Short-window hours"
+                    type="number"
+                    min={0}
+                    value={form.scheduledDispatch.SHORT_WINDOW_HOURS}
+                    onChange={(e) =>
+                      updateNested('scheduledDispatch', {
+                        SHORT_WINDOW_HOURS: Number(e.target.value),
+                      })
+                    }
+                  />
+                  <Input
+                    label="Long-lead hours"
+                    type="number"
+                    min={0}
+                    value={form.scheduledDispatch.LONG_LEAD_HOURS}
+                    onChange={(e) =>
+                      updateNested('scheduledDispatch', {
+                        LONG_LEAD_HOURS: Number(e.target.value),
+                      })
+                    }
+                  />
+                  <Input
+                    label="Emergency-pool minutes"
+                    type="number"
+                    min={5}
+                    value={form.scheduledDispatch.EMERGENCY_POOL_MINUTES}
+                    onChange={(e) =>
+                      updateNested('scheduledDispatch', {
+                        EMERGENCY_POOL_MINUTES: Number(e.target.value),
+                      })
+                    }
+                  />
+                </div>
+              </div>
+            </Section>
+          )} */}
 
           {isOutstation && (
             <OutstationFieldsEditor
@@ -699,7 +839,173 @@ const ServicePricingModal = ({ isOpen, onClose, serviceType, existing, onSaved }
               </p>
             </div>
           </Section>
+          {isHourly && (
+            <Section
+              title="Scheduled-ride dispatcher"
+              subtitle="When does the system start hunting for a driver for a future-scheduled hourly ride? Morning rides booked the day before fire immediately so drivers can plan; everything earlier gets queued until closer to pickup."
+            >
+              <div className="p-3 bg-slate-50 rounded-xl space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    Morning ride window
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Rides whose pickup hour falls inside this window are
+                    treated as &ldquo;morning&rdquo; rides. Tomorrow&rsquo;s
+                    morning rides search immediately; later mornings are
+                    held until the evening before pickup.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <Input
+                    label="Morning start hour (0–23)"
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={form.scheduledDispatch.MORNING_START_HOUR}
+                    onChange={(e) =>
+                      updateNested('scheduledDispatch', {
+                        MORNING_START_HOUR: Number(e.target.value),
+                      })
+                    }
+                  />
+                  <Input
+                    label="Morning end hour (1–24, exclusive)"
+                    type="number"
+                    min={1}
+                    max={24}
+                    value={form.scheduledDispatch.MORNING_END_HOUR}
+                    onChange={(e) =>
+                      updateNested('scheduledDispatch', {
+                        MORNING_END_HOUR: Number(e.target.value),
+                      })
+                    }
+                  />
+                </div>
+              </div>
 
+              <div className="p-3 bg-slate-50 rounded-xl space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    Lead-time for far-future morning rides
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    For a morning ride scheduled the day-after-tomorrow
+                    or later, the assignment job fires at this hour the
+                    evening BEFORE pickup (24-hour clock).
+                  </p>
+                </div>
+                <Input
+                  label="Evening trigger hour (0–23)"
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={form.scheduledDispatch.LEAD_SCHEDULE_HOUR}
+                  onChange={(e) =>
+                    updateNested('scheduledDispatch', {
+                      LEAD_SCHEDULE_HOUR: Number(e.target.value),
+                    })
+                  }
+                />
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-xl space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    Other scheduled-ride windows
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Short window = rides this close get the instant
+                    flow. Long lead = how many hours before pickup we
+                    fire the assignment job for non-morning rides.
+                    Emergency pool = if no driver yet this many minutes
+                    before pickup, the booking goes to admin manual
+                    assignment.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <Input
+                    label="Short-window hours"
+                    type="number"
+                    min={0}
+                    value={form.scheduledDispatch.SHORT_WINDOW_HOURS}
+                    onChange={(e) =>
+                      updateNested('scheduledDispatch', {
+                        SHORT_WINDOW_HOURS: Number(e.target.value),
+                      })
+                    }
+                  />
+                  <Input
+                    label="Long-lead hours"
+                    type="number"
+                    min={0}
+                    value={form.scheduledDispatch.LONG_LEAD_HOURS}
+                    onChange={(e) =>
+                      updateNested('scheduledDispatch', {
+                        LONG_LEAD_HOURS: Number(e.target.value),
+                      })
+                    }
+                  />
+                  <Input
+                    label="Emergency-pool minutes"
+                    type="number"
+                    min={5}
+                    value={form.scheduledDispatch.EMERGENCY_POOL_MINUTES}
+                    onChange={(e) =>
+                      updateNested('scheduledDispatch', {
+                        EMERGENCY_POOL_MINUTES: Number(e.target.value),
+                      })
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-xl space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    Booking floor &amp; reminders
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    The customer&rsquo;s scheduled-ride date picker is
+                    capped to at least this many hours from now (the
+                    backend also enforces it on create). Reminders are a
+                    comma-separated list of minutes-before-pickup at
+                    which the worker pushes an in-app toast to the
+                    customer (and to the driver once assigned).
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <Input
+                    label="Minimum lead time (hours)"
+                    type="number"
+                    min={0}
+                    step="0.5"
+                    value={form.scheduledDispatch.MIN_SCHEDULED_LEAD_HOURS}
+                    onChange={(e) =>
+                      updateNested('scheduledDispatch', {
+                        MIN_SCHEDULED_LEAD_HOURS: Number(e.target.value),
+                      })
+                    }
+                  />
+                  <Input
+                    label="Reminder offsets (minutes, comma-sep)"
+                    type="text"
+                    value={(
+                      form.scheduledDispatch.REMINDER_OFFSETS_MINUTES || []
+                    ).join(', ')}
+                    onChange={(e) =>
+                      updateNested('scheduledDispatch', {
+                        REMINDER_OFFSETS_MINUTES: e.target.value
+                          .split(',')
+                          .map((s) => Number(s.trim()))
+                          .filter((n) => Number.isFinite(n) && n > 0),
+                      })
+                    }
+                  />
+                </div>
+              </div>
+            </Section>
+          )}
           <div className="flex gap-3 pt-2 sticky bottom-0 bg-white pb-1">
             <Button variant="outline" size="md" fullWidth type="button" onClick={onClose}>
               Cancel

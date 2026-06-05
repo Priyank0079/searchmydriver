@@ -124,6 +124,7 @@ const ManageUsers = lazy(() => import('./features/admin/pages/ManageUsers'));
 const UserProfilePage = lazy(() => import('./features/admin/pages/UserProfilePage'));
 const ManageBookings = lazy(() => import('./features/admin/pages/ManageBookings'));
 const ManageEmergencyPool = lazy(() => import('./features/admin/pages/ManageEmergencyPool'));
+const ManageScheduledJobs = lazy(() => import('./features/admin/pages/ManageScheduledJobs'));
 const PlatformSettings = lazy(() => import('./features/admin/pages/PlatformSettings'));
 const ManageTeam = lazy(() => import('./features/admin/pages/ManageTeam'));
 const ManageKits = lazy(() => import('./features/admin/pages/ManageKits'));
@@ -289,7 +290,19 @@ function App() {
             <Route path="/admin/kit-orders" element={<ManageKitOrders />} />
             <Route path="/admin/kit-orders/:orderId" element={<KitOrderDetailPage />} />
             <Route path="/admin/bookings" element={<ManageBookings />} />
-            <Route path="/admin/emergency-pool" element={<ManageEmergencyPool />} />
+            <Route
+              path="/admin/bookings/scheduled-jobs"
+              element={<ManageScheduledJobs />}
+            />
+            <Route
+              path="/admin/bookings/emergency-pool"
+              element={<ManageEmergencyPool />}
+            />
+            {/* Back-compat redirect for the old top-level emergency-pool URL. */}
+            <Route
+              path="/admin/emergency-pool"
+              element={<Navigate to="/admin/bookings/emergency-pool" replace />}
+            />
             <Route path="/admin/settings" element={<Navigate to="/admin/settings/platform" replace />} />
             <Route path="/admin/settings/platform" element={<PlatformSettings />} />
             <Route path="/admin/settings/kits" element={<ManageKits />} />
