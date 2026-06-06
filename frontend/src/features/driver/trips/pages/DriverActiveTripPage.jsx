@@ -21,6 +21,7 @@ import {
 import {
   BOOKING_TYPE,
   PAYMENT_POLICY,
+  SCHEDULED_BOOKING,
 } from '../../../../constants/bookingStatus';
 import Card from '../../../../components/Card';
 import Badge from '../../../../components/Badge';
@@ -244,6 +245,48 @@ const DriverActiveTripPage = () => {
     distanceToPickup != null &&
     distanceToPickup <= ARRIVAL_PROXIMITY_METERS;
 
+  // Tick a heartbeat once a second so the cancel preview's grace-window
+  // recompute (in `previewDriverCancellation`) reflects the live wall
+  // clock. Without this the preview is frozen at mount time and the
+  // dialog would happily say "no penalty" 30 seconds after the grace
+  // window actually expired.
+  // The same heartbeat doubles as the source-of-truth re-render trigger
+  // for the scheduled "Start to pickup" countdown below.
+  const [, setHeartbeat] = useState(0);
+  useEffect(() => {
+    if (!booking) return undefined;
+    const id = setInterval(() => setHeartbeat((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [booking?._id]);
+
+  // Time gate on the `Start to pickup` CTA for SCHEDULED bookings.
+  // Mirrors `markDriverEnRouteService` on the backend: a driver can only
+  // flip into EN_ROUTE within `RIDE_BUFFER_MINUTES` of the scheduled
+  // pickup. Tapping earlier would lock them out of every other dispatch
+  // wave (the radius search filters on `isOnTrip = false`) for hours
+  // while they sit doing nothing — which is exactly the dead-zone bug
+  // we hit when this CTA had no time guard.
+  //
+  // The driver app doesn't have the user-side per-service pricing
+  // override handy, so we use the platform default. The backend still
+  // enforces the override authoritatively, so a stricter admin policy
+  // will surface as a 409 toast rather than silently going through.
+  const isFutureScheduled =
+    booking?.bookingType === BOOKING_TYPE.SCHEDULED &&
+    !!booking?.hourly?.scheduledStartAt;
+  const scheduledStartMs = isFutureScheduled
+    ? new Date(booking.hourly.scheduledStartAt).getTime()
+    : NaN;
+  const enRouteUnlockMinutes = SCHEDULED_BOOKING.RIDE_BUFFER_MINUTES;
+  const minutesUntilPickup = Number.isFinite(scheduledStartMs)
+    ? Math.ceil((scheduledStartMs - Date.now()) / 60_000)
+    : null;
+  const enRouteTooEarly =
+    isFutureScheduled &&
+    status === BOOKING_STATUS.DRIVER_ASSIGNED &&
+    Number.isFinite(scheduledStartMs) &&
+    minutesUntilPickup > enRouteUnlockMinutes;
+
   const handleAdvance = useCallback(async () => {
     if (!config?.cta) return;
     const action = config.cta.action;
@@ -272,12 +315,25 @@ const DriverActiveTripPage = () => {
       }
       return;
     }
+    if (action === 'markEnRoute' && enRouteTooEarly) {
+      toast.error(
+        `Pickup is still ${minutesUntilPickup} min away — you can head out within ${enRouteUnlockMinutes} min of the scheduled time.`,
+      );
+      return;
+    }
     try {
       await useDriverActiveTripStore.getState()[action]();
     } catch (err) {
       toast.error(err?.response?.data?.message || err?.message || 'Something went wrong');
     }
-  }, [config, driverPoint, distanceToPickup]);
+  }, [
+    config,
+    driverPoint,
+    distanceToPickup,
+    enRouteTooEarly,
+    minutesUntilPickup,
+    enRouteUnlockMinutes,
+  ]);
 
   const handleStartWithOtp = useCallback(
     (otp) => useDriverActiveTripStore.getState().startTrip(otp),
@@ -288,18 +344,6 @@ const DriverActiveTripPage = () => {
     if (!config?.canCancel) return;
     setCancelOpen(true);
   }, [config]);
-
-  // Tick a heartbeat once a second so the cancel preview's grace-window
-  // recompute (in `previewDriverCancellation`) reflects the live wall
-  // clock. Without this the preview is frozen at mount time and the
-  // dialog would happily say "no penalty" 30 seconds after the grace
-  // window actually expired.
-  const [, setHeartbeat] = useState(0);
-  useEffect(() => {
-    if (!booking) return undefined;
-    const id = setInterval(() => setHeartbeat((n) => n + 1), 1000);
-    return () => clearInterval(id);
-  }, [booking?._id]);
 
   // Live cancellation preview — recomputes every render (cheap pure
   // function) so the wall-clock heartbeat above drives the copy.
@@ -620,6 +664,30 @@ const DriverActiveTripPage = () => {
             </div>
           </div>
         )}
+
+        {/* Scheduled-pickup countdown banner. Surfaces when the driver is
+            sitting on a future scheduled booking — explains exactly when
+            they can tap "Start to pickup" so they don't accidentally
+            trigger the early-en-route guard (which would otherwise look
+            like a 409 with no obvious cause). Until that window opens
+            the driver remains free to receive non-overlapping offers. */}
+        {enRouteTooEarly && (
+          <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-3 flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-indigo-100 text-indigo-700">
+              <CalendarClock className="w-4 h-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-indigo-900">
+                Pickup {formatScheduledLead(minutesUntilPickup)} away
+              </p>
+              <p className="text-[12px] leading-snug mt-0.5 text-indigo-800">
+                You can tap <span className="font-semibold">Start to pickup</span> within{' '}
+                {enRouteUnlockMinutes} min of the scheduled time. Until then you stay
+                available for other rides.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Pay-first overlay: while the customer is settling the fare we lock
@@ -648,7 +716,8 @@ const DriverActiveTripPage = () => {
             disabled={
               paymentBlocker ||
               busy === 'cancel' ||
-              (config.cta.action === 'markArrived' && !arrivalReady)
+              (config.cta.action === 'markArrived' && !arrivalReady) ||
+              (config.cta.action === 'markEnRoute' && enRouteTooEarly)
             }
             loading={busy === config.cta.action}
             icon={config.cta.icon}
@@ -999,6 +1068,22 @@ function CustomerPaymentOverlay({ open, paymentDeadlineAt, driverAssignedAt }) {
       </div>
     </div>
   );
+}
+
+/**
+ * Friendly "X away" label for the scheduled-pickup countdown.
+ * Falls back to "less than a minute" when the lead is sub-minute, which
+ * lines up with the moment the en-route gate flips open.
+ */
+function formatScheduledLead(minutes) {
+  if (!Number.isFinite(minutes) || minutes <= 0) return 'less than a minute';
+  if (minutes < 60) return `${minutes} min`;
+  const hrs = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hrs < 24) return mins ? `${hrs}h ${mins}m` : `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  const remHrs = hrs % 24;
+  return remHrs ? `${days}d ${remHrs}h` : `${days}d`;
 }
 
 export default DriverActiveTripPage;

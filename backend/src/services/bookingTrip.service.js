@@ -9,11 +9,13 @@ import {
 import {
   BOOKING_STATUS,
   ACTIVE_BOOKING_STATUSES,
+  BOOKING_TYPE,
   PAYMENT_MODE,
   BOOKING_PAYMENT_STATUS,
   PAYMENT_POLICY,
   DISPATCH,
   DISPATCH_RESPONSE,
+  SCHEDULED_BOOKING,
 } from '../constants/bookingStatus.js';
 import { S2C_EVENTS } from '../constants/socketEvents.js';
 import {
@@ -179,11 +181,41 @@ function assertStatus(booking, allowed, label) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * Resolve the per-service `RIDE_BUFFER_MINUTES` override (admin-tunable
+ * via the pricing modal) that defines the "you can start heading to
+ * pickup now" window for scheduled rides. Falls back to the
+ * platform-wide constant when pricing isn't configured. Best-effort —
+ * any DB error degrades to the default.
+ */
+async function resolveEnRouteLeadMinutes(serviceType) {
+  if (!serviceType) return SCHEDULED_BOOKING.RIDE_BUFFER_MINUTES;
+  try {
+    const pricing = await ServicePricing.findOne({ serviceType })
+      .select('scheduledDispatch')
+      .lean();
+    const value = Number(pricing?.scheduledDispatch?.RIDE_BUFFER_MINUTES);
+    if (Number.isFinite(value) && value >= 0) return value;
+  } catch {
+    // fall through to default
+  }
+  return SCHEDULED_BOOKING.RIDE_BUFFER_MINUTES;
+}
+
+/**
  * driver_assigned → en_route
  *
  * Driver tells us "I've started heading to the pickup". We block this
  * transition while a pre-pay booking is still `awaiting_payment` — there's
  * no point driving to a pickup the customer hasn't paid for yet.
+ *
+ * For SCHEDULED bookings the tap is also gated on time-of-day: drivers
+ * can only flip into EN_ROUTE once pickup is within `RIDE_BUFFER_MINUTES`
+ * of now. Tapping earlier would lock them out of every other dispatch
+ * wave (the radius search filters on `isOnTrip = false`) for hours or
+ * days while still doing nothing physically — exactly the dispatch
+ * dead-zone bug we hit when a driver tapped "Start to pickup" 24 days
+ * before pickup. The guard mirrors `shouldImmediatelyLockDriver` in the
+ * dispatcher so accept-time and start-time both honour the same window.
  */
 export async function markDriverEnRouteService(driverId, bookingId) {
   const booking = await loadDriverBooking(driverId, bookingId);
@@ -197,6 +229,22 @@ export async function markDriverEnRouteService(driverId, bookingId) {
       409,
       'Customer has chosen Pay Now but has not paid yet — wait for confirmation',
     );
+  }
+
+  if (booking.bookingType === BOOKING_TYPE.SCHEDULED) {
+    const startMs = booking?.hourly?.scheduledStartAt
+      ? new Date(booking.hourly.scheduledStartAt).getTime()
+      : NaN;
+    if (Number.isFinite(startMs)) {
+      const leadMinutes = await resolveEnRouteLeadMinutes(booking.serviceType);
+      const minutesAway = Math.ceil((startMs - Date.now()) / 60_000);
+      if (minutesAway > leadMinutes) {
+        throw new ApiError(
+          409,
+          `Pickup is still ${minutesAway} min away — you can head out within ${leadMinutes} min of the scheduled time. Try again closer to pickup.`,
+        );
+      }
+    }
   }
 
   booking.status = BOOKING_STATUS.EN_ROUTE;

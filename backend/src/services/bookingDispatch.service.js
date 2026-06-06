@@ -101,6 +101,112 @@ function alreadyOfferedDriverIds(booking) {
   return (booking.dispatch?.offers || []).map((o) => String(o.driverId));
 }
 
+/** Statuses that legitimately keep a driver's `isOnTrip` flag at `true`. */
+const ON_TRIP_LOCK_STATUSES = Object.freeze([
+  BOOKING_STATUS.DRIVER_ASSIGNED,
+  BOOKING_STATUS.AWAITING_PAYMENT,
+  BOOKING_STATUS.EN_ROUTE,
+  BOOKING_STATUS.ARRIVED,
+  BOOKING_STATUS.STARTED,
+]);
+
+/**
+ * Self-heal pass that runs at the top of every dispatch wave.
+ *
+ * Two failure modes the rest of the system can't undo on its own:
+ *
+ *   1. A driver tapped "Start to pickup" on a SCHEDULED booking days
+ *      before pickup. The booking is now wedged at EN_ROUTE far from
+ *      its actual start time, and the driver's `isOnTrip` flag is set —
+ *      so the radius search excludes them from every new wave for the
+ *      entire interval. Walk those bookings back to DRIVER_ASSIGNED so
+ *      both sides can resume normal life. (The newer
+ *      `markDriverEnRouteService` guard prevents the wedge from
+ *      happening again, but legacy data still needs cleaning up.)
+ *
+ *   2. A driver's `isOnTrip` is `true` but they have NO booking in any
+ *      "actively committed" status. Cause is usually a server crash
+ *      between the booking-status update and the driver-flag update.
+ *      Reset their flag so the dispatcher stops skipping them.
+ *
+ * Both passes are bounded by Mongo aggregations on indexed fields, so
+ * the cost is negligible per wave. Failures are logged and swallowed —
+ * dispatch must never block on a self-heal hiccup.
+ */
+async function selfHealDriverLockState() {
+  // 1. Walk back any SCHEDULED booking parked in EN_ROUTE while pickup
+  //    is still well beyond the buffer window. We use the platform-wide
+  //    default buffer here rather than the per-service override —
+  //    accidentally clearing a few minutes early is harmless (the
+  //    radius search will still match conflicting drivers via the
+  //    overlap window) and keeps the heal cheap (no per-booking
+  //    pricing lookup).
+  try {
+    const wedgeCutoffMs =
+      Date.now() + SCHEDULED_BOOKING.RIDE_BUFFER_MINUTES * 60_000;
+    const wedged = await Booking.find({
+      isDeleted: false,
+      bookingType: BOOKING_TYPE.SCHEDULED,
+      status: BOOKING_STATUS.EN_ROUTE,
+      'hourly.scheduledStartAt': { $gt: new Date(wedgeCutoffMs) },
+    })
+      .select('_id userId driverId timeline status')
+      .lean();
+    for (const b of wedged) {
+      try {
+        await Booking.updateOne(
+          { _id: b._id, status: BOOKING_STATUS.EN_ROUTE },
+          {
+            $set: { status: BOOKING_STATUS.DRIVER_ASSIGNED },
+            $unset: { 'timeline.enRouteAt': '' },
+          },
+        );
+        if (b.driverId) {
+          await Driver.updateOne(
+            { _id: b.driverId },
+            { $set: { isOnTrip: false } },
+          );
+        }
+        // Sync any open driver/user/admin UIs so they don't keep
+        // rendering the stale EN_ROUTE state until the next refresh.
+        const payload = {
+          bookingId: String(b._id),
+          status: BOOKING_STATUS.DRIVER_ASSIGNED,
+        };
+        emitToBooking(b._id, S2C_EVENTS.BOOKING_UPDATED, payload);
+        if (b.userId) emitToUser(b.userId, S2C_EVENTS.BOOKING_UPDATED, payload);
+        if (b.driverId) emitToDriver(b.driverId, S2C_EVENTS.BOOKING_UPDATED, payload);
+        emitToAdmins(S2C_EVENTS.BOOKING_UPDATED, payload);
+      } catch (err) {
+        console.warn(
+          '[dispatch] failed to walk back wedged scheduled booking',
+          String(b._id),
+          err?.message,
+        );
+      }
+    }
+  } catch (err) {
+    console.warn('[dispatch] self-heal wedge sweep failed:', err?.message);
+  }
+
+  // 2. Drivers flagged on-trip with no booking to back the flag. Bulk
+  //    reset — the `$nin` is bounded by the live in-progress booking
+  //    count which is small in practice.
+  try {
+    const lockedDriverIds = await Booking.distinct('driverId', {
+      isDeleted: false,
+      driverId: { $ne: null },
+      status: { $in: ON_TRIP_LOCK_STATUSES },
+    });
+    await Driver.updateMany(
+      { isOnTrip: true, _id: { $nin: lockedDriverIds } },
+      { $set: { isOnTrip: false } },
+    );
+  } catch (err) {
+    console.warn('[dispatch] self-heal stale isOnTrip sweep failed:', err?.message);
+  }
+}
+
 function buildOfferPayload(booking, driver, { customer, car } = {}) {
   return {
     bookingId: String(booking._id),
@@ -187,6 +293,13 @@ export async function dispatchNextDriverService(bookingId) {
   }
 
   clearWaveTimer(bookingId);
+
+  // Belt-and-braces cleanup before each wave: walks back any SCHEDULED
+  // booking wedged at EN_ROUTE far from pickup and resets stale
+  // `Driver.isOnTrip` flags. Without this, a single early-en-route tap
+  // (or a crashed cancel path) would silently exclude the driver from
+  // every dispatch wave for hours/days.
+  await selfHealDriverLockState();
 
   const maxAttempts = booking.dispatch?.maxAttempts || DISPATCH.MAX_ATTEMPTS;
   if ((booking.dispatch?.attemptsCount || 0) >= maxAttempts) {
