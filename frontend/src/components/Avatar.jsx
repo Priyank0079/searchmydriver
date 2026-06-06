@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { getInitials } from '../utils/formatters';
 
 const sizeClasses = {
@@ -14,12 +15,24 @@ const Avatar = ({
   online,
   className = '',
 }) => {
+  // Track image-load failures so a broken / 403 URL falls back to the
+  // initials bubble instead of showing the browser's default broken
+  // image glyph. Reset whenever `src` changes so a fresh URL gets a
+  // fresh chance.
+  const [errored, setErrored] = useState(false);
+  useEffect(() => {
+    setErrored(false);
+  }, [src]);
+
+  const showImage = !!src && !errored;
+
   return (
     <div className={`relative inline-flex shrink-0 ${className}`}>
-      {src ? (
+      {showImage ? (
         <img
           src={src}
           alt={name || 'Avatar'}
+          onError={() => setErrored(true)}
           className={`${sizeClasses[size]} rounded-full object-cover bg-gray-100`}
         />
       ) : (

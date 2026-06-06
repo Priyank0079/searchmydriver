@@ -17,6 +17,9 @@ import {
   Zap,
   CreditCard,
   Wallet as WalletIcon,
+  Phone,
+  Mail,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   BOOKING_TYPE,
@@ -26,7 +29,7 @@ import {
 import Card from '../../../../components/Card';
 import Badge from '../../../../components/Badge';
 import Button from '../../../../components/Button';
-import PersonContactCard from '../../../../components/PersonContactCard';
+import Avatar from '../../../../components/Avatar';
 import TripTrackingMap from '../../../../components/maps/TripTrackingMap';
 import StartRideOtpSheet from '../components/StartRideOtpSheet';
 import ConfirmDialog from '../../../../components/ConfirmDialog';
@@ -409,6 +412,16 @@ const DriverActiveTripPage = () => {
   // working on bookings created before the rename.
   const customerPhone = customer?.phone_no || customer?.phone || null;
   const customerPhoto = customer?.profilePicture || null;
+  const customerEmail = customer?.email || null;
+  const customerSince = customer?.createdAt
+    ? new Date(customer.createdAt).toLocaleDateString('en-IN', {
+        month: 'short',
+        year: 'numeric',
+      })
+    : null;
+  const customerCallHref = customerPhone
+    ? `tel:+91${String(customerPhone).replace(/\D/g, '')}`
+    : null;
 
   // The driver-safe fareSnapshot only carries `driverEarning` — the
   // customer's gross fare and the platform commission are stripped on
@@ -459,12 +472,14 @@ const DriverActiveTripPage = () => {
 
   return (
     <div className="flex-1 flex flex-col bg-bg min-h-dvh">
-      {/* Header */}
-      <div className="bg-white border-b border-border-light px-4 py-3 flex items-center gap-3">
+      {/* Sticky header — pinned so the driver always knows what status
+          they're on no matter how far they scroll into the trip card.
+          `top-0` + `z-30` keeps it above sheets/overlays. */}
+      <div className="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-border-light px-4 py-3 flex items-center gap-3 shadow-sm">
         <button
           type="button"
           onClick={() => navigate('/driver/trips?tab=ongoing')}
-          className="w-10 h-10 rounded-full hover:bg-gray-100 flex items-center justify-center"
+          className="w-10 h-10 rounded-full hover:bg-gray-100 flex items-center justify-center active:scale-90 transition"
           aria-label="Back to my trips"
         >
           <ArrowLeft className="w-5 h-5 text-text" />
@@ -515,14 +530,18 @@ const DriverActiveTripPage = () => {
           <p className="text-sm text-text-secondary leading-snug">{config.subtitle}</p>
         </Card>
 
-        {/* Customer */}
-        <PersonContactCard
-          src={customerPhoto}
-          name={customerName || 'Customer'}
-          roleLabel="Customer"
-          metaLine={customerPhone || null}
+        {/* Customer hero card — surfaces every detail the driver might
+            want at a glance (name, phone, email, tenure) and gives the
+            call CTA the most prominent affordance on the page. Replaces
+            the generic PersonContactCard because the driver's primary
+            action on this screen is "phone the customer". */}
+        <CustomerHeroCard
+          photo={customerPhoto}
+          name={customerName}
           phone={customerPhone}
-          phoneCallLabel="Call customer"
+          email={customerEmail}
+          since={customerSince}
+          callHref={customerCallHref}
         />
 
         {/* Vehicle — image + brand/model + plate. Driver needs to spot
@@ -929,6 +948,102 @@ function WaitingTimerCard({ arrivedAt, freeMinutes, perMinuteRupees }) {
         </div>
       </div>
     </Card>
+  );
+}
+
+/**
+ * Hero card for the customer on the driver-side active trip page.
+ * Designed to put every piece of contact info the driver might need
+ * one tap away — large photo, name, primary CTA = Call, with phone +
+ * email + customer-since pinned beneath as secondary chips. The
+ * accent gradient + verified chip mirror the visual hierarchy we use
+ * on the user-side driver card so both audiences feel parallel.
+ */
+function CustomerHeroCard({ photo, name, phone, email, since, callHref }) {
+  return (
+    <Card className="!p-0 overflow-hidden">
+      <div className="bg-gradient-to-br from-primary/10 via-primary/5 to-transparent px-5 pt-5 pb-4 flex items-start gap-4">
+        <Avatar
+          src={photo}
+          name={name || 'Customer'}
+          size="xl"
+        />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-0.5">
+            <p className="text-[11px] uppercase tracking-wider text-primary-dark font-bold">
+              Customer
+            </p>
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full">
+              <ShieldCheck className="w-2.5 h-2.5" />
+              Verified
+            </span>
+          </div>
+          <h3 className="text-lg font-extrabold text-text truncate">
+            {name || 'Customer'}
+          </h3>
+          {since && (
+            <p className="text-[11px] text-text-muted mt-0.5">
+              Member since {since}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="px-5 pt-3 pb-4 border-t border-border-light bg-white space-y-2">
+        {phone && (
+          <ContactRow
+            icon={Phone}
+            label="Phone"
+            value={phone}
+            iconClass="text-emerald-600 bg-emerald-50"
+          />
+        )}
+        {email && (
+          <ContactRow
+            icon={Mail}
+            label="Email"
+            value={email}
+            iconClass="text-sky-600 bg-sky-50"
+            mono={false}
+          />
+        )}
+
+        {callHref && (
+          <a
+            href={callHref}
+            className="mt-3 w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-500 text-white font-semibold py-3 text-sm shadow-sm hover:bg-emerald-600 active:scale-[0.98] transition"
+            aria-label="Call customer"
+          >
+            <Phone className="w-4 h-4" />
+            Call customer
+          </a>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function ContactRow({ icon: Icon, label, value, iconClass = '', mono = true }) {
+  return (
+    <div className="flex items-center gap-3">
+      <div
+        className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${iconClass || 'text-text-muted bg-gray-100'
+          }`}
+      >
+        <Icon className="w-4 h-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">
+          {label}
+        </p>
+        <p
+          className={`text-sm font-semibold text-text truncate ${mono ? 'font-mono tracking-tight' : ''
+            }`}
+        >
+          {value}
+        </p>
+      </div>
+    </div>
   );
 }
 

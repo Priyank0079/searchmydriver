@@ -236,6 +236,12 @@ const DRIVER_USER_FIELDS = [
   'phone_no',
   'rating',
   'profilePicture',
+  // The "real" photo of the driver lives on the selfie document
+  // captured during onboarding (documents[].type === 'selfie').
+  // `profilePicture` is rarely set, so the customer-facing avatars
+  // were falling back to initials. Shipping `documents` lets the
+  // frontend pull the selfie URL when no profile picture exists.
+  'documents',
   'experienceYears',
   'vehicleExperience',
   'carTypeExperience',
@@ -244,7 +250,7 @@ const DRIVER_USER_FIELDS = [
 const DRIVER_USER_FIELDS_WITH_LOC = `${DRIVER_USER_FIELDS} location`;
 
 /** Fields the driver-side views need on the customer. */
-const CUSTOMER_DRIVER_FIELDS = 'name phone_no profilePicture';
+const CUSTOMER_DRIVER_FIELDS = 'name phone_no email profilePicture createdAt';
 
 /**
  * Shared `populate` recipe for the customer's car when fetching a

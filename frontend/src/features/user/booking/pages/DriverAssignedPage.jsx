@@ -12,11 +12,16 @@ import {
   PlayCircle,
   Clock,
   Timer as TimerIcon,
+  ArrowLeft,
+  Calendar,
+  Car,
 } from 'lucide-react';
 import Card from '../../../../components/Card';
 import Button from '../../../../components/Button';
 import PersonContactCard from '../../../../components/PersonContactCard';
 import TripTrackingMap from '../../../../components/maps/TripTrackingMap';
+import AdsCarousel from '../../../../components/AdsCarousel';
+import Avatar from '../../../../components/Avatar';
 import useUserActiveBookingStore from '../../../../store/user/useUserActiveBookingStore';
 import useUserWalletStore from '../../../../store/user/useUserWalletStore';
 import { useSocket, useSocketEvent } from '../../../../hooks/useSocket';
@@ -28,7 +33,7 @@ import {
   BOOKING_STATUS,
   BOOKING_PAYMENT_STATUS,
 } from '../../../../constants/bookingStatus';
-import { SERVICE_TYPES } from '../../../../constants/serviceTypes';
+import { SERVICE_TYPES, SERVICE_TYPE_LABELS } from '../../../../constants/serviceTypes';
 import { haversineMeters, formatDistance } from '../../../../utils/geo';
 import useBookingDraftStore from '../../../../store/user/useBookingDraftStore';
 import PaymentChoiceSheet from '../components/PaymentChoiceSheet';
@@ -36,6 +41,11 @@ import RideStartOtpCard from '../components/RideStartOtpCard';
 import ExtendRideModal from '../components/ExtendRideModal';
 import ConfirmDialog from '../../../../components/ConfirmDialog';
 import { previewUserCancellation } from '../utils/cancellationPreview';
+
+/** How long the full-size map is shown before it auto-shrinks to the
+ * floating preview card. Tuned for "long enough to glance at the driver,
+ * short enough to surface promos quickly". */
+const MAP_AUTO_COLLAPSE_MS = 7000;
 
 /**
  * Maps every status the user can be on while their booking is live to the
@@ -288,6 +298,24 @@ const DriverAssignedPage = () => {
     return [...new Set([...fromVehicles, ...fromTypes])].slice(0, 3);
   }, [driver]);
 
+  // Drivers in this app store their face photo on the `selfie` document
+  // captured during onboarding, not in `profilePicture` (which is left
+  // blank by the registration flow). We pick the selfie URL first and
+  // fall back to `profilePicture` only when present, so the avatars
+  // actually render a face instead of grey initials.
+  const driverPhotoUrl = useMemo(() => {
+    if (!driver) return null;
+    const docs = Array.isArray(driver.documents) ? driver.documents : [];
+    const selfie = docs.find((d) => d?.type === 'selfie' && d?.fileUrl);
+    return selfie?.fileUrl || driver.profilePicture || null;
+  }, [driver]);
+
+  const driverCallHref = useMemo(() => {
+    const raw = driver?.phone_no || driver?.phone;
+    if (!raw) return null;
+    return `tel:+91${String(raw).replace(/\D/g, '')}`;
+  }, [driver]);
+
   // Ride duration timer + extension prompt (only active once STARTED).
   const rideTimer = useRideTimer(booking);
 
@@ -359,6 +387,41 @@ const DriverAssignedPage = () => {
     }
   };
 
+  // NOTE: these hooks must live ABOVE the `if (!booking)` early return.
+  // Otherwise the first render (booking still loading) calls fewer hooks
+  // than the second render (booking arrived), and React throws
+  // "Rendered more hooks than during the previous render" — the bug that
+  // produced the blank screen on hard refresh.
+  const [cancellable, setCancellable] = useState(true);
+  const [sheetExpanded, setSheetExpanded] = useState(false);
+  const [mapLocked, setMapLocked] = useState(false);
+
+  const bookingStatusForCancel = booking?.status;
+  const arrivedAtForCancel = booking?.timeline?.arrivedAt;
+  const freeWaitForCancel = booking?.waiting?.freeMinutes;
+  useEffect(() => {
+    if (!bookingStatusForCancel) return undefined;
+    if (bookingStatusForCancel === BOOKING_STATUS.STARTED) {
+      setCancellable(false);
+      return undefined;
+    }
+    if (bookingStatusForCancel === BOOKING_STATUS.ARRIVED && arrivedAtForCancel) {
+      const freeWaitMinutes = freeWaitForCancel ?? 15;
+      const arrivedAtMs = new Date(arrivedAtForCancel).getTime();
+
+      const checkCancellable = () => {
+        const elapsedMinutes = (Date.now() - arrivedAtMs) / 60000;
+        setCancellable(elapsedMinutes <= freeWaitMinutes);
+      };
+
+      checkCancellable();
+      const interval = setInterval(checkCancellable, 10000);
+      return () => clearInterval(interval);
+    }
+    setCancellable(true);
+    return undefined;
+  }, [bookingStatusForCancel, arrivedAtForCancel, freeWaitForCancel]);
+
   if (!booking) {
     return (
       <div className="flex-1 flex items-center justify-center bg-bg min-h-dvh">
@@ -374,183 +437,355 @@ const DriverAssignedPage = () => {
     (sum, ext) => sum + (ext?.fareDelta || 0),
     0,
   );
-  // Effective total = base + every accepted extension. The payment service
-  // does the same math server-side so the two numbers always agree.
   const total = baseTotal + extensionsTotal;
   const amountPaid = booking.payment?.amountPaidRupees || 0;
   const payNowAmount = Math.max(0, total - amountPaid);
 
-  const [cancellable, setCancellable] = useState(true);
-
-  useEffect(() => {
-    if (!booking) return;
-    if (booking.status === BOOKING_STATUS.STARTED) {
-      setCancellable(false);
-      return;
-    }
-    if (booking.status === BOOKING_STATUS.ARRIVED && booking.timeline?.arrivedAt) {
-      const freeWaitMinutes = booking.waiting?.freeMinutes ?? 15;
-      const arrivedAtMs = new Date(booking.timeline.arrivedAt).getTime();
-
-      const checkCancellable = () => {
-        const elapsedMinutes = (Date.now() - arrivedAtMs) / 60000;
-        setCancellable(elapsedMinutes <= freeWaitMinutes);
-      };
-
-      checkCancellable();
-      const interval = setInterval(checkCancellable, 10000);
-      return () => clearInterval(interval);
-    }
-    setCancellable(true);
-  }, [booking?.status, booking?.timeline?.arrivedAt, booking?.waiting?.freeMinutes]);
   const view = STATUS_VIEW[booking.status] || STATUS_VIEW[BOOKING_STATUS.DRIVER_ASSIGNED];
+  const showMap = pickupPoint && booking.status !== BOOKING_STATUS.STARTED;
+
+  /* ─── Status pill color helper ─── */
+  const statusPillColor = {
+    [BOOKING_STATUS.DRIVER_ASSIGNED]: 'bg-emerald-500',
+    [BOOKING_STATUS.AWAITING_PAYMENT]: 'bg-red-500',
+    [BOOKING_STATUS.EN_ROUTE]: 'bg-blue-500',
+    [BOOKING_STATUS.ARRIVED]: 'bg-amber-500',
+    [BOOKING_STATUS.STARTED]: 'bg-sky-500',
+    [BOOKING_STATUS.PENDING_ASSIGNMENT]: 'bg-indigo-500',
+  }[booking.status] || 'bg-emerald-500';
 
   return (
-    <div className="flex-1 flex flex-col bg-bg min-h-dvh">
-      <div className="bg-success-light/60 px-4 py-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-success/15 rounded-2xl flex items-center justify-center">
-            <StatusIcon icon={view.icon} />
-          </div>
-          <div className="min-w-0">
-            <h1 className="text-lg font-bold text-text">{view.title}</h1>
-            <p className="text-xs text-text-muted truncate">{booking.bookingNumber}</p>
-          </div>
-        </div>
-        <p className="text-[12px] text-text-secondary mt-2 leading-snug">{view.subtitle}</p>
-      </div>
+    <div className="flex-1 flex flex-col relative bg-gray-950 min-h-dvh overflow-hidden">
 
-      <div className="flex-1 p-4 space-y-4">
-        {/* Live driver tracking map. We only render it when we actually
-            have the pickup coordinates — early/legacy bookings without one
-            silently skip the map block. */}
-        {pickupPoint && booking.status !== BOOKING_STATUS.STARTED && (
+      {/* ═══════════════════════════════════════════
+          LAYER 1 — Full-screen live map (background)
+          ═══════════════════════════════════════════ */}
+      {showMap ? (
+        <div
+          className="absolute inset-0"
+          style={{ pointerEvents: mapLocked ? 'none' : 'auto' }}
+        >
           <TripTrackingMap
             driver={driverPoint}
             pickup={pickupPoint}
             emphasis="driver"
-            height={220}
+            height="100%"
             showRoute={booking.status !== BOOKING_STATUS.ARRIVED}
           />
-        )}
+        </div>
+      ) : (
+        /* Fallback gradient when there's no map (STARTED status) */
+        <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-slate-800 to-gray-900" />
+      )}
 
-        {/* OTP for the driver — shown only on arrival, never carried in
-            broadcasts that admins or the driver could see. */}
-        {booking.status === BOOKING_STATUS.ARRIVED && booking.rideStartOtp?.code && (
-          <RideStartOtpCard code={booking.rideStartOtp.code} />
-        )}
+      {/* ═══════════════════════════════════════════
+          LAYER 2 — Floating top bar (always visible)
+          ═══════════════════════════════════════════ */}
+      <div className="relative z-20 flex items-center justify-between px-4 pt-12 pb-3 pointer-events-auto">
+        {/* Back button */}
+        <button
+          type="button"
+          onClick={() => navigate('/user/activity')}
+          aria-label="Back to trips"
+          className="w-10 h-10 rounded-2xl bg-white/90 backdrop-blur shadow-lg flex items-center justify-center active:scale-90 transition"
+        >
+          <ArrowLeft className="w-5 h-5 text-gray-800" />
+        </button>
 
-        <PersonContactCard
-          src={driver?.profilePicture}
-          name={driver?.name || 'Your driver'}
-          roleLabel="Driver"
-          online={!!liveDriver}
-          rating={driver?.rating}
-          experienceYears={driver?.experienceYears}
-          expertise={driverExpertise}
-          metaLine={
-            liveDriver
-              ? `${formatDistance(distanceMeters)} away`
-              : firebaseDisabled
-                ? 'Awaiting driver location\u2026'
-                : 'Locating driver\u2026'
-          }
-          phone={driver?.phone_no || driver?.phone}
-          showMessageButton
-        />
+        {/* Status chip */}
+        <div className={`flex items-center gap-2 px-4 py-2 rounded-full shadow-lg backdrop-blur-sm ${statusPillColor}`}>
+          <span className="w-2 h-2 rounded-full bg-white/70 animate-pulse" />
+          <span className="text-white text-xs font-bold tracking-wide">{view.title}</span>
+        </div>
 
-        <Card>
-          <h3 className="text-sm font-semibold text-text mb-3">Trip</h3>
-          <div className="flex items-start gap-3">
-            <MapPin className="w-4 h-4 text-success mt-1 shrink-0" />
-            <div className="min-w-0">
-              <p className="text-xs text-text-muted">Pickup</p>
-              <p className="text-sm font-medium text-text break-words">{booking.pickup?.address}</p>
-            </div>
-          </div>
-          {booking.outstation?.destinationAddress && (
-            <div className="flex items-start gap-3 mt-3">
-              <MapPin className="w-4 h-4 text-danger mt-1 shrink-0" />
-              <div className="min-w-0">
-                <p className="text-xs text-text-muted">Destination</p>
-                <p className="text-sm font-medium text-text break-words">
-                  {booking.outstation.destinationAddress}
-                </p>
-              </div>
-            </div>
-          )}
-        </Card>
-
-        {/* In-ride duration tracker. Only renders while the ride is live
-            so it doesn't leak into the pre-arrival flow. */}
-        {rideTimer.isStarted && rideTimer.scheduledEndAt && (
-          <Card>
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-primary/15 flex items-center justify-center">
-                <Clock className="w-4 h-4 text-primary-dark" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs text-text-muted">
-                  {rideTimer.remainingSeconds >= 0
-                    ? 'Time remaining'
-                    : 'You are over the booked duration'}
-                </p>
-                <p
-                  className={`text-base font-bold ${rideTimer.remainingSeconds < 0 ? 'text-danger' : 'text-text'
-                    }`}
-                >
-                  {formatRideClock(Math.abs(rideTimer.remainingSeconds))}
-                </p>
-              </div>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setExtensionPromptOpen(true)}
-              >
-                Extend ride
-              </Button>
-            </div>
-          </Card>
-        )}
-
-        <Card>
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              {isPaid ? (
-                <CreditCard className="w-5 h-5 text-success shrink-0" />
-              ) : (
-                <Wallet className="w-5 h-5 text-amber-700 shrink-0" />
-              )}
-              <div className="min-w-0">
-                <p className="text-xs text-text-muted">Payment</p>
-                <p className="text-sm font-semibold text-text truncate">
-                  {paymentSummary({ isPaid, isAwaitingPayment, total, payNowAmount })}
-                </p>
-              </div>
-            </div>
-          </div>
-          {isAwaitingPayment && !isPaid && (
-            <p className="mt-2 text-[11px] text-amber-700">
-              Complete the payment in the popup — your driver is waiting.
-            </p>
-          )}
-        </Card>
-      </div>
-
-      {cancellable && (
-        <div className="p-4 bg-white border-t border-border-light">
+        {/* Lock map button (only when map is visible) */}
+        {showMap && (
           <button
             type="button"
-            disabled={cancelling}
-            onClick={handleCancel}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 text-red-600 font-semibold py-3 text-sm disabled:opacity-60 hover:bg-red-100 transition"
+            onClick={() => setMapLocked((v) => !v)}
+            aria-label={mapLocked ? 'Unlock map' : 'Lock map'}
+            className={`w-10 h-10 rounded-2xl shadow-lg flex items-center justify-center active:scale-90 transition backdrop-blur ${
+              mapLocked ? 'bg-primary text-white' : 'bg-white/90 text-gray-600'
+            }`}
           >
-            <X className="w-4 h-4" />
-            {cancelling ? 'Cancelling…' : 'Cancel booking'}
+            {mapLocked ? (
+              /* Locked icon */
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                <path fillRule="evenodd" d="M12 1.5a5.25 5.25 0 0 0-5.25 5.25v3a3 3 0 0 0-3 3v6.75a3 3 0 0 0 3 3h10.5a3 3 0 0 0 3-3v-6.75a3 3 0 0 0-3-3v-3A5.25 5.25 0 0 0 12 1.5Zm3.75 8.25v-3a3.75 3.75 0 1 0-7.5 0v3h7.5Z" clipRule="evenodd" />
+              </svg>
+            ) : (
+              /* Unlocked icon */
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                <path d="M18 1.5c2.9 0 5.25 2.35 5.25 5.25v3.75a.75.75 0 0 1-1.5 0V6.75a3.75 3.75 0 1 0-7.5 0v3h.75a3 3 0 0 1 3 3v6.75a3 3 0 0 1-3 3H3.75a3 3 0 0 1-3-3v-6.75a3 3 0 0 1 3-3H15v-3C15 3.85 16.35 1.5 18 1.5Z" />
+              </svg>
+            )}
           </button>
+        )}
+      </div>
+
+      {/* ═══════════════════════════════════════════
+          LAYER 3 — Driver ETA / distance pill
+          (floats mid-screen when map is visible)
+          ═══════════════════════════════════════════ */}
+      {showMap && liveDriver && distanceMeters != null && booking.status !== BOOKING_STATUS.ARRIVED && (
+        <div className="relative z-10 flex justify-center pointer-events-none" style={{ marginTop: 'auto' }}>
+          {/* This is absolutely positioned in the middle third of the screen */}
         </div>
       )}
 
+      {/* ═══════════════════════════════════════════
+          LAYER 4 — Bottom Sheet (details panel)
+          ═══════════════════════════════════════════ */}
+      <div className="relative z-20 mt-auto pointer-events-auto">
+
+        {/* ── Ads strip — visible only when sheet is expanded ──
+             AdsCarousel renders nothing when no ads are loaded. */}
+        {sheetExpanded && (
+          <div className="px-4 pb-2">
+            <AdsCarousel />
+          </div>
+        )}
+
+        {/* ── The sheet itself ──
+             Split into two zones:
+               1. Header (handle + peek row) — never scrolls, always pinned
+               2. Body  — scrollable, capped at 72dvh when expanded          */}
+        <div className="bg-white rounded-t-[28px] shadow-[0_-8px_32px_rgba(0,0,0,0.18)]">
+
+          {/* Zone 1: sticky header — tap to toggle.
+              We render the trigger as a div+role=button (not a <button>)
+              so the call CTA inside can stay a real <a href="tel:..">
+              without nesting an interactive inside another interactive
+              (which Chrome strips and a11y tools flag). */}
+          <div
+            role="button"
+            tabIndex={0}
+            aria-label={sheetExpanded ? 'Collapse details' : 'Expand details'}
+            onClick={() => setSheetExpanded((v) => !v)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setSheetExpanded((v) => !v);
+              }
+            }}
+            className="w-full px-5 pt-3 pb-4 flex flex-col items-stretch gap-2 focus:outline-none cursor-pointer"
+          >
+            {/* Drag handle pill */}
+            <div className="mx-auto w-10 h-1 rounded-full bg-gray-200" />
+
+            {/* Top meta row: trip-type chip + fare */}
+            <div className="flex items-center justify-between">
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide bg-primary/10 text-primary-dark px-2.5 py-1 rounded-full">
+                <Car className="w-3 h-3" />
+                {SERVICE_TYPE_LABELS[booking.serviceType] || booking.serviceType || 'Trip'}
+                {booking.hourly?.durationHours
+                  ? ` · ${booking.hourly.durationHours}h`
+                  : booking.outstation?.days
+                    ? ` · ${booking.outstation.days}d`
+                    : ''}
+              </span>
+              <span className="text-sm font-extrabold text-gray-900">
+                {'\u20B9'}{total}
+              </span>
+            </div>
+
+            {/* Collapsed peek row — driver avatar + name + call + chevron */}
+            <div className="w-full flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <Avatar
+                  src={driverPhotoUrl}
+                  name={driver?.name || 'Driver'}
+                  size="lg"
+                  online={!!liveDriver}
+                />
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-gray-900 truncate">
+                    {driver?.name || 'Assigning driver…'}
+                  </p>
+                  <p className="text-xs text-gray-500 truncate">
+                    {liveDriver
+                      ? `${formatDistance(distanceMeters)} away`
+                      : booking.status === BOOKING_STATUS.PENDING_ASSIGNMENT
+                        ? 'Driver assigned at scheduled time'
+                        : 'Locating driver…'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {driverCallHref && (
+                  <a
+                    href={driverCallHref}
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label="Call driver"
+                    className="w-11 h-11 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shadow-md hover:bg-emerald-600 active:scale-90 transition"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                      <path fillRule="evenodd" d="M1.5 4.5a3 3 0 0 1 3-3h1.372c.86 0 1.61.586 1.819 1.42l1.105 4.423a1.875 1.875 0 0 1-.694 1.955l-1.293.97c-.135.101-.164.249-.126.352a11.285 11.285 0 0 0 6.697 6.697c.103.038.25.009.352-.126l.97-1.293a1.875 1.875 0 0 1 1.955-.694l4.423 1.105c.834.209 1.42.959 1.42 1.82V19.5a3 3 0 0 1-3 3h-2.25C8.552 22.5 1.5 15.448 1.5 6.75V4.5Z" clipRule="evenodd" />
+                    </svg>
+                  </a>
+                )}
+                <div className={`w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center transition-transform duration-300 ${sheetExpanded ? 'rotate-180' : ''}`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-gray-500">
+                    <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Zone 2: scrollable body — only rendered (and takes up space) when expanded */}
+          {sheetExpanded && (
+            <div
+              className="overflow-y-auto overscroll-contain"
+              style={{ maxHeight: '60dvh' }}
+            >
+              <div className="px-4 pb-4 space-y-4">
+
+                {/* Booking number & status badge */}
+                <div className="bg-gray-50 rounded-2xl px-4 py-3 flex items-center justify-between">
+                  <div>
+                    <p className="text-[11px] text-gray-400 font-medium uppercase tracking-wider">Booking ID</p>
+                    <p className="text-sm font-bold text-gray-800 font-mono">{booking.bookingNumber}</p>
+                  </div>
+                  <div className={`px-3 py-1 rounded-full text-[11px] font-bold text-white ${statusPillColor}`}>
+                    {view.title}
+                  </div>
+                </div>
+
+                {/* OTP card — moved inside the expanded sheet */}
+                {booking.status === BOOKING_STATUS.ARRIVED && booking.rideStartOtp?.code && (
+                  <RideStartOtpCard code={booking.rideStartOtp.code} />
+                )}
+
+                {/* Driver profile — large photo + rating + call/message */}
+                {booking.status !== BOOKING_STATUS.PENDING_ASSIGNMENT && driver && (
+                  <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                    <div className="bg-gradient-to-br from-primary/10 to-primary/5 px-5 pt-5 pb-4 flex items-center gap-4">
+                      <Avatar
+                        src={driverPhotoUrl}
+                        name={driver?.name || 'Driver'}
+                        size="xl"
+                        online={!!liveDriver}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[11px] text-primary-dark font-semibold uppercase tracking-wider mb-0.5">Your Driver</p>
+                        <h3 className="text-lg font-extrabold text-gray-900 truncate">{driver?.name || 'Driver'}</h3>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          {driver?.rating ? (
+                            <span className="inline-flex items-center gap-1 text-sm font-semibold text-gray-700">
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-amber-400">
+                                <path fillRule="evenodd" d="M10.868 2.884c-.321-.772-1.415-.772-1.736 0l-1.83 4.401-4.753.381c-.833.067-1.171 1.107-.536 1.651l3.62 3.102-1.106 4.637c-.194.813.691 1.456 1.405 1.02L10 15.591l4.069 2.485c.713.436 1.598-.207 1.404-1.02l-1.106-4.637 3.62-3.102c.635-.544.297-1.584-.536-1.65l-4.752-.382-1.831-4.401Z" clipRule="evenodd" />
+                              </svg>
+                              {Number(driver.rating).toFixed(1)}
+                            </span>
+                          ) : null}
+                          {driver?.experienceYears ? (
+                            <span className="text-xs text-gray-500">
+                              {Math.round(driver.experienceYears)}+ yrs exp
+                            </span>
+                          ) : null}
+                          {liveDriver ? (
+                            <span className="text-xs text-emerald-600 font-medium">
+                              · {formatDistance(distanceMeters)} away
+                            </span>
+                          ) : null}
+                        </div>
+                        {driverExpertise.length > 0 && (
+                          <p className="text-[11px] text-gray-400 mt-1 truncate">
+                            Drives: {driverExpertise.join(', ')}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    {(driver?.phone_no || driver?.phone) && (
+                      <div className="px-5 py-3 border-t border-gray-100">
+                        <a
+                          href={`tel:+91${String(driver.phone_no || driver.phone).replace(/\D/g, '')}`}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-50 text-emerald-700 font-semibold text-sm hover:bg-emerald-100 active:scale-95 transition"
+                          aria-label="Call driver"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                            <path fillRule="evenodd" d="M1.5 4.5a3 3 0 0 1 3-3h1.372c.86 0 1.61.586 1.819 1.42l1.105 4.423a1.875 1.875 0 0 1-.694 1.955l-1.293.97c-.135.101-.164.249-.126.352a11.285 11.285 0 0 0 6.697 6.697c.103.038.25.009.352-.126l.97-1.293a1.875 1.875 0 0 1 1.955-.694l4.423 1.105c.834.209 1.42.959 1.42 1.82V19.5a3 3 0 0 1-3 3h-2.25C8.552 22.5 1.5 15.448 1.5 6.75V4.5Z" clipRule="evenodd" />
+                          </svg>
+                          Call driver
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Trip details card */}
+                <TripDetailsCard booking={booking} />
+
+                {/* In-ride duration tracker */}
+                {rideTimer.isStarted && rideTimer.scheduledEndAt && (
+                  <Card>
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full bg-primary/15 flex items-center justify-center">
+                        <Clock className="w-4 h-4 text-primary-dark" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-text-muted">
+                          {rideTimer.remainingSeconds >= 0 ? 'Time remaining' : 'Over booked duration'}
+                        </p>
+                        <p className={`text-base font-bold ${rideTimer.remainingSeconds < 0 ? 'text-danger' : 'text-text'}`}>
+                          {formatRideClock(Math.abs(rideTimer.remainingSeconds))}
+                        </p>
+                      </div>
+                      <Button size="sm" variant="secondary" onClick={() => setExtensionPromptOpen(true)}>
+                        Extend ride
+                      </Button>
+                    </div>
+                  </Card>
+                )}
+
+                {/* Payment card */}
+                <Card>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      {isPaid ? (
+                        <CreditCard className="w-5 h-5 text-success shrink-0" />
+                      ) : (
+                        <Wallet className="w-5 h-5 text-amber-700 shrink-0" />
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-xs text-text-muted">Payment</p>
+                        <p className="text-sm font-semibold text-text truncate">
+                          {paymentSummary({ isPaid, isAwaitingPayment, total, payNowAmount })}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  {isAwaitingPayment && !isPaid && (
+                    <p className="mt-2 text-[11px] text-amber-700">
+                      Complete the payment in the popup — your driver is waiting.
+                    </p>
+                  )}
+                </Card>
+
+                {/* Cancel button */}
+                {cancellable && (
+                  <button
+                    type="button"
+                    disabled={cancelling}
+                    onClick={handleCancel}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 text-red-600 font-semibold py-3 text-sm disabled:opacity-60 hover:bg-red-100 transition"
+                  >
+                    <X className="w-4 h-4" />
+                    {cancelling ? 'Cancelling…' : 'Cancel booking'}
+                  </button>
+                )}
+
+                {/* Safe-area bottom padding */}
+                <div className="h-2" />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ─── Modals / overlays (logic unchanged) ─── */}
       <ConfirmDialog
         open={cancelConfirmOpen}
         onClose={() => !cancelling && setCancelConfirmOpen(false)}
@@ -563,13 +798,9 @@ const DriverAssignedPage = () => {
         loading={cancelling}
       />
 
-      {/* The pay-first sheet is driven purely by booking status — it is
-          non-dismissible so the user can't sidestep the deadline. */}
       <PaymentChoiceSheet
         open={isAwaitingPayment && !isPaid}
-        onClose={() => {
-          /* sheet only closes via successful payment / status change */
-        }}
+        onClose={() => { /* sheet only closes via successful payment / status change */ }}
         booking={booking}
       />
 
@@ -601,6 +832,128 @@ const DriverAssignedPage = () => {
 };
 
 /* ------------------------------------------------------------------ */
+
+/**
+ * Rich trip-detail card shown right under the driver/contact strip.
+ * Surfaces the bits the user usually scrolls back up to double-check:
+ * service type, duration (hours / days), scheduled pickup time, the
+ * car they registered, and the pickup / destination addresses.
+ */
+function TripDetailsCard({ booking }) {
+  const serviceLabel =
+    SERVICE_TYPE_LABELS[booking.serviceType] || booking.serviceType || 'Trip';
+
+  const durationLabel = (() => {
+    if (booking.hourly?.durationHours) {
+      const h = booking.hourly.durationHours;
+      return `${h} hour${h > 1 ? 's' : ''}`;
+    }
+    if (booking.outstation?.days) {
+      const d = booking.outstation.days;
+      return `${d} day${d > 1 ? 's' : ''}`;
+    }
+    return null;
+  })();
+
+  const scheduledAt =
+    booking.hourly?.scheduledStartAt ||
+    booking.outstation?.startDate ||
+    booking.timeline?.scheduledFor ||
+    null;
+  const scheduledLabel = scheduledAt
+    ? new Date(scheduledAt).toLocaleString('en-IN', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    : null;
+
+  const car = booking.carId || booking.car;
+  const carLabel = (() => {
+    if (!car) return null;
+    const parts = [car.brandName || car.brand, car.modelName || car.model]
+      .filter(Boolean)
+      .join(' ');
+    const plate = car.registrationNumber || car.numberPlate;
+    if (parts && plate) return `${parts} · ${plate}`;
+    return parts || plate || null;
+  })();
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-text">Trip details</h3>
+        <span className="text-[11px] font-semibold uppercase tracking-wide bg-primary/10 text-primary-dark px-2 py-0.5 rounded-full">
+          {serviceLabel}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        {durationLabel && (
+          <DetailTile
+            icon={<Clock className="w-4 h-4 text-primary-dark" />}
+            label="Duration"
+            value={durationLabel}
+          />
+        )}
+        {scheduledLabel && (
+          <DetailTile
+            icon={<Calendar className="w-4 h-4 text-primary-dark" />}
+            label="Scheduled"
+            value={scheduledLabel}
+          />
+        )}
+        {carLabel && (
+          <DetailTile
+            icon={<Car className="w-4 h-4 text-primary-dark" />}
+            label="Your car"
+            value={carLabel}
+            full={!durationLabel || !scheduledLabel}
+          />
+        )}
+      </div>
+
+      <div className="border-t border-border-light pt-3 space-y-3">
+        <div className="flex items-start gap-3">
+          <MapPin className="w-4 h-4 text-success mt-1 shrink-0" />
+          <div className="min-w-0">
+            <p className="text-xs text-text-muted">Pickup</p>
+            <p className="text-sm font-medium text-text break-words">
+              {booking.pickup?.address}
+            </p>
+          </div>
+        </div>
+        {booking.outstation?.destinationAddress && (
+          <div className="flex items-start gap-3">
+            <MapPin className="w-4 h-4 text-danger mt-1 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-xs text-text-muted">Destination</p>
+              <p className="text-sm font-medium text-text break-words">
+                {booking.outstation.destinationAddress}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function DetailTile({ icon, label, value, full }) {
+  return (
+    <div
+      className={`rounded-xl bg-gray-50 border border-border-light px-3 py-2 ${full ? 'col-span-2' : ''
+        }`}
+    >
+      <div className="flex items-center gap-2 mb-0.5">
+        {icon}
+        <p className="text-[11px] text-text-muted">{label}</p>
+      </div>
+      <p className="text-sm font-semibold text-text break-words">{value}</p>
+    </div>
+  );
+}
 
 /**
  * Build the body copy for the cancel-confirmation dialog. Branches on
