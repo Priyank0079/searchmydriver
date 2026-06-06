@@ -5,6 +5,7 @@ import {
 } from './scheduledBooking.queue.js';
 import {
   kickoffScheduledAssignment,
+  runScheduledRetry,
   sendScheduledReminder,
 } from '../services/bookingScheduled.service.js';
 
@@ -51,6 +52,13 @@ export async function startScheduledBookingWorker() {
           case SCHEDULED_JOB_NAMES.ASSIGN:
             await kickoffScheduledAssignment(bookingId);
             return { ok: true, kind: 'assign' };
+          case SCHEDULED_JOB_NAMES.RETRY:
+            await runScheduledRetry(bookingId);
+            return {
+              ok: true,
+              kind: 'retry',
+              attempt: job.data?.attemptNumber || null,
+            };
           case SCHEDULED_JOB_NAMES.REMINDER:
             await sendScheduledReminder(bookingId, Number(minutesAhead) || 0);
             return { ok: true, kind: 'reminder', minutesAhead };

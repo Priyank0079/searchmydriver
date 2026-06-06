@@ -11,11 +11,17 @@ import { schedulePaymentTimeout } from './bookingPaymentTimeout.service.js';
 import {
   BOOKING_STATUS,
   BOOKING_PAYMENT_STATUS,
+  BOOKING_TYPE,
   PAYMENT_MODE,
   PAYMENT_POLICY,
   DISPATCH,
   DISPATCH_RESPONSE,
+  SCHEDULED_BOOKING,
 } from '../constants/bookingStatus.js';
+import {
+  estimateBookingWindow,
+  findConflictingDriverIds,
+} from './driverConflict.service.js';
 import { S2C_EVENTS } from '../constants/socketEvents.js';
 import {
   emitToDriver,
@@ -56,6 +62,32 @@ import {
 
 /** bookingId → setTimeout handle for the active wave's expiry. */
 const waveTimers = new Map();
+
+/**
+ * Read the per-service `RIDE_BUFFER_MINUTES` override (admin-tunable
+ * via the pricing modal). Falls back to the platform-wide constant.
+ *
+ * Loaded through a dynamic import so the `bookingDispatch ↔
+ * bookingScheduled` module pair can stay loosely coupled (the
+ * scheduled service already pulls `dispatchNextDriverService` from
+ * here, so a top-level static import would be circular).
+ */
+async function resolveRideBufferMinutes(serviceType) {
+  try {
+    const { loadScheduledDispatchConfig } = await import(
+      './bookingScheduled.service.js'
+    );
+    const cfg = await loadScheduledDispatchConfig(serviceType);
+    const value = Number(cfg?.RIDE_BUFFER_MINUTES);
+    if (Number.isFinite(value) && value >= 0) return value;
+  } catch (err) {
+    console.warn(
+      '[dispatch] failed to load RIDE_BUFFER_MINUTES override:',
+      err?.message,
+    );
+  }
+  return SCHEDULED_BOOKING.RIDE_BUFFER_MINUTES;
+}
 
 function clearWaveTimer(bookingId) {
   const handle = waveTimers.get(String(bookingId));
@@ -188,6 +220,33 @@ export async function dispatchNextDriverService(bookingId) {
     .lean();
   const carTypeIds = car?.carTypeId?._id ? [String(car.carTypeId._id)] : [];
 
+  // Resolve the per-service buffer (admin-tunable). Falls back to the
+  // platform-wide default when pricing isn't configured for the service.
+  const bufferMinutes = await resolveRideBufferMinutes(booking.serviceType);
+
+  // Exclude drivers whose existing accepted/scheduled bookings would
+  // overlap this booking's time window once the buffer is applied. Lets
+  // a driver who's holding a 6 PM scheduled ride still pick up an
+  // 11 AM instant offer — but blocks them from a 5:30 PM ride that
+  // would clash with their commitment.
+  //
+  // The buffer is applied EXACTLY ONCE — on the existing booking side
+  // inside `findConflictingDriverIds` — so admins reading the modal as
+  // "30 min between rides" get exactly 30 min, not 60.
+  const newWindow = estimateBookingWindow(booking);
+  const conflictedDriverIds = newWindow
+    ? await findConflictingDriverIds({
+        window: newWindow,
+        excludeBookingId: booking._id,
+        bufferMinutes,
+      })
+    : [];
+
+  const excludeDriverIds = [
+    ...alreadyOfferedDriverIds(booking),
+    ...conflictedDriverIds,
+  ];
+
   const { drivers, radiusMeters } = await findDriversInExpandingRadius({
     lat,
     lng,
@@ -197,7 +256,7 @@ export async function dispatchNextDriverService(bookingId) {
     limit: DISPATCH.WAVE_SIZE,
     minResults: 1,
     carTypeIds,
-    excludeDriverIds: alreadyOfferedDriverIds(booking),
+    excludeDriverIds,
   });
 
   if (!drivers.length) {
@@ -247,10 +306,47 @@ export async function dispatchNextDriverService(bookingId) {
 
 async function failBookingNoDrivers(bookingId) {
   clearWaveTimer(bookingId);
-  // For scheduled bookings this routes to the emergency pool instead
-  // of terminating with NO_DRIVERS_FOUND (see
-  // `adminMarkNoDriversFoundService`). The status on the returned doc
-  // is the source of truth for the broadcast payload below.
+
+  // Scheduled bookings get a "retry, then escalate" loop instead of an
+  // immediate dead-end. We park the booking back in PENDING_ASSIGNMENT
+  // and queue another assign attempt RETRY_DELAY_MINUTES later — until
+  // we run out of runway before the emergency-pool cutoff, at which
+  // point the booking is parked in the pool for an admin to take.
+  const peek = await Booking.findById(bookingId).select(
+    'bookingType bookingNumber userId',
+  );
+  if (peek?.bookingType === BOOKING_TYPE.SCHEDULED) {
+    const { scheduleAssignmentRetryOrEscalate } = await import(
+      './bookingScheduled.service.js'
+    );
+    const outcome = await scheduleAssignmentRetryOrEscalate(bookingId);
+    if (outcome.retried) {
+      emitToAdmins(S2C_EVENTS.ADMIN_ALERT, {
+        kind: 'scheduled_dispatch_retry',
+        severity: 'info',
+        message:
+          `Scheduled booking ${peek.bookingNumber} found no drivers — ` +
+          `retry #${outcome.attempt} queued.`,
+        data: { bookingId: String(bookingId), attempt: outcome.attempt },
+      });
+      return { ok: false, reason: 'scheduled_retry_queued', attempt: outcome.attempt };
+    }
+    if (outcome.escalated) {
+      emitToAdmins(S2C_EVENTS.ADMIN_ALERT, {
+        kind: 'emergency_pool_entered',
+        severity: 'warn',
+        message: `Scheduled booking ${peek.bookingNumber} needs manual driver assignment`,
+        data: { bookingId: String(bookingId) },
+      });
+      return { ok: false, reason: 'in_emergency_pool' };
+    }
+    // Unknown failure path (e.g. booking deleted out from under us);
+    // fall through to the legacy terminator so the caller still sees a
+    // settled status.
+  }
+
+  // Instant bookings (or scheduled bookings that somehow escaped the
+  // branch above) follow the legacy path: NO_DRIVERS_FOUND + refund.
   const booking = await adminMarkNoDriversFoundService(bookingId);
   const escalated = booking.status === BOOKING_STATUS.IN_EMERGENCY_POOL;
   emitToUser(booking.userId, S2C_EVENTS.BOOKING_UPDATED, {
@@ -269,6 +365,34 @@ async function failBookingNoDrivers(bookingId) {
     ok: false,
     reason: escalated ? 'in_emergency_pool' : 'no_drivers_found',
   };
+}
+
+/**
+ * Decide whether a freshly-accepted booking should immediately mark
+ * the driver as `isOnTrip: true`. Returns `true` for:
+ *
+ *   - Instant bookings (driver is committed right now).
+ *   - Scheduled bookings whose pickup is inside one buffer window of
+ *     now (e.g. ≤ 30 min away by default) — at that point we don't
+ *     want to risk offering them another ride.
+ *
+ * Returns `false` for far-future scheduled bookings: the driver
+ * stays dispatchable for non-overlapping work in the meantime and
+ * the overlap-check in `dispatchNextDriverService` protects the
+ * accepted booking.
+ */
+async function shouldImmediatelyLockDriver(booking) {
+  if (!booking) return true;
+  if (booking.bookingType !== BOOKING_TYPE.SCHEDULED) return true;
+
+  const scheduledAt = booking?.hourly?.scheduledStartAt;
+  if (!scheduledAt) return true;
+  const startMs = new Date(scheduledAt).getTime();
+  if (!Number.isFinite(startMs)) return true;
+
+  const bufferMinutes = await resolveRideBufferMinutes(booking.serviceType);
+  const lockLeadMs = Math.max(0, Number(bufferMinutes) || 0) * 60_000;
+  return startMs - Date.now() <= lockLeadMs;
 }
 
 /** Driver accepts a live offer for a booking. First driver in the wave wins. */
@@ -337,14 +461,43 @@ export async function acceptBookingService(bookingId, driverId) {
   }
   await booking.save();
 
-  // Mark the driver as on-trip so future dispatches skip them. Other drivers
-  // in the lost wave stay available.
-  await Driver.updateOne({ _id: driverId }, { $set: { isOnTrip: true } });
+  // Mark the driver as on-trip so future dispatches skip them. Other
+  // drivers in the lost wave stay available.
+  //
+  // For SCHEDULED bookings whose pickup is more than the configured
+  // buffer away we leave `isOnTrip` alone — the driver can still be
+  // offered other non-overlapping rides in the meantime, and the
+  // conflict-overlap check in `dispatchNextDriverService` prevents
+  // anything from clashing with the upcoming pickup. The flag flips
+  // on automatically when the driver hits "I'm on the way"
+  // (`markDriverEnRouteService`), which is the moment they're
+  // physically committed to that pickup.
+  const shouldLockDriver = await shouldImmediatelyLockDriver(booking);
+  if (shouldLockDriver) {
+    await Driver.updateOne({ _id: driverId }, { $set: { isOnTrip: true } });
+  }
 
   // Kick off the auto-cancel timer only for the standard (unpaid) flow.
   // Re-dispatched bookings are already paid → no payment timer needed.
   if (!alreadyPaid) {
     schedulePaymentTimeout(booking._id);
+  }
+
+  // For scheduled bookings, NOW is the right moment to queue the
+  // pre-pickup reminder toasts — we have a driver, so the reminders
+  // will be useful to both sides. Fire-and-forget (queue is best-effort).
+  if (booking.bookingType === BOOKING_TYPE.SCHEDULED) {
+    import('./bookingScheduled.service.js')
+      .then(({ enqueueRemindersAfterAssignment }) =>
+        enqueueRemindersAfterAssignment(booking),
+      )
+      .catch((err) =>
+        console.warn(
+          '[bookingDispatch] reminder enqueue failed for',
+          String(booking._id),
+          err?.message,
+        ),
+      );
   }
 
   // Notify the losing drivers that the offer is gone.

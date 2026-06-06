@@ -48,3 +48,38 @@ export const uploadVideo = multer({
     fileSize: 100 * 1024 * 1024,
   },
 });
+
+/**
+ * Media uploader for promotional ads. Accepts EITHER an image (≤5 MB)
+ * OR a short video (≤25 MB) — both routed through the same form field
+ * (`media`) so the admin UI only deals with one upload endpoint and
+ * Cloudinary picks the right `resource_type` via `resource_type: 'auto'`.
+ */
+const AD_MEDIA_MAX_BYTES = 25 * 1024 * 1024;
+const AD_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+
+const adMediaFilter = (req, file, cb) => {
+  const mime = (file.mimetype || '').toLowerCase();
+  if (IMAGE_MIME_TYPES.includes(mime)) {
+    cb(null, true);
+    return;
+  }
+  if (isAllowedVideo(file)) {
+    cb(null, true);
+    return;
+  }
+  cb(new Error('Ad media must be an image (JPG/PNG/WEBP) or a short video (MP4/WEBM/MOV).'), false);
+};
+
+export const uploadAdMedia = multer({
+  storage,
+  fileFilter: adMediaFilter,
+  limits: { fileSize: AD_MEDIA_MAX_BYTES },
+});
+
+/**
+ * Image-only size guard for ad media. Multer only enforces the global
+ * `fileSize` limit, so the route handler re-checks images against the
+ * tighter 5 MB cap.
+ */
+export const AD_IMAGE_MAX = AD_IMAGE_MAX_BYTES;

@@ -183,14 +183,18 @@ export const DISPATCH_RESPONSE = Object.freeze({
  *      → defer: enqueue an `assign` job that fires at
  *        `scheduledStartAt − LONG_LEAD_HOURS`.
  *
- * Separately, every scheduled booking also gets an `escalate` job that
- * fires at `scheduledStartAt − EMERGENCY_POOL_MINUTES`. If no driver is
- * assigned by then the booking moves to `IN_EMERGENCY_POOL` and the
- * admin assigns one manually.
+ * When the `assign` (or any subsequent `retry`) job runs and the wave
+ * dispatcher comes back empty, we DON'T immediately give up. Instead
+ * we re-queue another retry `RETRY_DELAY_MINUTES` later and keep doing
+ * so until we run out of runway before the emergency-pool cutoff (at
+ * `scheduledStartAt − EMERGENCY_POOL_MINUTES`). Past that cutoff the
+ * `escalate` job parks the booking in the admin-managed pool.
  *
- * `REMINDER_OFFSETS_MINUTES` controls the in-app countdown toasts the
- * user / driver receive ahead of the pickup. All knobs are overridable
- * per-service via `ServicePricing.scheduledDispatch`.
+ * Reminder jobs (`REMINDER_OFFSETS_MINUTES`) are NOT enqueued at
+ * booking-creation time any more — they only fire once a driver has
+ * actually been assigned to the booking (whether by the dispatcher or
+ * by an admin pulling it out of the emergency pool). All knobs are
+ * overridable per-service via `ServicePricing.scheduledDispatch`.
  */
 export const SCHEDULED_BOOKING = Object.freeze({
   MORNING_START_HOUR: 6,
@@ -204,6 +208,22 @@ export const SCHEDULED_BOOKING = Object.freeze({
    */
   LEAD_SCHEDULE_HOUR: 18,
   EMERGENCY_POOL_MINUTES: 120,
+  /**
+   * Minutes to wait between assignment retries when the dispatcher
+   * comes back empty. The retry loop keeps firing until we run out of
+   * runway before `scheduledStartAt − EMERGENCY_POOL_MINUTES`; after
+   * that the escalate job takes over.
+   */
+  RETRY_DELAY_MINUTES: 5,
+  /**
+   * Buffer (in minutes) padded around every booking's time window when
+   * checking for conflicts on the distipatch side. A driver is offered a
+   * new booking ONLY if none of their existing acve/scheduled
+   * bookings overlap `[newStart − RIDE_BUFFER_MINUTES, newEnd +
+   * RIDE_BUFFER_MINUTES]`. Lets drivers stack future scheduled
+   * bookings safely without back-to-back overlaps.
+   */
+  RIDE_BUFFER_MINUTES: 30,
   REMINDER_OFFSETS_MINUTES: Object.freeze([60, 15]),
   /**
    * Hard floor on how far in advance a scheduled booking can be created.

@@ -139,6 +139,7 @@ const KitOrderDetailPage = lazy(() => import('./features/admin/pages/KitOrderDet
 const ManageTasks = lazy(() => import('./features/admin/pages/ManageTasks'));
 const TaskActivityLogPage = lazy(() => import('./features/admin/pages/TaskActivityLogPage'));
 const StaffProfilePage = lazy(() => import('./features/admin/pages/StaffProfilePage'));
+const ManageAds = lazy(() => import('./features/admin/pages/ManageAds'));
 
 function PageLoader() {
   return (
@@ -289,6 +290,7 @@ function App() {
             <Route path="/admin/kits" element={<Navigate to="/admin/settings/kits" replace />} />
             <Route path="/admin/kit-orders" element={<ManageKitOrders />} />
             <Route path="/admin/kit-orders/:orderId" element={<KitOrderDetailPage />} />
+            <Route path="/admin/ads" element={<ManageAds />} />
             <Route path="/admin/bookings" element={<ManageBookings />} />
             <Route
               path="/admin/bookings/scheduled-jobs"

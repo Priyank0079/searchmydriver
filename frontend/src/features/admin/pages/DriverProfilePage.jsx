@@ -1,9 +1,11 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import {
   ArrowLeft,
   CheckCircle2,
   Circle,
+  Download,
   Loader2,
   Mail,
   Phone,
@@ -11,6 +13,7 @@ import {
   Video,
 } from 'lucide-react';
 import Avatar from '../../../components/Avatar';
+import api from '../../../utils/api';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { buildCacheKey } from '../../../store/lib/buildCacheKey';
 import { useAdminDriverProfileStore } from '../../../store/admin/useAdminDriverProfileStore';
@@ -30,6 +33,7 @@ import { formatVehicleExperienceLabel } from '../../../utils/vehicleCatalog';
 
 const DriverProfilePage = () => {
   const { driverId } = useParams();
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   const queryParams = useMemo(() => ({ driverId }), [driverId]);
   const cacheKey = buildCacheKey('driver-profile', queryParams);
@@ -40,6 +44,40 @@ const DriverProfilePage = () => {
     queryParams,
     { enabled: Boolean(driverId) },
   );
+
+  /**
+   * Fetch the driver dossier as a binary blob and trigger a download
+   * via a synthetic anchor click. We deliberately bypass `window.open`
+   * because the endpoint requires the auth-bearing axios instance —
+   * a fresh window load wouldn't carry the staff JWT cookie/header.
+   */
+  const handleDownloadPdf = async () => {
+    if (!driverId) return;
+    setDownloadingPdf(true);
+    try {
+      const res = await api.get(`/admin/drivers/${driverId}/pdf`, {
+        responseType: 'blob',
+      });
+      const filenameSafe =
+        (profile?.driver?.name || 'driver').toString().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') ||
+        'driver';
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${filenameSafe}-${driverId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Revoke after the browser has had a chance to start the download.
+      setTimeout(() => URL.revokeObjectURL(url), 5_000);
+      toast.success('PDF downloaded');
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Could not generate PDF');
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
 
   const invalidateAfterReview = () => {
     useAdminDriversStore.getState().invalidate('admin-drivers');
@@ -81,15 +119,30 @@ const DriverProfilePage = () => {
     <div className="space-y-6 animate-fade-in-up pb-8">
       <div className="flex items-center justify-between gap-4">
         <BackLink />
-        <button
-          type="button"
-          onClick={() => refetch()}
-          disabled={loading}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleDownloadPdf}
+            disabled={downloadingPdf || loading}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-50"
+          >
+            {downloadingPdf ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4" />
+            )}
+            {downloadingPdf ? 'Generating…' : 'Download PDF'}
+          </button>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">

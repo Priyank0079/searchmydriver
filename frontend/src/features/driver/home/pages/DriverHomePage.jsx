@@ -1,21 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Card from '../../../../components/Card';
-import Badge from '../../../../components/Badge';
 import Toggle from '../../../../components/Toggle';
 import {
   Star,
   TrendingUp,
   Bell,
   MapPin,
-  Navigation,
   AlertCircle,
   ShieldAlert,
   ChevronRight,
   Car,
-  Clock,
   ShieldCheck,
-  Phone,
   Flag,
 } from 'lucide-react';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
@@ -27,10 +23,6 @@ import { useDriverOnlineToggle } from '../../../../hooks/useDriverOnlineToggle';
 import { useDriverLocation } from '../../../../hooks/useDriverLocation';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
 import { formatCurrency } from '../../../../utils/formatters';
-import {
-  SERVICE_TYPES,
-  SERVICE_TYPE_LABELS,
-} from '../../../../constants/serviceTypes';
 import {
   BOOKING_STATUS,
   ACTIVE_BOOKING_STATUSES,
@@ -165,10 +157,9 @@ const DriverHomePage = () => {
         )}
 
         {hasActiveBooking && (
-          <ActiveTripCard
+          <ActiveTripsBanner
             booking={activeBooking}
-            chance={cancellationChances}
-            onResume={() => navigate(`/driver/trip/${activeBooking._id}`)}
+            onOpen={() => navigate('/driver/trips?tab=ongoing')}
           />
         )}
 
@@ -238,32 +229,6 @@ const DriverHomePage = () => {
           </Card>
         )}
 
-        {isOnline && location.permission !== 'denied' && (
-          <Card className="animate-fade-in-up">
-            <div className="flex items-center gap-3">
-              <div
-                className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                  location.isSharing ? 'bg-primary/10' : 'bg-gray-100'
-                }`}
-              >
-                <Navigation
-                  className={`w-5 h-5 ${location.isSharing ? 'text-primary animate-pulse' : 'text-gray-400'}`}
-                />
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-text">
-                  {location.isSharing ? 'Sharing live location' : 'Acquiring GPS signal…'}
-                </p>
-                <p className="text-xs text-text-muted mt-0.5">
-                  {location.coords
-                    ? `Accuracy ±${Math.round(location.coords.accuracy)}m · updated every 5s`
-                    : 'Make sure you are in an open area for a faster fix.'}
-                </p>
-              </div>
-            </div>
-          </Card>
-        )}
-
         {!isOnline && canGoOnline && (
           <Card className="border-l-4 border-l-gray-300">
             <p className="text-sm text-text-secondary text-center py-3">
@@ -288,167 +253,50 @@ const DriverHomePage = () => {
 /* ------------------------------------------------------------------ */
 
 /**
- * "Resume your trip" tile shown on home whenever the driver has a
- * booking in any active status. Tapping anywhere on the card jumps
- * back to the live trip page so the driver can never lose context
- * after closing the app or switching tabs.
+ * Compact "You have an active trip" banner shown on the driver home.
  *
- * Rich layout: shows pickup + drop, customer name + phone, fare,
- * duration, and a live "free cancel: 1m 24s left" countdown when the
- * driver is still inside the grace window.
+ * We deliberately don't render the full ride card here anymore. The
+ * driver gets a one-line summary + tap-target that bounces them to
+ * `/driver/trips?tab=ongoing` where every active/assigned trip is
+ * listed with the full hero card. This avoids two sources of truth
+ * (home tile vs trips list) drifting and keeps the home screen
+ * focused on "go online / take new offers".
  */
-function ActiveTripCard({ booking, chance, onResume }) {
+function ActiveTripsBanner({ booking, onOpen }) {
   const status = booking?.status;
   const subtitle = ACTIVE_STATUS_COPY[status] || 'Trip in progress';
-  const fare = booking?.fareSnapshot?.driverEarning;
-  const serviceLabel =
-    SERVICE_TYPE_LABELS[booking?.serviceType] || booking?.serviceType || 'Trip';
-  const pickup = booking?.pickup?.address;
-  const drop = booking?.dropoff?.address;
-  const customer =
-    booking?.userId && typeof booking.userId === 'object' ? booking.userId : null;
-  const customerName = customer?.name || 'Customer';
-  const customerPhone = customer?.phone_no || customer?.phone || null;
-  const hours =
-    booking?.serviceType === SERVICE_TYPES.HOURLY
-      ? booking?.hourly?.durationHours
-      : null;
+  const bookingNumber = booking?.bookingNumber || null;
 
   return (
     <Card
       hoverable
-      onClick={onResume}
-      className="animate-fade-in-up border-l-4 border-l-primary !p-0 overflow-hidden"
+      onClick={onOpen}
+      className="animate-fade-in-up border-l-4 border-l-primary"
     >
-      {/* Top strip: service + earning */}
-      <div className="flex items-center justify-between px-4 pt-3.5 pb-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <Badge variant="primary">{serviceLabel}</Badge>
-          {hours && (
-            <span className="text-[11px] text-text-muted">{hours} h booked</span>
-          )}
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
+          <Car className="w-5 h-5" />
         </div>
-        {fare > 0 && (
-          <div className="text-right shrink-0">
-            <p className="text-[10px] uppercase tracking-wide text-text-muted font-semibold leading-none">
-              Your earning
-            </p>
-            <p className="text-sm font-bold text-emerald-700 leading-tight">
-              {formatCurrency(fare)}
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* Status line */}
-      <div className="px-4 pb-2 flex items-center gap-2 text-sm font-semibold text-text">
-        <Car className="w-4 h-4 text-primary shrink-0" />
-        <span className="truncate">{subtitle}</span>
-      </div>
-
-      {/* Pickup + drop */}
-      <div className="px-4 pb-2 space-y-1.5">
-        {pickup && (
-          <RouteLine
-            tone="text-primary bg-primary/10"
-            label="Pickup"
-            text={pickup}
-          />
-        )}
-        {drop && (
-          <RouteLine
-            tone="text-rose-700 bg-rose-100"
-            label="Drop"
-            text={drop}
-          />
-        )}
-      </div>
-
-      {/* Customer line */}
-      {(customerName || customerPhone) && (
-        <div className="px-4 pb-2 flex items-center gap-2 text-xs text-text-muted">
-          <Phone className="w-3.5 h-3.5" />
-          <span className="font-medium text-text">{customerName}</span>
-          {customerPhone && (
-            <>
-              <span>{'\u00B7'}</span>
-              <span className="font-mono">{customerPhone}</span>
-            </>
-          )}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-text truncate">
+            You have an active trip
+          </p>
+          <p className="text-[11px] text-text-muted truncate mt-0.5">
+            {subtitle}
+            {bookingNumber && (
+              <>
+                {' '}
+                {'\u00B7'}{' '}
+                <span className="font-mono">{bookingNumber}</span>
+              </>
+            )}
+          </p>
         </div>
-      )}
-
-      {/* Live grace countdown when applicable */}
-      <ActiveTripGraceFooter chance={chance} />
-
-      {/* Resume CTA strip */}
-      <div className="px-4 py-2.5 bg-primary/5 border-t border-primary/10 flex items-center justify-between text-xs font-semibold text-primary">
-        <span>Resume trip</span>
-        <ChevronRight className="w-4 h-4" />
+        <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-primary shrink-0">
+          Open <ChevronRight className="w-3.5 h-3.5" />
+        </span>
       </div>
     </Card>
-  );
-}
-
-function RouteLine({ tone, label, text }) {
-  return (
-    <div className="flex items-start gap-2 text-xs">
-      <span
-        className={`mt-0.5 px-1.5 py-0.5 rounded-md font-semibold text-[10px] uppercase tracking-wide shrink-0 ${tone}`}
-      >
-        {label}
-      </span>
-      <span className="text-text leading-snug line-clamp-2">{text}</span>
-    </div>
-  );
-}
-
-/**
- * Footer strip on the active-trip card that ticks down the remaining
- * grace-window minutes once per second. Hidden when the booking is
- * past grace OR the driver has no free chances left today (in those
- * cases the cancel modal handles all the messaging).
- */
-function ActiveTripGraceFooter({ chance }) {
-  const [, setHeartbeat] = useState(0);
-  useEffect(() => {
-    if (!chance?.inGrace) return undefined;
-    const id = setInterval(() => setHeartbeat((n) => n + 1), 1000);
-    return () => clearInterval(id);
-  }, [chance?.inGrace]);
-
-  if (!chance) return null;
-  const dailyLimit = Number(chance.dailyLimit) || 0;
-  const chancesLeft = Math.max(0, Number(chance.chancesLeft) || 0);
-  const inGrace = !!chance.inGrace;
-  const graceMinutes = Math.max(0, Number(chance.graceMinutes) || 0);
-
-  if (!inGrace || chancesLeft <= 0 || graceMinutes <= 0) return null;
-
-  // Live recompute from the server-provided `remainingMinutes` snapshot
-  // (which was already in-grace) decremented by client wall-clock since
-  // mount. Without this the countdown would freeze at fetch time.
-  const remainingMinutes = Math.max(
-    0,
-    Number(chance.remainingMinutes) || 0,
-  );
-  if (remainingMinutes <= 0) return null;
-
-  const totalSec = Math.max(0, Math.floor(remainingMinutes * 60));
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  const display = m > 0 ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`;
-
-  return (
-    <div className="mx-4 mb-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center gap-2">
-      <Clock className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
-      <p className="text-[11px] text-emerald-800 leading-snug">
-        Free cancel window:{' '}
-        <strong className="font-semibold">{display}</strong> left ·{' '}
-        {chancesLeft} of {dailyLimit} free cancellation
-        {dailyLimit === 1 ? '' : 's'} today
-      </p>
-    </div>
   );
 }
 

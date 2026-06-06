@@ -17,6 +17,7 @@ import { useNearbyDrivers } from '../../../../hooks/useNearbyDrivers';
 import { reverseGeocode } from '../../../../utils/geocoding';
 import NearbyDriversMap from '../../../../components/maps/NearbyDriversMap';
 import NearbyDriversList from '../../../../components/maps/NearbyDriversList';
+import AdsCarousel from '../../../../components/AdsCarousel';
 
 const NEARBY_RADIUS_METERS = 2000;
 const NEARBY_LIMIT = 8;
@@ -215,10 +216,11 @@ const UserHomePage = () => {
                 ? `View ${driversCount} nearby driver${driversCount === 1 ? '' : 's'}`
                 : 'View nearby drivers'}
             </button>
+            <div className="w-full bg-red-500 flex items-center justify-center">
+              <AdsCarousel />
+            </div>
           </div>
         </div>
-
-        <div className="h-40" />
       </div>
 
       {/* ====== Nearby Drivers Bottom Sheet ====== */}

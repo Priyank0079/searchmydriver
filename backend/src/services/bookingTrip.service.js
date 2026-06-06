@@ -203,6 +203,18 @@ export async function markDriverEnRouteService(driverId, bookingId) {
   booking.timeline.enRouteAt = new Date();
   await booking.save();
 
+  // Scheduled bookings deliberately leave `isOnTrip` false at accept
+  // time so the driver can keep receiving non-overlapping offers
+  // until pickup is close. Once they tap "On the way" they're
+  // physically committed — flip the flag now so the dispatcher stops
+  // offering anything else, regardless of buffer maths.
+  Driver.updateOne({ _id: driverId }, { $set: { isOnTrip: true } }).catch((err) =>
+    console.warn(
+      '[bookingTrip] failed to set driver.isOnTrip on en-route:',
+      err?.message,
+    ),
+  );
+
   broadcastUpdate(booking);
   return booking.toObject();
 }

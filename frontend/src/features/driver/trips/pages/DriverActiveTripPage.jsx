@@ -3,18 +3,27 @@ import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
   ArrowLeft,
+  CalendarClock,
+  Car as CarIcon,
   CheckCircle2,
   Flag,
+  Fuel,
   Loader2,
   MapPin,
   PlayCircle,
   Route,
+  Settings2,
   XCircle,
+  Zap,
   CreditCard,
   Wallet as WalletIcon,
 } from 'lucide-react';
-import { PAYMENT_POLICY } from '../../../../constants/bookingStatus';
+import {
+  BOOKING_TYPE,
+  PAYMENT_POLICY,
+} from '../../../../constants/bookingStatus';
 import Card from '../../../../components/Card';
+import Badge from '../../../../components/Badge';
 import Button from '../../../../components/Button';
 import PersonContactCard from '../../../../components/PersonContactCard';
 import TripTrackingMap from '../../../../components/maps/TripTrackingMap';
@@ -372,6 +381,36 @@ const DriverActiveTripPage = () => {
       ? `${booking.outstation?.days || 1}-day Outstation`
       : `${booking.hourly?.durationHours || ''}h ${SERVICE_TYPE_LABELS.hourly || 'Hourly'}`;
 
+  // Booking-type chip (instant vs scheduled). Driver app already
+  // colour-codes the offer popup; we mirror that vocabulary on the
+  // active trip page so the driver keeps the same mental model after
+  // accepting (especially helpful for scheduled trips where the
+  // pickup may be hours away).
+  const isScheduled = booking.bookingType === BOOKING_TYPE.SCHEDULED;
+  const scheduledStartAt =
+    booking.hourly?.scheduledStartAt || booking.outstation?.startDate || null;
+  const scheduledStartLabel = scheduledStartAt
+    ? new Date(scheduledStartAt).toLocaleString([], {
+        weekday: 'short',
+        day: '2-digit',
+        month: 'short',
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    : null;
+
+  // Vehicle (populated by getBookingByIdService / getActiveBookingForDriverService
+  // when the request is driver-side).
+  const car = typeof booking.carId === 'object' && booking.carId ? booking.carId : null;
+  const carBrand = car?.brandId?.name || null;
+  const carModel = car?.modelId?.name || null;
+  const carType = car?.carTypeId?.name || null;
+  const carFuel = car?.fuelTypeId?.name || null;
+  const carTransmission = car?.transmission || null;
+  const carPlate = car?.vehicleNumber || null;
+  const carImage = car?.image || null;
+  const carHeadline = [carBrand, carModel].filter(Boolean).join(' ') || carType || 'Vehicle';
+
   const showMap = STATUSES_WITH_MAP.includes(booking.status) && pickupCoords;
 
   return (
@@ -380,19 +419,37 @@ const DriverActiveTripPage = () => {
       <div className="bg-white border-b border-border-light px-4 py-3 flex items-center gap-3">
         <button
           type="button"
-          onClick={() => navigate('/driver/home')}
+          onClick={() => navigate('/driver/trips?tab=ongoing')}
           className="w-10 h-10 rounded-full hover:bg-gray-100 flex items-center justify-center"
-          aria-label="Back to dashboard"
+          aria-label="Back to my trips"
         >
           <ArrowLeft className="w-5 h-5 text-text" />
         </button>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="text-[11px] uppercase tracking-wide text-text-muted font-semibold">
             {config.title}
           </p>
-          <p className="text-sm font-bold text-text truncate">{titleLine}</p>
+          <div className="flex items-center gap-2 mt-0.5 min-w-0">
+            <p className="text-sm font-bold text-text truncate">{titleLine}</p>
+            <Badge
+              variant={isScheduled ? 'info' : 'primary'}
+              className="!text-[10px] gap-1 shrink-0"
+            >
+              {isScheduled ? (
+                <CalendarClock className="w-3 h-3" />
+              ) : (
+                <Zap className="w-3 h-3 fill-current" />
+              )}
+              {isScheduled ? 'Scheduled' : 'Instant'}
+            </Badge>
+          </div>
+          {isScheduled && scheduledStartLabel && (
+            <p className="text-[11px] text-text-muted mt-0.5">
+              Pickup {scheduledStartLabel}
+            </p>
+          )}
         </div>
-        <span className="ml-auto text-[11px] text-text-muted font-mono">
+        <span className="ml-auto text-[11px] text-text-muted font-mono shrink-0 self-start">
           {booking.bookingNumber}
         </span>
       </div>
@@ -423,6 +480,20 @@ const DriverActiveTripPage = () => {
           phone={customerPhone}
           phoneCallLabel="Call customer"
         />
+
+        {/* Vehicle — image + brand/model + plate. Driver needs to spot
+            the car at the pickup; we render the customer's vehicle in
+            the same hierarchy as the customer card. */}
+        {car && (
+          <VehicleCard
+            image={carImage}
+            headline={carHeadline}
+            carType={carType}
+            plate={carPlate}
+            fuel={carFuel}
+            transmission={carTransmission}
+          />
+        )}
 
         {/* Waiting timer — only at ARRIVED. Ticks once a second and
             flips colour the moment the free wait expires so the
@@ -785,6 +856,81 @@ function WaitingTimerCard({ arrivedAt, freeMinutes, perMinuteRupees }) {
               {'\u20B9'}
               {perMin}/min after free
             </p>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * Vehicle tile shown on the driver's active trip — the customer's
+ * registered car the driver will be driving. Mirrors the layout of
+ * `PersonContactCard` (image / headline / chips) so the trip detail
+ * page reads as a sequence of "who + what" cards.
+ *
+ * Props:
+ *   image          car photo URL (falls back to a styled icon tile)
+ *   headline       "Honda · City" style brand+model line
+ *   carType        e.g. "Sedan"
+ *   plate          vehicle number (rendered in mono so the driver can
+ *                  read it from a distance)
+ *   fuel           "Petrol" | "Diesel" | "EV" | ...
+ *   transmission   "manual" | "automatic"
+ */
+function VehicleCard({
+  image,
+  headline,
+  carType,
+  plate,
+  fuel,
+  transmission,
+}) {
+  const chips = [];
+  if (carType) chips.push({ icon: CarIcon, label: carType });
+  if (fuel) chips.push({ icon: Fuel, label: fuel });
+  if (transmission) {
+    chips.push({
+      icon: Settings2,
+      label: transmission.charAt(0).toUpperCase() + transmission.slice(1),
+    });
+  }
+
+  return (
+    <Card>
+      <div className="flex items-start gap-3">
+        {image ? (
+          <img
+            src={image}
+            alt={headline}
+            className="w-20 h-20 rounded-xl object-cover bg-gray-100 shrink-0"
+            loading="lazy"
+          />
+        ) : (
+          <div className="w-20 h-20 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+            <CarIcon className="w-7 h-7" />
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] text-text-muted">Vehicle</p>
+          <p className="text-sm font-bold text-text truncate">{headline}</p>
+          {plate && (
+            <p className="text-[12px] font-mono font-semibold tracking-wider text-text mt-0.5">
+              {plate}
+            </p>
+          )}
+          {chips.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {chips.map(({ icon: ChipIcon, label }) => (
+                <span
+                  key={label}
+                  className="inline-flex items-center gap-1 text-[11px] text-text-secondary bg-gray-100 px-2 py-0.5 rounded-full"
+                >
+                  <ChipIcon className="w-3 h-3" />
+                  {label}
+                </span>
+              ))}
+            </div>
           )}
         </div>
       </div>

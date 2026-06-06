@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Car, CalendarCheck, DollarSign, Settings,
   LogOut, X, ChevronRight, ChevronDown, ShieldCheck, Monitor, Package,
   CheckSquare, MapPin, Receipt, Sparkles, Navigation, Wallet, Banknote,
-  LifeBuoy, ClipboardList, Timer,
+  LifeBuoy, ClipboardList, Timer, Megaphone,
 } from 'lucide-react';
 import { APP_NAME } from '../../../utils/constants';
 import useAdminAuthStore from '../../../store/useAdminAuthStore';
@@ -23,6 +23,9 @@ const navItems = [
   { path: '/admin/drivers', label: 'Drivers', icon: Car },
   { path: '/admin/drivers/live', label: 'Live Map', icon: Navigation },
   { path: '/admin/kit-orders', label: 'Kit Orders', icon: Package },
+  // Ads management — admin + sub_admin can publish promotional images
+  // and short videos that surface on the user home screen.
+  { path: '/admin/ads', label: 'Ads', icon: Megaphone, roles: ['admin', 'sub_admin'] },
   {
     label: 'Bookings',
     icon: CalendarCheck,

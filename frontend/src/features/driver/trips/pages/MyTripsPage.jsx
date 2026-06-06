@@ -1,12 +1,21 @@
-import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader2, AlertCircle, Inbox } from 'lucide-react';
 import Card from '../../../../components/Card';
 import Button from '../../../../components/Button';
+import OngoingTripCard, {
+  pickOngoingBooking,
+} from '../../../../components/OngoingTripCard';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
 import { useDriverTripsListStore } from '../../../../store/driver/useDriverTripsStore';
-import { ACTIVE_BOOKING_STATUSES } from '../../../../constants/bookingStatus';
+import useDriverActiveTripStore from '../../../../store/driver/useDriverActiveTripStore';
+import { useSocketEvent } from '../../../../hooks/useSocket';
+import { S2C_EVENTS } from '../../../../constants/socketEvents';
+import {
+  ACTIVE_BOOKING_STATUSES,
+  BOOKING_STATUS,
+} from '../../../../constants/bookingStatus';
 import DriverScreenShell from '../../components/DriverScreenShell';
 import DriverTripCard from '../components/DriverTripCard';
 
@@ -26,10 +35,34 @@ const PAGE_LIMIT = 15;
  * Reuses `DriverTripCard` (shared with the earnings page's "recent
  * payouts" feed) so any future fields added there land here for free.
  */
+const VALID_TABS = new Set(TABS.map((t) => t.id));
+
 const MyTripsPage = () => {
   const navigate = useNavigate();
-  const [tab, setTab] = useState('all');
+  // Deep-link tab via `?tab=ongoing` so the driver home banner (and
+  // any future surface) can drop the driver straight into the right
+  // bucket. We seed the initial tab from the URL once on mount and
+  // then keep them in lockstep through `handleTabChange` — avoiding a
+  // URL→state effect that would trip React's "no setState in effect"
+  // rule.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tab, setTab] = useState(() => {
+    const initial = searchParams.get('tab');
+    return initial && VALID_TABS.has(initial) ? initial : 'all';
+  });
   const [page, setPage] = useState(1);
+
+  const handleTabChange = useCallback(
+    (next) => {
+      setTab(next);
+      setPage(1);
+      const params = new URLSearchParams(searchParams);
+      if (next === 'all') params.delete('tab');
+      else params.set('tab', next);
+      setSearchParams(params, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
 
   const params = useMemo(
     () => ({ tab, page, limit: PAGE_LIMIT }),
@@ -43,12 +76,79 @@ const MyTripsPage = () => {
     params,
   );
 
+  // Driver-side active-trip handle. Mirrors the user-side flow:
+  // hydrate on mount + apply socket patches so the hero card phase is
+  // always live (driver_assigned → en_route → arrived → started …).
+  const activeBooking = useDriverActiveTripStore((s) => s.booking);
+  const fetchActive = useDriverActiveTripStore((s) => s.fetchActive);
+  const applyActiveUpdate = useDriverActiveTripStore((s) => s.applyUpdate);
+  const setActiveBooking = useDriverActiveTripStore((s) => s.setBooking);
+  const clearActiveBooking = useDriverActiveTripStore((s) => s.clear);
+
+  useEffect(() => {
+    fetchActive().catch(() => {});
+    refetch?.().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep both sources in lockstep over the socket so the hero (and the
+  // list rows) reflect every dispatcher / trip-transition event while
+  // the driver sits on this page. We mirror `refetch` into a ref so
+  // the socket-event callback below always sees the latest reference
+  // without having to re-subscribe on every render.
+  const refetchRef = useRef(refetch);
+  useEffect(() => {
+    refetchRef.current = refetch;
+  }, [refetch]);
+  useSocketEvent(
+    S2C_EVENTS.BOOKING_UPDATED,
+    useCallback(
+      (payload) => {
+        if (!payload) return;
+        applyActiveUpdate(payload);
+        if (
+          payload.status === BOOKING_STATUS.COMPLETED ||
+          payload.status === BOOKING_STATUS.CANCELLED ||
+          payload.status === BOOKING_STATUS.NO_DRIVERS_FOUND
+        ) {
+          clearActiveBooking();
+        }
+        refetchRef.current?.().catch(() => {});
+      },
+      [applyActiveUpdate, clearActiveBooking],
+    ),
+  );
+
   const trips = data?.data || [];
   const pagination = data?.pagination || { total: 0, page: 1, pages: 1 };
+
+  // The hero shows whichever booking is currently "live" — same
+  // disambiguation as `/user/activity`: prefer the further-along
+  // phase when the store + list disagree on the same booking id.
+  const ongoingBooking = useMemo(
+    () => pickOngoingBooking(activeBooking, trips),
+    [activeBooking, trips],
+  );
+  const ongoingId = ongoingBooking ? String(ongoingBooking._id) : null;
+  // Filter the live booking out of the list below so it doesn't appear
+  // twice (once in the hero, once in the list).
+  const visibleTrips = useMemo(
+    () => trips.filter((t) => !ongoingId || String(t._id) !== ongoingId),
+    [trips, ongoingId],
+  );
+
+  const handleOpenOngoing = useCallback(() => {
+    if (!ongoingBooking) return;
+    // Seed the active-trip store so `DriverActiveTripPage` renders
+    // immediately even before its own `fetchById` resolves.
+    setActiveBooking(ongoingBooking);
+    navigate(`/driver/trip/${ongoingBooking._id}`);
+  }, [ongoingBooking, navigate, setActiveBooking]);
 
   const handleSelect = (trip) => {
     if (!trip) return;
     if (ACTIVE_BOOKING_STATUSES.includes(trip.status)) {
+      setActiveBooking(trip);
       navigate(`/driver/trip/${trip._id}`);
     }
     // Completed/cancelled trips don't have a dedicated details page yet —
@@ -70,18 +170,19 @@ const MyTripsPage = () => {
               </span>
             )}
           </div>
-          <TabBar
-            tabs={TABS}
-            active={tab}
-            onChange={(t) => {
-              setTab(t);
-              setPage(1);
-            }}
-          />
+          <TabBar tabs={TABS} active={tab} onChange={handleTabChange} />
         </header>
       }
       bodyClassName="p-4 -mt-2 pb-8 space-y-3"
     >
+      {ongoingBooking && (
+        <OngoingTripCard
+          booking={ongoingBooking}
+          audience="driver"
+          onOpen={handleOpenOngoing}
+        />
+      )}
+
       {loading && !data && (
         <Card className="flex items-center justify-center py-10">
           <Loader2 className="w-5 h-5 animate-spin text-text-muted" />
@@ -120,7 +221,7 @@ const MyTripsPage = () => {
         </Card>
       )}
 
-      {trips.map((trip, idx) => (
+      {visibleTrips.map((trip, idx) => (
         <DriverTripCard
           key={trip._id}
           trip={trip}

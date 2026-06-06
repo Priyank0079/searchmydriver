@@ -103,6 +103,15 @@ import {
   assignDriverToEmergencyPoolBooking,
   getScheduledJobs,
 } from '../controllers/booking.controller.js';
+import {
+  adminListAds,
+  adminCreateAd,
+  adminUpdateAd,
+  adminDeleteAd,
+  adminUploadAdMedia,
+} from '../controllers/ad.controller.js';
+import { downloadDriverProfilePdf } from '../controllers/driverPdf.controller.js';
+import { uploadAdMedia } from '../middlewares/multer.js';
 
 const router = express.Router();
 const { ALL_STAFF, OPERATIONS, SUPER_ADMIN } = ROUTE_ROLES;
@@ -162,9 +171,36 @@ router.post(
 router.get('/drivers', protectStaff, restrictTo(...ALL_STAFF), getDrivers);
 router.get('/drivers/live', protectStaff, restrictTo(...ALL_STAFF), getLiveDriversSnapshot);
 router.get('/drivers/:id', protectStaff, restrictTo(...ALL_STAFF), getDriverById);
+/* ---- Driver profile PDF export -------------------------------------- */
+// Streams a one-click PDF dossier of the driver (identity, licence,
+// bank, vehicles, every uploaded document image). Used by ops to
+// share offline copies of the profile for verification audits.
+router.get(
+  '/drivers/:id/pdf',
+  protectStaff,
+  restrictTo(...ALL_STAFF),
+  downloadDriverProfilePdf,
+);
 router.put('/drivers/:id/status', protectStaff, restrictTo(...ALL_STAFF), updateDriverStatus);
 router.patch('/drivers/:id/suspend', protectStaff, restrictTo(...ALL_STAFF), suspendDriver);
 router.patch('/drivers/:id/unsuspend', protectStaff, restrictTo(...ALL_STAFF), unsuspendDriver);
+
+/* ---- Ads (admin + sub_admin manage; users get the public feed) ------ */
+// Admins upload either an image OR a short video to Cloudinary via
+// the existing /common/upload* endpoints, then POST the resulting
+// URL + publicId here. Only OPERATIONS (admin/sub_admin) can mutate;
+// the team_member role isn't trusted with promotional content.
+router.get('/ads', protectStaff, restrictTo(...OPERATIONS), adminListAds);
+router.post(
+  '/ads/upload',
+  protectStaff,
+  restrictTo(...OPERATIONS),
+  uploadAdMedia.single('media'),
+  adminUploadAdMedia,
+);
+router.post('/ads', protectStaff, restrictTo(...OPERATIONS), adminCreateAd);
+router.put('/ads/:id', protectStaff, restrictTo(...OPERATIONS), adminUpdateAd);
+router.delete('/ads/:id', protectStaff, restrictTo(...OPERATIONS), adminDeleteAd);
 
 router.post('/team', protectStaff, restrictTo(...SUPER_ADMIN), addAdminMember);
 router.get('/team', protectStaff, restrictTo(...SUPER_ADMIN), getAdminTeam);

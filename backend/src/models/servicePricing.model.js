@@ -245,6 +245,11 @@ const driverSearchSchema = new mongoose.Schema(
  *   EMERGENCY_POOL_MINUTES — if no driver is assigned this many minutes
  *                         before pickup, the booking moves to the
  *                         admin-managed emergency pool.
+ *   RETRY_DELAY_MINUTES — minutes to wait between assignment retries
+ *                         when the wave dispatcher comes back empty.
+ *                         Retries keep firing until pickup is closer
+ *                         than EMERGENCY_POOL_MINUTES, after which the
+ *                         escalate job parks the booking in the pool.
  *   MIN_SCHEDULED_LEAD_HOURS — hard floor on how far in advance the
  *                         customer can create a scheduled booking.
  *                         The booking-create endpoint rejects anything
@@ -252,6 +257,9 @@ const driverSearchSchema = new mongoose.Schema(
  *   REMINDER_OFFSETS_MINUTES — list of minutes-before-pickup at which
  *                         the worker emits an in-app reminder toast to
  *                         the customer (and the driver once assigned).
+ *                         Reminders are only enqueued AFTER a driver
+ *                         has been assigned (dispatcher accept or
+ *                         emergency-pool manual assignment).
  */
 const scheduledDispatchSchema = new mongoose.Schema(
   {
@@ -261,6 +269,15 @@ const scheduledDispatchSchema = new mongoose.Schema(
     LONG_LEAD_HOURS: { type: Number, default: 4, min: 0 },
     LEAD_SCHEDULE_HOUR: { type: Number, default: 18, min: 0, max: 23 },
     EMERGENCY_POOL_MINUTES: { type: Number, default: 120, min: 5 },
+    RETRY_DELAY_MINUTES: { type: Number, default: 5, min: 1 },
+    /**
+     * Buffer (in minutes) padded around every booking's time window
+     * when checking for overlapping rides during dispatch. Drivers
+     * with an existing booking whose `[start − buffer, end + buffer]`
+     * intersects the new request's window are skipped, even if they
+     * are otherwise online and idle. Defaults to 30 min.
+     */
+    RIDE_BUFFER_MINUTES: { type: Number, default: 30, min: 0 },
     MIN_SCHEDULED_LEAD_HOURS: { type: Number, default: 2, min: 0 },
     REMINDER_OFFSETS_MINUTES: {
       type: [Number],

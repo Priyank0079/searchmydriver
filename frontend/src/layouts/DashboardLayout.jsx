@@ -1,12 +1,15 @@
 import { Outlet } from 'react-router-dom';
 import BottomNav from '../components/BottomNav';
-import { Home, MapPin, ClipboardList, User, Car, DollarSign } from 'lucide-react';
+import { Home, MapPin, User, Car, DollarSign } from 'lucide-react';
 import BookingOfferModal from '../features/driver/trips/components/BookingOfferModal';
 
 const userNavItems = [
   { path: '/user/home', label: 'Home', icon: Home },
   { path: '/user/book', label: 'Book', icon: MapPin, matchPaths: ['/user/book'] },
-  { path: '/user/activity', label: 'Activity', icon: ClipboardList },
+  // URL stays `/user/activity` (deep links + bookmarks) — the surface
+  // label + icon mirror the driver-side "Trips" tab so the user mental
+  // model matches.
+  { path: '/user/activity', label: 'Trips', icon: Car },
   { path: '/user/account', label: 'Account', icon: User },
 ];
 

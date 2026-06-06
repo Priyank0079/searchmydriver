@@ -300,13 +300,25 @@ const bookingSchema = new mongoose.Schema(
      * only when the booking is created with `bookingType = scheduled`.
      *
      *   tier             which branch of the schedule decision tree
-     *                    fired: 'morning' | 'short_window' | 'long_lead'
+     *                    fired: 'morning' | 'morning_lead' |
+     *                    'short_window' | 'long_lead'
      *   assignAt         server time at which `kickoffScheduledAssignment`
      *                    is expected to run (null = "search immediately")
      *   escalateAt       server time at which `escalateToEmergencyPool`
      *                    will fire if no driver is assigned by then
      *   assignmentStartedAt  set when the worker actually flips
      *                    PENDING_ASSIGNMENT → SEARCHING
+     *   retryAttempts    number of times the wave dispatcher has come
+     *                    back empty and we've re-queued a `retry` job.
+     *                    Bounded by `escalateAt` (we stop retrying and
+     *                    let the escalate job take over when there's no
+     *                    runway left).
+     *   lastRetryAt      timestamp of the most recent retry kickoff —
+     *                    surfaced in the admin "Scheduled Jobs" board.
+     *   remindersEnqueuedAt  set when reminder jobs have been pushed to
+     *                    the queue (one-shot, after a driver was
+     *                    actually assigned). Reminders are NOT enqueued
+     *                    at booking-creation time any more.
      *   escalatedAt      set when the booking lands in the emergency pool
      *   emergencyPool    audit + UI state for the manual-assignment
      *                    queue (notes the admin who took it, etc.)
@@ -314,12 +326,15 @@ const bookingSchema = new mongoose.Schema(
     scheduled: {
       tier: {
         type: String,
-        enum: ['morning', 'short_window', 'long_lead', ''],
+        enum: ['morning', 'morning_lead', 'short_window', 'long_lead', ''],
         default: '',
       },
       assignAt: { type: Date, default: null },
       escalateAt: { type: Date, default: null },
       assignmentStartedAt: { type: Date, default: null },
+      retryAttempts: { type: Number, default: 0, min: 0 },
+      lastRetryAt: { type: Date, default: null },
+      remindersEnqueuedAt: { type: Date, default: null },
       escalatedAt: { type: Date, default: null },
       emergencyPool: {
         enteredAt: { type: Date, default: null },

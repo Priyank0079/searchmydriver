@@ -114,6 +114,8 @@ const buildDefaultForm = (serviceType) => ({
     LONG_LEAD_HOURS: 4,
     LEAD_SCHEDULE_HOUR: 18,
     EMERGENCY_POOL_MINUTES: 120,
+    RETRY_DELAY_MINUTES: 5,
+    RIDE_BUFFER_MINUTES: 30,
     MIN_SCHEDULED_LEAD_HOURS: 2,
     REMINDER_OFFSETS_MINUTES: [60, 15],
   },
@@ -957,7 +959,39 @@ const ServicePricingModal = ({ isOpen, onClose, serviceType, existing, onSaved }
                       })
                     }
                   />
+                  <Input
+                    label="Retry delay (minutes)"
+                    type="number"
+                    min={1}
+                    value={form.scheduledDispatch.RETRY_DELAY_MINUTES}
+                    onChange={(e) =>
+                      updateNested('scheduledDispatch', {
+                        RETRY_DELAY_MINUTES: Number(e.target.value),
+                      })
+                    }
+                  />
+                  <Input
+                    label="Ride buffer (minutes)"
+                    type="number"
+                    min={0}
+                    value={form.scheduledDispatch.RIDE_BUFFER_MINUTES}
+                    onChange={(e) =>
+                      updateNested('scheduledDispatch', {
+                        RIDE_BUFFER_MINUTES: Number(e.target.value),
+                      })
+                    }
+                  />
                 </div>
+                <p className="text-[11px] text-slate-500">
+                  When a dispatch round finds no driver we wait this many
+                  minutes and try again — looping until pickup is closer
+                  than the emergency-pool window, at which point the
+                  booking is parked for admin to assign manually. The
+                  ride buffer is padded around every existing booking so
+                  drivers with a future scheduled ride still receive new
+                  offers, as long as the new ride finishes at least this
+                  many minutes before the next pickup (and vice-versa).
+                </p>
               </div>
 
               <div className="p-3 bg-slate-50 rounded-xl space-y-3">
@@ -971,7 +1005,9 @@ const ServicePricingModal = ({ isOpen, onClose, serviceType, existing, onSaved }
                     backend also enforces it on create). Reminders are a
                     comma-separated list of minutes-before-pickup at
                     which the worker pushes an in-app toast to the
-                    customer (and to the driver once assigned).
+                    customer and the assigned driver. They are queued
+                    only AFTER a driver has been assigned to the
+                    booking.
                   </p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

@@ -6,7 +6,9 @@ import { ApiError } from '../utils/apiError.js';
 import {
   BOOKING_STATUS,
   BOOKING_PAYMENT_STATUS,
+  BOOKING_TYPE,
   DISPATCH_RESPONSE,
+  SCHEDULED_BOOKING,
 } from '../constants/bookingStatus.js';
 import { S2C_EVENTS } from '../constants/socketEvents.js';
 import {
@@ -16,7 +18,10 @@ import {
   emitToAdmins,
 } from '../utils/socketEmitters.js';
 import { withdrawCurrentOfferService } from './bookingDispatch.service.js';
-import { cancelScheduledBookingJobs } from './bookingScheduled.service.js';
+import {
+  cancelScheduledBookingJobs,
+  enqueueRemindersAfterAssignment,
+} from './bookingScheduled.service.js';
 import { hasOperationalStaffAccess } from '../constants/staffPermissions.js';
 
 /**
@@ -34,6 +39,45 @@ import { hasOperationalStaffAccess } from '../constants/staffPermissions.js';
  * The wave dispatcher is bypassed at assignment — this is a human picking
  * a specific driver, not an offer broadcast.
  */
+
+/**
+ * Lazily load the buffer-minutes resolver from `bookingDispatch`. Used
+ * by the manual-assignment path so the lock decision uses the same
+ * per-service buffer admins configure for the auto dispatcher.
+ */
+async function resolveBufferMinutesFor(serviceType) {
+  try {
+    const { loadScheduledDispatchConfig } = await import(
+      './bookingScheduled.service.js'
+    );
+    const cfg = await loadScheduledDispatchConfig(serviceType);
+    const value = Number(cfg?.RIDE_BUFFER_MINUTES);
+    if (Number.isFinite(value) && value >= 0) return value;
+  } catch {
+    // fall through to default
+  }
+  return SCHEDULED_BOOKING.RIDE_BUFFER_MINUTES;
+}
+
+/**
+ * Whether an emergency-pool assignment should immediately set
+ * `Driver.isOnTrip = true`. Same logic as the dispatcher's accept
+ * path — instant bookings always lock; scheduled bookings only lock
+ * if pickup is within one buffer window of now.
+ */
+async function shouldImmediatelyLockOnEmergencyAssign(booking) {
+  if (!booking) return true;
+  if (booking.bookingType !== BOOKING_TYPE.SCHEDULED) return true;
+
+  const scheduledAt = booking?.hourly?.scheduledStartAt;
+  if (!scheduledAt) return true;
+  const startMs = new Date(scheduledAt).getTime();
+  if (!Number.isFinite(startMs)) return true;
+
+  const bufferMinutes = await resolveBufferMinutesFor(booking.serviceType);
+  const lockLeadMs = Math.max(0, Number(bufferMinutes) || 0) * 60_000;
+  return startMs - Date.now() <= lockLeadMs;
+}
 
 /* ------------------------------------------------------------------ */
 /* Escalation                                                          */
@@ -276,7 +320,27 @@ export async function adminAssignDriverToEmergencyPoolService(
 
   await booking.save();
 
-  await Driver.updateOne({ _id: driver._id }, { $set: { isOnTrip: true } });
+  // Mirror the dispatcher's "only lock immediately if pickup is close"
+  // rule so admins can still hand drivers a far-future scheduled
+  // booking without taking them off the dispatch radar for the
+  // intervening hours. `markDriverEnRouteService` flips the flag for
+  // sure once the driver actually starts heading to pickup.
+  const lockNow = await shouldImmediatelyLockOnEmergencyAssign(booking);
+  if (lockNow) {
+    await Driver.updateOne({ _id: driver._id }, { $set: { isOnTrip: true } });
+  }
+
+  // Now that the booking has a driver, queue the pre-pickup reminders.
+  // Fire-and-forget — the queue degrades to no-op when Redis is down,
+  // and stamping `remindersEnqueuedAt` keeps repeats out of Redis on
+  // re-saves.
+  enqueueRemindersAfterAssignment(booking).catch((err) =>
+    console.warn(
+      '[emergencyPool] reminder enqueue failed for',
+      String(booking._id),
+      err?.message,
+    ),
+  );
 
   // Hydrate the driver-side payload exactly like the dispatcher does so
   // the driver app can route straight to the active-trip screen.

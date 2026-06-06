@@ -109,7 +109,7 @@ const DriverAssignedPage = () => {
   useEffect(() => {
     if (didHydrate.current) return;
     didHydrate.current = true;
-    fetchActive().catch(() => {});
+    fetchActive().catch(() => { });
   }, [fetchActive]);
 
   // Join the booking room so the driver, user, and any admin watching get the
@@ -122,6 +122,19 @@ const DriverAssignedPage = () => {
 
   useSocketEvent(S2C_EVENTS.BOOKING_UPDATED, (payload) => {
     applyUpdate(payload);
+  });
+
+  // Scheduled-ride countdown reminder. The same event is consumed on
+  // SearchingDriverPage; here it covers the case where a driver was
+  // already assigned (e.g. 15-minute reminder fires while the booking
+  // sits in driver_assigned / en_route).
+  useSocketEvent(S2C_EVENTS.BOOKING_REMINDER, (payload) => {
+    const m = Number(payload?.minutesAhead);
+    if (!m) return;
+    toast(`Your ride starts in ${m} minutes`, {
+      icon: '\u23F0',
+      duration: 4000,
+    });
   });
 
   // No-show prompt: backend pings us when the driver has been at the
@@ -212,7 +225,7 @@ const DriverAssignedPage = () => {
       // Cancellation refund (wallet) settles on the backend the moment
       // the booking flips — pull a fresh wallet snapshot so the home /
       // wallet pages render the new balance without a manual refresh.
-      fetchWallet().catch(() => {});
+      fetchWallet().catch(() => { });
       draftReset();
       navigate('/user/home', { replace: true });
     }
@@ -378,12 +391,12 @@ const DriverAssignedPage = () => {
     if (booking.status === BOOKING_STATUS.ARRIVED && booking.timeline?.arrivedAt) {
       const freeWaitMinutes = booking.waiting?.freeMinutes ?? 15;
       const arrivedAtMs = new Date(booking.timeline.arrivedAt).getTime();
-      
+
       const checkCancellable = () => {
         const elapsedMinutes = (Date.now() - arrivedAtMs) / 60000;
         setCancellable(elapsedMinutes <= freeWaitMinutes);
       };
-      
+
       checkCancellable();
       const interval = setInterval(checkCancellable, 10000);
       return () => clearInterval(interval);
@@ -483,9 +496,8 @@ const DriverAssignedPage = () => {
                     : 'You are over the booked duration'}
                 </p>
                 <p
-                  className={`text-base font-bold ${
-                    rideTimer.remainingSeconds < 0 ? 'text-danger' : 'text-text'
-                  }`}
+                  className={`text-base font-bold ${rideTimer.remainingSeconds < 0 ? 'text-danger' : 'text-text'
+                    }`}
                 >
                   {formatRideClock(Math.abs(rideTimer.remainingSeconds))}
                 </p>

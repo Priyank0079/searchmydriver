@@ -20,6 +20,7 @@ import Button from '../../../components/Button';
 import Input from '../../../components/Input';
 import Badge from '../../../components/Badge';
 import ServerPaginatedTable from '../components/ServerPaginatedTable';
+import BookingDetailsModal from '../components/ManageBookings/BookingDetailsModal';
 import api from '../../../utils/api';
 import useAdminAuthStore from '../../../store/useAdminAuthStore';
 import { useSocketEvent } from '../../../hooks/useSocket';
@@ -56,6 +57,10 @@ const ManageEmergencyPool = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedBooking, setSelectedBooking] = useState(null);
+  // Row-click opens the read-only details panel. We keep it separate
+  // from `selectedBooking` (which drives the Assign drawer) so the
+  // operator can inspect a booking without committing to assignment.
+  const [detailBooking, setDetailBooking] = useState(null);
 
   useEffect(() => {
     const id = setTimeout(() => setDebounced(search), 300);
@@ -193,7 +198,13 @@ const ManageEmergencyPool = () => {
           canAssign ? (
             <Button
               size="sm"
-              onClick={() => setSelectedBooking(row)}
+              onClick={(e) => {
+                // Don't bubble to the row-click handler — clicking the
+                // Assign CTA should jump straight to the driver-picker
+                // drawer, not also open the read-only details panel.
+                e.stopPropagation();
+                setSelectedBooking(row);
+              }}
               icon={UserIcon}
             >
               Assign
@@ -282,6 +293,7 @@ const ManageEmergencyPool = () => {
         limit={limit}
         pagination={pagination}
         onPageChange={setPage}
+        onRowClick={(row) => setDetailBooking(row)}
         entityLabel="bookings"
         emptyMessage="No bookings need manual assignment right now."
       />
@@ -296,6 +308,12 @@ const ManageEmergencyPool = () => {
           }}
         />
       )}
+
+      <BookingDetailsModal
+        isOpen={!!detailBooking}
+        onClose={() => setDetailBooking(null)}
+        booking={detailBooking}
+      />
     </div>
   );
 };

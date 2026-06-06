@@ -247,6 +247,26 @@ const DRIVER_USER_FIELDS_WITH_LOC = `${DRIVER_USER_FIELDS} location`;
 const CUSTOMER_DRIVER_FIELDS = 'name phone_no profilePicture';
 
 /**
+ * Shared `populate` recipe for the customer's car when fetching a
+ * booking on the driver side. Drivers need to identify the vehicle
+ * (image + brand + model + plate + fuel + transmission) on the active
+ * trip screen so they can spot it at the pickup. The nested refs
+ * resolve to `{ name }` documents via separate populates so the FE
+ * gets the same shape it already consumes from the `BOOKING_OFFERED`
+ * socket payload (see `buildOfferPayload`).
+ */
+const CAR_DRIVER_POPULATE = {
+  path: 'carId',
+  select: 'vehicleNumber transmission image carTypeId brandId modelId fuelTypeId',
+  populate: [
+    { path: 'carTypeId', select: 'name' },
+    { path: 'brandId', select: 'name' },
+    { path: 'modelId', select: 'name' },
+    { path: 'fuelTypeId', select: 'name' },
+  ],
+};
+
+/**
  * Status priority for surfacing "the most relevant active booking" when
  * a user has multiple in flight. In-trip statuses outrank pre-trip ones
  * so the resume UX always lands on whatever is happening *now*, not on
@@ -333,10 +353,15 @@ export async function getBookingByIdService(bookingId, { userId, driverId } = {}
   const filter = { _id: bookingId, isDeleted: false };
   if (userId) filter.userId = userId;
   if (driverId) filter.driverId = driverId;
-  const booking = await Booking.findOne(filter)
+  const query = Booking.findOne(filter)
     .populate('driverId', DRIVER_USER_FIELDS_WITH_LOC)
-    .populate('userId', CUSTOMER_DRIVER_FIELDS)
-    .lean();
+    .populate('userId', CUSTOMER_DRIVER_FIELDS);
+  // Driver-side detail view needs the vehicle (image + brand + model
+  // + plate) so the driver can identify the car at pickup. We only
+  // pull it down for driver lookups — users don't need to see their
+  // own car re-rendered on the booking detail.
+  if (driverId) query.populate(CAR_DRIVER_POPULATE);
+  const booking = await query.lean();
   if (!booking) throw new ApiError(404, 'Booking not found');
   if (driverId) {
     return attachCancellationPreview(
@@ -356,6 +381,7 @@ export async function getActiveBookingForDriverService(driverId) {
     isDeleted: false,
   })
     .populate('userId', CUSTOMER_DRIVER_FIELDS)
+    .populate(CAR_DRIVER_POPULATE)
     .lean();
   resumeNoShowScheduleIfNeeded(booking).catch(() => {});
   return attachCancellationPreview(
