@@ -77,6 +77,9 @@ const InvoicePage = lazy(() => import('./features/user/tracking/pages/InvoicePag
 
 // User Dashboard
 const ActivityPage = lazy(() => import('./features/user/activity/pages/ActivityPage'));
+const TripDetailsPage = lazy(
+  () => import('./features/user/activity/pages/TripDetailsPage'),
+);
 const UserAccountPage = lazy(() => import('./features/user/account/pages/UserAccountPage'));
 const SubscriptionsPage = lazy(() => import('./features/user/subscriptions/pages/SubscriptionsPage'));
 
@@ -177,6 +180,7 @@ function App() {
               <Route path="/user/book" element={<Navigate to="/user/book/service" replace />} />
               <Route path="/user/book/service" element={<SelectServicePage />} />
               <Route path="/user/activity" element={<ActivityPage />} />
+              <Route path="/user/trips/:id" element={<TripDetailsPage />} />
               <Route path="/user/account" element={<UserAccountPage />} />
               <Route path="/user/subscriptions" element={<SubscriptionsPage />} />
               <Route path="/user/wallet" element={<WalletPage />} />
@@ -206,6 +210,12 @@ function App() {
           {/* Shared post-creation screens (used by both flows) */}
           <Route path="/user/book/searching" element={<SearchingDriverPage />} />
           <Route path="/user/book/assigned" element={<DriverAssignedPage />} />
+          {/* Id-scoped variant so a hard refresh stays on the same
+              booking — without the id, the page falls back to
+              `/auth/bookings/active` which returns whichever booking
+              the backend ranks highest (wrong when the user has
+              multiple active bookings). */}
+          <Route path="/user/book/assigned/:id" element={<DriverAssignedPage />} />
 
           {/* ========== User Tracking Flow ========== */}
           <Route path="/user/tracking/on-way" element={<DriverOnWayPage />} />

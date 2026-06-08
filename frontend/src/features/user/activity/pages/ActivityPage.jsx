@@ -1,106 +1,65 @@
-import { useCallback, useEffect, useState, useMemo, useRef } from 'react';
-import {
-  MapPin,
-  Clock,
-  Calendar,
-  Loader2,
-  Navigation,
-  CheckCircle2,
-  AlertCircle,
-  ChevronRight,
-  Car,
-} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Badge from '../../../../components/Badge';
-import OngoingTripCard, { pickOngoingBooking } from '../../../../components/OngoingTripCard';
+import {
+  AlertCircle,
+  Calendar,
+  Car,
+  CheckCircle2,
+  ChevronRight,
+  Clock,
+  Loader2,
+  MapPin,
+  Navigation,
+  Star,
+} from 'lucide-react';
+import Avatar from '../../../../components/Avatar';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
+import { mergeLiveBookingIntoList } from '../../../../utils/mergeLiveBooking';
 import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
 import { useUserBookingsStore } from '../../../../store/user/useUserBookingsStore';
 import useUserActiveBookingStore from '../../../../store/user/useUserActiveBookingStore';
-import { BOOKING_STATUS, ACTIVE_BOOKING_STATUSES } from '../../../../constants/bookingStatus';
+import {
+  ACTIVE_BOOKING_STATUSES,
+  BOOKING_STATUS,
+} from '../../../../constants/bookingStatus';
 import { SERVICE_CATALOG } from '../../home/constants/serviceCatalog';
+import { SERVICE_TYPES, SERVICE_TYPE_LABELS } from '../../../../constants/serviceTypes';
 import { useSocketEvent } from '../../../../hooks/useSocket';
 import { S2C_EVENTS } from '../../../../constants/socketEvents';
 
 /**
- * Map a booking row to the user-facing screen that owns its current
- * phase. Mirrors the status switch in `SearchingDriverPage` and the
- * tracking pages so the deep link feels seamless when the user taps a
- * "live" trip card.
+ * /user/activity — the user's "My Trips" rail.
  *
- * Returns `null` for terminal / non-active bookings — the driver side
- * does the same (completed + cancelled stay non-clickable today).
+ * Tabbed list of bookings — Active / Completed / Cancelled. Every row
+ * (including any currently-live trip) uses the same `TripHistoryCard`
+ * component so the layout never shifts between phases, and every
+ * click opens the dedicated `/user/trips/:id` details page — that
+ * page fetches the specific booking, so the user never lands on
+ * "some other ride" when they tap a card.
  */
-const routeForBooking = (booking) => {
-  if (!booking) return null;
-  switch (booking.status) {
-    case BOOKING_STATUS.PENDING_ASSIGNMENT:
-    case BOOKING_STATUS.IN_EMERGENCY_POOL:
-      return '/user/book/scheduled';
-    case BOOKING_STATUS.SEARCHING:
-      return '/user/book/searching';
-    case BOOKING_STATUS.DRIVER_ASSIGNED:
-      return '/user/book/assigned';
-    case BOOKING_STATUS.AWAITING_PAYMENT:
-      // Wallet bookings never see the standalone pay screen — bounce
-      // them to the assigned screen where the inline pay sheet lives.
-      return booking.paymentMethod === 'wallet'
-        ? '/user/book/assigned'
-        : '/user/book/payment';
-    case BOOKING_STATUS.EN_ROUTE:
-      return '/user/tracking/on-way';
-    case BOOKING_STATUS.ARRIVED:
-      return '/user/tracking/reached';
-    case BOOKING_STATUS.STARTED:
-      return '/user/tracking/in-progress';
-    default:
-      return null;
-  }
-};
 
-const tabs = ['Active', 'Completed', 'Cancelled'];
-
-const getStatusProps = (status) => {
-  if (status === BOOKING_STATUS.COMPLETED) {
-    return { label: 'Completed', variant: 'success', icon: CheckCircle2, bg: 'bg-emerald-50', border: 'border-emerald-100' };
-  }
-  if (status === BOOKING_STATUS.CANCELLED || status === BOOKING_STATUS.NO_DRIVERS_FOUND) {
-    return { label: 'Cancelled', variant: 'danger', icon: AlertCircle, bg: 'bg-rose-50', border: 'border-rose-100' };
-  }
-  if ([BOOKING_STATUS.SEARCHING, BOOKING_STATUS.PENDING_ASSIGNMENT, BOOKING_STATUS.IN_EMERGENCY_POOL].includes(status)) {
-    return { label: 'Searching', variant: 'warning', icon: Loader2, bg: 'bg-amber-50', border: 'border-amber-100' };
-  }
-  return { label: 'Active', variant: 'primary', icon: Navigation, bg: 'bg-indigo-50', border: 'border-indigo-100' };
-};
-
-const formatBookingDate = (b) => {
-  const dateStr = b.hourly?.scheduledStartAt || b.outstation?.startDate || b.timeline?.createdAt || b.createdAt;
-  if (!dateStr) return '';
-  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-};
-
-const getDurationLabel = (b) => {
-  if (b.hourly?.durationHours) return `${b.hourly.durationHours} hr${b.hourly.durationHours > 1 ? 's' : ''}`;
-  if (b.outstation?.days) return `${b.outstation.days} day${b.outstation.days > 1 ? 's' : ''}`;
-  return '';
-};
+const TABS = ['Active', 'Completed', 'Cancelled'];
 
 const ActivityPage = () => {
   const navigate = useNavigate();
-  const setActiveBooking = useUserActiveBookingStore((s) => s.setBooking);
   const activeBooking = useUserActiveBookingStore((s) => s.booking);
   const fetchActive = useUserActiveBookingStore((s) => s.fetchActive);
   const applyActiveUpdate = useUserActiveBookingStore((s) => s.applyUpdate);
   const clearActiveBooking = useUserActiveBookingStore((s) => s.clear);
   const [activeTab, setActiveTab] = useState('Active');
 
-  const { data: bookings = [], loading, error, refetch } = useCachedQuery(
+  const {
+    data: bookings = [],
+    loading,
+    error,
+    refetch,
+  } = useCachedQuery(
     useUserBookingsStore,
     buildCacheKey('user-bookings-history'),
   );
 
   // Force a fresh fetch on mount so we don't render a stale cached
-  // status (the previous SearchingDriverPage left the cache at
+  // status (e.g. SearchingDriverPage may have left the cache at
   // SEARCHING). Both stores get refreshed in parallel.
   useEffect(() => {
     fetchActive().catch(() => {});
@@ -108,10 +67,9 @@ const ActivityPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Live socket → keep both stores in lockstep so the hero's phase
-  // (and the list cards) reflect dispatcher events that fire while
-  // the user is looking at this page (driver accept, payment, en
-  // route, arrival, completion, cancellation, escalation, …).
+  // Live socket → keep both stores in lockstep so the list cards
+  // reflect dispatcher events that fire while the user is looking at
+  // this page.
   const refetchRef = useRef(refetch);
   refetchRef.current = refetch;
   useSocketEvent(
@@ -120,8 +78,6 @@ const ActivityPage = () => {
       (payload) => {
         if (!payload) return;
         applyActiveUpdate(payload);
-        // Clear the active-booking handle on terminal statuses so the
-        // hero doesn't keep showing a finished trip.
         if (
           payload.status === BOOKING_STATUS.COMPLETED ||
           payload.status === BOOKING_STATUS.CANCELLED ||
@@ -135,47 +91,50 @@ const ActivityPage = () => {
     ),
   );
 
-  // Pick the freshest representation of the live booking. Both
+  // Merge the live (socket-updated) booking into the list so the
+  // active row always reflects the freshest lifecycle phase. Both
   // sources can disagree by a tick — the active-booking store updates
-  // over socket; the history list updates on refetch — so we always
-  // prefer whichever has the *more advanced* lifecycle status when both
-  // reference the same booking _id (logic lives in
-  // `pickOngoingBooking`, shared with `/driver/trips`).
-  const ongoingBooking = useMemo(
-    () => pickOngoingBooking(activeBooking, bookings),
+  // over socket; the history list updates on refetch — and we want
+  // the rendered card to show the more advanced status when they
+  // diverge.
+  const mergedBookings = useMemo(
+    () => mergeLiveBookingIntoList(activeBooking, bookings),
     [activeBooking, bookings],
   );
-  const ongoingId = ongoingBooking ? String(ongoingBooking._id) : null;
 
   const filtered = useMemo(() => {
-    return (bookings || []).filter((b) => {
-      // Avoid showing the same trip both in the hero card and the list.
-      if (ongoingId && String(b._id) === ongoingId) return false;
+    return (mergedBookings || []).filter((b) => {
       if (activeTab === 'Completed') return b.status === BOOKING_STATUS.COMPLETED;
-      if (activeTab === 'Cancelled') return b.status === BOOKING_STATUS.CANCELLED || b.status === BOOKING_STATUS.NO_DRIVERS_FOUND;
+      if (activeTab === 'Cancelled') {
+        return (
+          b.status === BOOKING_STATUS.CANCELLED ||
+          b.status === BOOKING_STATUS.NO_DRIVERS_FOUND
+        );
+      }
       return ACTIVE_BOOKING_STATUSES.includes(b.status);
     });
-  }, [bookings, activeTab, ongoingId]);
+  }, [mergedBookings, activeTab]);
 
-  const handleCardClick = (booking) => {
-    const route = routeForBooking(booking);
-    if (!route) return;
-    // Seed the active-booking store with what we already know so the
-    // destination screen renders immediately. The tracking pages still
-    // call `fetchActive` on mount, so any missing fields hydrate from
-    // the canonical `/auth/bookings/active` endpoint a beat later.
-    setActiveBooking(booking);
-    navigate(route);
-  };
+  // Every card navigates to the dedicated detail page so the user
+  // always sees the booking they tapped on — not the currently-active
+  // booking that the tracking pages auto-load.
+  const openTrip = useCallback(
+    (bookingId) => {
+      if (!bookingId) return;
+      navigate(`/user/trips/${bookingId}`);
+    },
+    [navigate],
+  );
 
   return (
     <div className="flex-1 flex flex-col bg-bg">
       <div className="sticky top-0 bg-white px-4 pt-5 pb-0 shadow-sm z-30">
         <h1 className="text-xl font-bold text-text mb-4">My Trips</h1>
         <div className="flex gap-1 overflow-x-auto pb-0 -mx-4 px-4 scrollbar-hide">
-          {tabs.map((tab) => (
+          {TABS.map((tab) => (
             <button
               key={tab}
+              type="button"
               onClick={() => setActiveTab(tab)}
               className={`px-4 py-2.5 text-sm font-semibold rounded-t-xl whitespace-nowrap transition-all duration-200
                 ${
@@ -190,15 +149,7 @@ const ActivityPage = () => {
         </div>
       </div>
 
-      <div className="flex-1 p-4 space-y-4 overflow-y-auto pb-20">
-        {ongoingBooking && (
-          <OngoingTripCard
-            booking={ongoingBooking}
-            audience="user"
-            onOpen={() => handleCardClick(ongoingBooking)}
-          />
-        )}
-
+      <div className="flex-1 p-4 space-y-3 overflow-y-auto pb-20">
         {loading && (!bookings || bookings.length === 0) ? (
           <div className="flex-1 flex items-center justify-center py-32">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -207,136 +158,311 @@ const ActivityPage = () => {
           <div className="flex-1 flex flex-col items-center justify-center py-20">
             <AlertCircle className="w-12 h-12 text-danger mb-3 opacity-50" />
             <p className="text-sm text-text-muted">Failed to load bookings</p>
-            <button onClick={refetch} className="mt-3 text-sm text-primary font-medium">Try again</button>
+            <button
+              type="button"
+              onClick={refetch}
+              className="mt-3 text-sm text-primary font-medium"
+            >
+              Try again
+            </button>
           </div>
         ) : filtered.length === 0 ? (
-          // If the active tab is empty BUT the ongoing-trip hero is
-          // already covering the user's live booking, suppress the
-          // generic "no trips" state — it would read like a
-          // contradiction right under the hero.
-          activeTab === 'Active' && ongoingBooking ? null : (
-            <div className="flex-1 flex flex-col items-center justify-center py-32 text-center animate-fade-in-up">
-              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                <Car className="w-8 h-8 text-gray-400" />
-              </div>
-              <h3 className="text-base font-bold text-text mb-1">No {activeTab.toLowerCase()} trips</h3>
-              <p className="text-sm text-text-muted max-w-[240px]">
-                {activeTab === 'Active'
-                  ? "You don't have any ongoing trips at the moment."
-                  : `You haven't ${activeTab.toLowerCase()} any trips yet.`}
-              </p>
-            </div>
-          )
+          <EmptyState tab={activeTab} />
         ) : (
-          filtered.map((booking, idx) => {
-            const { label, variant, icon: StatusIcon, bg, border } = getStatusProps(booking.status);
-            const catalog = SERVICE_CATALOG[booking.serviceType] || {};
-            const serviceName = catalog.title || booking.serviceType;
-            const fare = booking.fareSnapshot?.total || booking.payment?.amountPaidRupees || 0;
-            const isHourly = booking.serviceType === 'hourly';
-            const clickRoute = routeForBooking(booking);
-            const isClickable = !!clickRoute;
-
-            return (
-              <div
-                key={booking._id}
-                onClick={isClickable ? () => handleCardClick(booking) : undefined}
-                role={isClickable ? 'button' : undefined}
-                tabIndex={isClickable ? 0 : undefined}
-                onKeyDown={
-                  isClickable
-                    ? (e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          handleCardClick(booking);
-                        }
-                      }
-                    : undefined
-                }
-                className={`relative overflow-hidden rounded-2xl bg-white border ${border} shadow-sm transition-all duration-200 animate-fade-in-up ${
-                  isClickable
-                    ? 'cursor-pointer hover:shadow-md hover:border-primary/20 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40'
-                    : ''
-                }`}
-                style={{ animationDelay: `${idx * 0.05}s` }}
-              >
-                {/* Accent top border */}
-                <div className={`h-1.5 w-full ${catalog.gradient || 'bg-gradient-to-r from-gray-200 to-gray-300'}`} />
-
-                <div className="p-4">
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-2.5">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${bg}`}>
-                        <StatusIcon className={`w-4 h-4 ${variant === 'primary' ? 'text-indigo-600' : variant === 'success' ? 'text-emerald-600' : variant === 'danger' ? 'text-rose-600' : 'text-amber-600'} ${booking.status === BOOKING_STATUS.SEARCHING ? 'animate-spin' : ''}`} />
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-bold text-text capitalize">{serviceName}</h3>
-                        <p className="text-[11px] font-mono text-text-muted mt-0.5">#{booking.bookingNumber || booking._id.slice(-6).toUpperCase()}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-1.5">
-                      <div className="flex flex-col items-end">
-                        <span className="text-sm font-bold text-text">{`\u20B9`}{fare}</span>
-                        <Badge variant={variant} className="mt-1 scale-90 origin-right">{label}</Badge>
-                      </div>
-                      {isClickable && (
-                        <ChevronRight className="w-4 h-4 text-text-muted shrink-0 mt-0.5" />
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2 mt-4 pl-1">
-                    <div className="flex items-start gap-3 text-sm text-text-secondary">
-                      <div className="mt-0.5">
-                        <MapPin className="w-4 h-4 text-primary" />
-                      </div>
-                      <span className="flex-1 line-clamp-1">{booking.pickup?.address || 'Pickup location'}</span>
-                    </div>
-
-                    {!isHourly && booking.dropoff && (
-                      <div className="flex items-start gap-3 text-sm text-text-secondary relative">
-                        <div className="absolute left-2 -top-3 w-px h-3 bg-gray-200" />
-                        <div className="mt-0.5">
-                          <MapPin className="w-4 h-4 text-rose-500" />
-                        </div>
-                        <span className="flex-1 line-clamp-1">{booking.dropoff.address}</span>
-                      </div>
-                    )}
-
-                    <div className="flex items-center gap-3 text-xs text-text-muted mt-3">
-                      <Calendar className="w-3.5 h-3.5 shrink-0" />
-                      <span>{formatBookingDate(booking)}</span>
-                      <span className="w-1 h-1 rounded-full bg-gray-300" />
-                      <Clock className="w-3.5 h-3.5 shrink-0" />
-                      <span>{getDurationLabel(booking)}</span>
-                    </div>
-                  </div>
-
-                  {booking.driverId && (
-                    <div className="mt-4 pt-3 border-t border-border-light flex items-center justify-between bg-gray-50/50 -mx-4 -mb-4 px-4 pb-4">
-                      <div className="flex items-center gap-2">
-                        <img
-                          src={booking.driverId.profilePicture || 'https://ui-avatars.com/api/?name=' + (booking.driverId.name || 'Driver')}
-                          alt="Driver"
-                          className="w-7 h-7 rounded-full bg-gray-200 object-cover"
-                        />
-                        <span className="text-xs font-medium text-text-secondary">{booking.driverId.name || 'Your Driver'}</span>
-                      </div>
-                      {booking.driverId.rating && (
-                        <span className="text-xs font-bold text-amber-500 bg-amber-50 px-2 py-0.5 rounded-full flex items-center gap-1">
-                          ⭐ {booking.driverId.rating}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })
+          filtered.map((booking, idx) => (
+            <TripHistoryCard
+              key={booking._id}
+              booking={booking}
+              onOpen={() => openTrip(booking._id)}
+              indexInList={idx}
+            />
+          ))
         )}
       </div>
     </div>
   );
 };
+
+/* ------------------------------------------------------------------ */
+/* TripHistoryCard — single source of truth for every row             */
+/* ------------------------------------------------------------------ */
+
+const STATUS_BADGES = {
+  [BOOKING_STATUS.COMPLETED]: {
+    label: 'Completed',
+    icon: CheckCircle2,
+    chip: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+    accent: 'bg-emerald-500',
+    iconColor: 'text-emerald-600',
+  },
+  [BOOKING_STATUS.CANCELLED]: {
+    label: 'Cancelled',
+    icon: AlertCircle,
+    chip: 'bg-rose-50 text-rose-700 border-rose-100',
+    accent: 'bg-rose-500',
+    iconColor: 'text-rose-600',
+  },
+  [BOOKING_STATUS.NO_DRIVERS_FOUND]: {
+    label: 'No drivers',
+    icon: AlertCircle,
+    chip: 'bg-rose-50 text-rose-700 border-rose-100',
+    accent: 'bg-rose-500',
+    iconColor: 'text-rose-600',
+  },
+  [BOOKING_STATUS.SEARCHING]: {
+    label: 'Searching',
+    icon: Loader2,
+    chip: 'bg-amber-50 text-amber-700 border-amber-100',
+    accent: 'bg-amber-500',
+    iconColor: 'text-amber-600 animate-spin',
+  },
+  [BOOKING_STATUS.PENDING_ASSIGNMENT]: {
+    label: 'Scheduled',
+    icon: Calendar,
+    chip: 'bg-indigo-50 text-indigo-700 border-indigo-100',
+    accent: 'bg-indigo-500',
+    iconColor: 'text-indigo-600',
+  },
+  [BOOKING_STATUS.IN_EMERGENCY_POOL]: {
+    label: 'Manual',
+    icon: AlertCircle,
+    chip: 'bg-amber-50 text-amber-700 border-amber-100',
+    accent: 'bg-amber-500',
+    iconColor: 'text-amber-600',
+  },
+  [BOOKING_STATUS.AWAITING_PAYMENT]: {
+    label: 'Pay now',
+    icon: Clock,
+    chip: 'bg-amber-50 text-amber-700 border-amber-100',
+    accent: 'bg-amber-500',
+    iconColor: 'text-amber-600',
+  },
+  [BOOKING_STATUS.DRIVER_ASSIGNED]: {
+    label: 'Driver assigned',
+    icon: Navigation,
+    chip: 'bg-sky-50 text-sky-700 border-sky-100',
+    accent: 'bg-sky-500',
+    iconColor: 'text-sky-600',
+  },
+  [BOOKING_STATUS.EN_ROUTE]: {
+    label: 'On the way',
+    icon: Navigation,
+    chip: 'bg-sky-50 text-sky-700 border-sky-100',
+    accent: 'bg-sky-500',
+    iconColor: 'text-sky-600',
+  },
+  [BOOKING_STATUS.ARRIVED]: {
+    label: 'Driver arrived',
+    icon: MapPin,
+    chip: 'bg-sky-50 text-sky-700 border-sky-100',
+    accent: 'bg-sky-500',
+    iconColor: 'text-sky-600',
+  },
+  [BOOKING_STATUS.STARTED]: {
+    label: 'In progress',
+    icon: Navigation,
+    chip: 'bg-indigo-50 text-indigo-700 border-indigo-100',
+    accent: 'bg-indigo-500',
+    iconColor: 'text-indigo-600',
+  },
+};
+
+const FALLBACK_BADGE = {
+  label: 'Booking',
+  icon: Car,
+  chip: 'bg-gray-100 text-gray-700 border-gray-200',
+  accent: 'bg-gray-400',
+  iconColor: 'text-gray-500',
+};
+
+function TripHistoryCard({ booking, onOpen, indexInList = 0 }) {
+  const badge = STATUS_BADGES[booking.status] || FALLBACK_BADGE;
+  const StatusIcon = badge.icon;
+  const serviceLabel =
+    SERVICE_TYPE_LABELS[booking.serviceType] ||
+    SERVICE_CATALOG[booking.serviceType]?.title ||
+    booking.serviceType ||
+    'Trip';
+  const isHourly = booking.serviceType === SERVICE_TYPES.HOURLY;
+
+  // Single source of truth for the headline fare. We prefer the
+  // canonical fare snapshot, then the running ledger so completed
+  // trips show the final figure (including waiting / extensions when
+  // those have been settled).
+  const fare = useMemo(() => {
+    const base = Number(booking.fareSnapshot?.total) || 0;
+    const waiting = Number(booking.waiting?.chargeRupees) || 0;
+    const extensions = (booking.extensions || []).reduce(
+      (sum, ext) =>
+        sum + (ext?.status === 'accepted' ? Number(ext.fareDelta) || 0 : 0),
+      0,
+    );
+    const computed = base + waiting + extensions;
+    return computed || Number(booking.payment?.amountPaidRupees) || 0;
+  }, [booking]);
+
+  const dateValue =
+    booking.timeline?.completedAt ||
+    booking.timeline?.cancelledAt ||
+    booking.hourly?.scheduledStartAt ||
+    booking.outstation?.startDate ||
+    booking.timeline?.createdAt ||
+    booking.createdAt;
+  const dateLabel = dateValue
+    ? new Date(dateValue).toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : '';
+
+  const durationLabel = (() => {
+    if (booking.hourly?.durationHours) {
+      const h = booking.hourly.durationHours;
+      return `${h}h`;
+    }
+    if (booking.outstation?.days) {
+      const d = booking.outstation.days;
+      return `${d}d`;
+    }
+    return null;
+  })();
+
+  const driver = booking.driverId && typeof booking.driverId === 'object'
+    ? booking.driverId
+    : null;
+  const driverPhoto = (() => {
+    if (!driver) return null;
+    const docs = Array.isArray(driver.documents) ? driver.documents : [];
+    const selfie = docs.find((d) => d?.type === 'selfie' && d?.fileUrl);
+    return selfie?.fileUrl || driver.profilePicture || null;
+  })();
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpen?.();
+        }
+      }}
+      style={{ animationDelay: `${Math.min(indexInList, 8) * 0.04}s` }}
+      className="group relative overflow-hidden rounded-2xl bg-white border border-border-light shadow-sm cursor-pointer transition-all duration-200 hover:shadow-md hover:border-primary/30 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 animate-fade-in-up"
+    >
+      <div className={`h-1 w-full ${badge.accent}`} />
+
+      <div className="p-4">
+        {/* Row 1 — Service + status + fare */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0">
+            <div
+              className={`w-9 h-9 rounded-2xl flex items-center justify-center shrink-0 ${badge.chip}`}
+            >
+              <StatusIcon className={`w-4 h-4 ${badge.iconColor}`} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-text capitalize truncate">
+                {serviceLabel}
+              </p>
+              <p className="text-[11px] font-mono text-text-muted mt-0.5 truncate">
+                #{booking.bookingNumber || String(booking._id).slice(-6).toUpperCase()}
+              </p>
+            </div>
+          </div>
+          <div className="text-right shrink-0">
+            <p className="text-sm font-bold text-text tabular-nums">
+              &#8377;{Number(fare || 0).toLocaleString('en-IN')}
+            </p>
+            <span
+              className={`mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide border ${badge.chip}`}
+            >
+              {badge.label}
+            </span>
+          </div>
+        </div>
+
+        {/* Row 2 — Route */}
+        <div className="mt-3 pl-1 relative">
+          <div className="flex items-start gap-3">
+            <span className="mt-1 w-2 h-2 rounded-full bg-primary shrink-0" />
+            <p className="flex-1 text-sm text-text truncate">
+              {booking.pickup?.address || 'Pickup'}
+            </p>
+          </div>
+          <div className="ml-[3px] my-0.5 h-3 w-px bg-border" />
+          <div className="flex items-start gap-3">
+            <span
+              className={`mt-1 w-2 h-2 rounded-full shrink-0 ${
+                booking.dropoff ? 'bg-rose-500' : 'border-2 border-primary bg-white'
+              }`}
+            />
+            <p className="flex-1 text-sm text-text truncate">
+              {booking.dropoff?.address ||
+                (isHourly ? 'Around the city' : 'Multi-day trip')}
+            </p>
+          </div>
+        </div>
+
+        {/* Row 3 — Meta strip (date + duration + driver) */}
+        <div className="mt-3 pt-3 border-t border-border-light flex items-center gap-3 text-[11px] text-text-muted">
+          {dateLabel && (
+            <span className="inline-flex items-center gap-1">
+              <Calendar className="w-3.5 h-3.5" />
+              {dateLabel}
+            </span>
+          )}
+          {durationLabel && (
+            <span className="inline-flex items-center gap-1">
+              <Clock className="w-3.5 h-3.5" />
+              {durationLabel}
+            </span>
+          )}
+          <span className="flex-1" />
+          {driver ? (
+            <div className="flex items-center gap-1.5 max-w-[55%] min-w-0">
+              <Avatar src={driverPhoto} name={driver.name} size="sm" />
+              <div className="min-w-0 leading-tight">
+                <p className="text-xs font-medium text-text truncate">
+                  {driver.name || 'Your driver'}
+                </p>
+                {driver.rating ? (
+                  <p className="inline-flex items-center gap-0.5 text-[10px] text-amber-600">
+                    <Star className="w-2.5 h-2.5 fill-amber-500 stroke-amber-500" />
+                    {Number(driver.rating).toFixed(1)}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+          <ChevronRight className="w-4 h-4 text-text-muted/70 shrink-0 group-hover:text-primary" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+function EmptyState({ tab }) {
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center py-32 text-center animate-fade-in-up">
+      <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+        <Car className="w-8 h-8 text-gray-400" />
+      </div>
+      <h3 className="text-base font-bold text-text mb-1">
+        No {tab.toLowerCase()} trips
+      </h3>
+      <p className="text-sm text-text-muted max-w-[240px]">
+        {tab === 'Active'
+          ? "You don't have any ongoing trips at the moment."
+          : `You haven't ${tab.toLowerCase()} any trips yet.`}
+      </p>
+    </div>
+  );
+}
 
 export default ActivityPage;

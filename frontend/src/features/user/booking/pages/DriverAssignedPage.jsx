@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
   MapPin,
@@ -93,8 +93,12 @@ function StatusIcon({ icon }) {
 
 const DriverAssignedPage = () => {
   const navigate = useNavigate();
+  const { id: routeBookingId } = useParams();
   const booking = useUserActiveBookingStore((s) => s.booking);
-  const fetchActive = useUserActiveBookingStore((s) => s.fetchActive);
+  const fetchById = useUserActiveBookingStore((s) => s.fetchById);
+  const refreshCurrentOrActive = useUserActiveBookingStore(
+    (s) => s.refreshCurrentOrActive,
+  );
   const applyUpdate = useUserActiveBookingStore((s) => s.applyUpdate);
   const cancelBooking = useUserActiveBookingStore((s) => s.cancelBooking);
   const createExtension = useUserActiveBookingStore((s) => s.createExtension);
@@ -110,17 +114,29 @@ const DriverAssignedPage = () => {
   const [extensionPromptOpen, setExtensionPromptOpen] = useState(false);
   const [extensionPromptDismissedAt, setExtensionPromptDismissedAt] = useState(null);
 
-  // Always fetch the full booking from the server on mount. The store
-  // may already hold a booking object set by createBooking or a socket
-  // patch, but those don't include `cancellationPreview.policy` (only
-  // the GET /active endpoint hydrates it). Without it the cancel dialog
-  // shows stale / zero-fee messages until the user manually reloads.
+  // Hydrate the active booking on mount. Two paths:
+  //   1. URL carries `/:id` (preferred) → fetch *that* booking. This
+  //      is what makes a hard refresh keep the same trip even when
+  //      the user has several active bookings — the alternative
+  //      (`/auth/bookings/active`) returns whichever the backend
+  //      ranks highest, which is the wrong one in that scenario.
+  //   2. Legacy `/user/book/assigned` with no id → fall back to the
+  //      booking already in the store (refreshed by id), or `/active`
+  //      when the store is empty. Older navigators still hit this
+  //      path; new ones include the id so refresh survives.
+  // Either way we re-pull the full record so `cancellationPreview`
+  // and other server-only fields land (the store entry seeded by
+  // `createBooking` or socket patches doesn't include them).
   const didHydrate = useRef(false);
   useEffect(() => {
     if (didHydrate.current) return;
     didHydrate.current = true;
-    fetchActive().catch(() => { });
-  }, [fetchActive]);
+    if (routeBookingId) {
+      fetchById(routeBookingId).catch(() => { });
+    } else {
+      refreshCurrentOrActive().catch(() => { });
+    }
+  }, [routeBookingId, fetchById, refreshCurrentOrActive]);
 
   // Join the booking room so the driver, user, and any admin watching get the
   // same trip-room broadcasts (Phase 5 will lean on this for live ETA).
@@ -267,6 +283,16 @@ const DriverAssignedPage = () => {
     if (!Array.isArray(c) || c.length !== 2) return null;
     return { lat: c[1], lng: c[0] };
   }, [booking?.pickup]);
+
+  // Drop-off coords (when present) so the in-progress map can render
+  // the route the driver is currently following. `booking.dropoff` is
+  // a `placeSchema` POJO with `location.coordinates` in [lng, lat]
+  // order — same shape as `pickup`.
+  const dropoffPoint = useMemo(() => {
+    const c = booking?.dropoff?.location?.coordinates;
+    if (!Array.isArray(c) || c.length !== 2) return null;
+    return { lat: c[1], lng: c[0] };
+  }, [booking?.dropoff]);
 
   const driverPoint = useMemo(() => {
     if (!liveDriver) return null;
@@ -442,7 +468,13 @@ const DriverAssignedPage = () => {
   const payNowAmount = Math.max(0, total - amountPaid);
 
   const view = STATUS_VIEW[booking.status] || STATUS_VIEW[BOOKING_STATUS.DRIVER_ASSIGNED];
-  const showMap = pickupPoint && booking.status !== BOOKING_STATUS.STARTED;
+  const isTripStarted = booking.status === BOOKING_STATUS.STARTED;
+  // Map is shown for every post-acceptance phase, including STARTED.
+  // The destination/route during STARTED is determined below by
+  // `mapAnchor` (driver→dropoff if we have a dropoff, otherwise the
+  // pickup so the camera still has a stable anchor for hourly rides).
+  const mapAnchor = isTripStarted ? dropoffPoint || pickupPoint : pickupPoint;
+  const showMap = !!mapAnchor;
 
   /* ─── Status pill color helper ─── */
   const statusPillColor = {
@@ -467,14 +499,23 @@ const DriverAssignedPage = () => {
         >
           <TripTrackingMap
             driver={driverPoint}
-            pickup={pickupPoint}
+            // Once the trip is STARTED the customer cares about the
+            // route to the destination, not back to the pickup they
+            // already left. Swap the pickup pin for the dropoff (when
+            // we have one) and let the camera trail the driver.
+            pickup={isTripStarted ? dropoffPoint || pickupPoint : pickupPoint}
             emphasis="driver"
             height="100%"
+            // Show the polyline at every phase that has a destination
+            // to draw to — pickup (pre-arrival) and dropoff (in
+            // progress). It's the ARRIVED phase that intentionally
+            // hides it (the driver is on top of the pin).
             showRoute={booking.status !== BOOKING_STATUS.ARRIVED}
+            followDriver={isTripStarted}
           />
         </div>
       ) : (
-        /* Fallback gradient when there's no map (STARTED status) */
+        /* Fallback gradient when coordinates are missing. */
         <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-slate-800 to-gray-900" />
       )}
 
@@ -632,6 +673,26 @@ const DriverAssignedPage = () => {
                 </div>
               </div>
             </div>
+
+            {/* Always-visible cancel CTA — the previous version was nested
+                inside the expanded sheet body, so users had to discover
+                they could expand the sheet before they could cancel.
+                Keeping it in the peek row means it's reachable in one tap
+                no matter the sheet state. */}
+            {cancellable && (
+              <button
+                type="button"
+                disabled={cancelling}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleCancel();
+                }}
+                className="self-end inline-flex items-center gap-1 text-xs font-semibold text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 disabled:opacity-60 transition"
+              >
+                <X className="w-3.5 h-3.5" />
+                {cancelling ? 'Cancelling…' : 'Cancel booking'}
+              </button>
+            )}
           </div>
 
           {/* Zone 2: scrollable body — only rendered (and takes up space) when expanded */}
@@ -764,18 +825,8 @@ const DriverAssignedPage = () => {
                   )}
                 </Card>
 
-                {/* Cancel button */}
-                {cancellable && (
-                  <button
-                    type="button"
-                    disabled={cancelling}
-                    onClick={handleCancel}
-                    className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 text-red-600 font-semibold py-3 text-sm disabled:opacity-60 hover:bg-red-100 transition"
-                  >
-                    <X className="w-4 h-4" />
-                    {cancelling ? 'Cancelling…' : 'Cancel booking'}
-                  </button>
-                )}
+                {/* (Cancel CTA lives in the always-visible peek row above
+                    so it's reachable without expanding this sheet.) */}
 
                 {/* Safe-area bottom padding */}
                 <div className="h-2" />

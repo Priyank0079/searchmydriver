@@ -3,10 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader2, AlertCircle, Inbox } from 'lucide-react';
 import Card from '../../../../components/Card';
 import Button from '../../../../components/Button';
-import OngoingTripCard, {
-  pickOngoingBooking,
-} from '../../../../components/OngoingTripCard';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
+import { mergeLiveBookingIntoList } from '../../../../utils/mergeLiveBooking';
 import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
 import { useDriverTripsListStore } from '../../../../store/driver/useDriverTripsStore';
 import useDriverActiveTripStore from '../../../../store/driver/useDriverActiveTripStore';
@@ -77,8 +75,9 @@ const MyTripsPage = () => {
   );
 
   // Driver-side active-trip handle. Mirrors the user-side flow:
-  // hydrate on mount + apply socket patches so the hero card phase is
-  // always live (driver_assigned → en_route → arrived → started …).
+  // hydrate on mount + apply socket patches so the in-flight row
+  // phase is always live (driver_assigned → en_route → arrived →
+  // started …).
   const activeBooking = useDriverActiveTripStore((s) => s.booking);
   const fetchActive = useDriverActiveTripStore((s) => s.fetchActive);
   const applyActiveUpdate = useDriverActiveTripStore((s) => s.applyUpdate);
@@ -91,10 +90,10 @@ const MyTripsPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Keep both sources in lockstep over the socket so the hero (and the
-  // list rows) reflect every dispatcher / trip-transition event while
-  // the driver sits on this page. We mirror `refetch` into a ref so
-  // the socket-event callback below always sees the latest reference
+  // Keep both sources in lockstep over the socket so the list rows
+  // reflect every dispatcher / trip-transition event while the driver
+  // sits on this page. We mirror `refetch` into a ref so the
+  // socket-event callback below always sees the latest reference
   // without having to re-subscribe on every render.
   const refetchRef = useRef(refetch);
   useEffect(() => {
@@ -122,28 +121,14 @@ const MyTripsPage = () => {
   const trips = data?.data || [];
   const pagination = data?.pagination || { total: 0, page: 1, pages: 1 };
 
-  // The hero shows whichever booking is currently "live" — same
-  // disambiguation as `/user/activity`: prefer the further-along
-  // phase when the store + list disagree on the same booking id.
-  const ongoingBooking = useMemo(
-    () => pickOngoingBooking(activeBooking, trips),
+  // Merge the live (socket-updated) booking into the list so the row
+  // for an in-flight trip always reflects the freshest lifecycle
+  // phase — same idea as `/user/activity`. The store can be ahead of
+  // the list by a tick when a transition socket lands.
+  const visibleTrips = useMemo(
+    () => mergeLiveBookingIntoList(activeBooking, trips),
     [activeBooking, trips],
   );
-  const ongoingId = ongoingBooking ? String(ongoingBooking._id) : null;
-  // Filter the live booking out of the list below so it doesn't appear
-  // twice (once in the hero, once in the list).
-  const visibleTrips = useMemo(
-    () => trips.filter((t) => !ongoingId || String(t._id) !== ongoingId),
-    [trips, ongoingId],
-  );
-
-  const handleOpenOngoing = useCallback(() => {
-    if (!ongoingBooking) return;
-    // Seed the active-trip store so `DriverActiveTripPage` renders
-    // immediately even before its own `fetchById` resolves.
-    setActiveBooking(ongoingBooking);
-    navigate(`/driver/trip/${ongoingBooking._id}`);
-  }, [ongoingBooking, navigate, setActiveBooking]);
 
   const handleSelect = (trip) => {
     if (!trip) return;
@@ -175,14 +160,6 @@ const MyTripsPage = () => {
       }
       bodyClassName="p-4 -mt-2 pb-8 space-y-3"
     >
-      {ongoingBooking && (
-        <OngoingTripCard
-          booking={ongoingBooking}
-          audience="driver"
-          onOpen={handleOpenOngoing}
-        />
-      )}
-
       {loading && !data && (
         <Card className="flex items-center justify-center py-10">
           <Loader2 className="w-5 h-5 animate-spin text-text-muted" />

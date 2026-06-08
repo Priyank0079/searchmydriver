@@ -53,7 +53,34 @@ const useUserActiveBookingStore = create((set, get) => ({
     // `driverId` can legitimately go from a value back to `null` (driver
     // bailed → booking back to SEARCHING). Honour an explicit `null` in
     // the patch instead of only forwarding truthy ids.
-    if ('driverId' in patch) merged.driverId = patch.driverId;
+    //
+    // Critical: socket patches send `driverId` as a bare id string (see
+    // backend `buildUpdatePayload`). If we blindly assigned that, we'd
+    // clobber the already-populated driver object the REST fetch put on
+    // the booking, and the UI would collapse to "Driver" / "Assigning
+    // driver…" the next time *any* transition (e.g. trip STARTED) fires.
+    // So when the patch is a bare id matching the currently-populated
+    // driver, keep the object; only replace when the driver actually
+    // changes (or when the patch explicitly clears it).
+    if ('driverId' in patch) {
+      const next = patch.driverId;
+      if (next === null || next === undefined) {
+        merged.driverId = next;
+      } else if (typeof next === 'object') {
+        merged.driverId = next;
+      } else {
+        const cur = current.driverId;
+        const curId =
+          cur && typeof cur === 'object'
+            ? cur._id
+              ? String(cur._id)
+              : null
+            : cur
+              ? String(cur)
+              : null;
+        merged.driverId = curId && curId === String(next) ? cur : next;
+      }
+    }
     if (patch.dispatch) {
       merged.dispatch = { ...(current.dispatch || {}), ...patch.dispatch };
     }
@@ -121,6 +148,53 @@ const useUserActiveBookingStore = create((set, get) => ({
       const message = err?.response?.data?.message || err?.message || 'Failed to load booking';
       set({ error: message, loading: false });
       throw err;
+    }
+  },
+
+  /**
+   * Fetch a specific booking by id and put it in the store. Use this
+   * on tracking pages that have the id in the URL (e.g.
+   * `/user/book/assigned/:id`) so a hard refresh continues to render
+   * the same booking — `/active` alone would return whichever booking
+   * the backend ranks highest, which is wrong when the user has
+   * several active bookings.
+   */
+  async fetchById(bookingId) {
+    if (!bookingId) return null;
+    set({ loading: true, error: null });
+    try {
+      const res = await api.get(`/auth/bookings/${bookingId}`);
+      const booking = res?.data?.data?.booking || null;
+      set({ booking, loading: false });
+      return booking;
+    } catch (err) {
+      const message =
+        err?.response?.data?.message || err?.message || 'Failed to load booking';
+      set({ error: message, loading: false });
+      throw err;
+    }
+  },
+
+  /**
+   * Refresh whichever booking the store currently holds (by id) or
+   * fall back to `/active` when the store is empty. Used by pages
+   * that don't have the id in the URL — they rely on whatever the
+   * navigator put in the store. Prefer the URL-driven `fetchById`
+   * when possible because it survives a hard refresh.
+   */
+  async refreshCurrentOrActive() {
+    const currentId = get().booking?._id;
+    if (!currentId) {
+      try {
+        return await get().fetchActive();
+      } catch {
+        return null;
+      }
+    }
+    try {
+      return await get().fetchById(currentId);
+    } catch {
+      return null;
     }
   },
 

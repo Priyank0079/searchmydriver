@@ -53,14 +53,20 @@ const DriverOnWayPage = () => {
   }, [driverPoint, pickupPoint]);
 
   // Auto-route to the appropriate screen as the booking progresses.
+  // STARTED now bounces back to the assigned page so the user stays
+  // on the live map (DriverAssignedPage shows the in-progress map
+  // too) — id-scoped so a refresh keeps the same booking.
   useEffect(() => {
     if (!booking?.status) return;
     if (booking.status === BOOKING_STATUS.ARRIVED) {
       navigate('/user/tracking/reached', { replace: true });
     } else if (booking.status === BOOKING_STATUS.STARTED) {
-      navigate('/user/tracking/in-progress', { replace: true });
+      const target = booking._id
+        ? `/user/book/assigned/${booking._id}`
+        : '/user/book/assigned';
+      navigate(target, { replace: true });
     }
-  }, [booking?.status, navigate]);
+  }, [booking?.status, booking?._id, navigate]);
 
   const driverName = driverObj?.name || 'Your driver';
   const driverRating = driverObj?.rating;

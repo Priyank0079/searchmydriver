@@ -66,7 +66,7 @@ const PaymentPage = () => {
       booking.paymentMode === PAYMENT_MODE.PRE_RIDE &&
       booking.status === BOOKING_STATUS.DRIVER_ASSIGNED
     ) {
-      navigate('/user/book/assigned', { replace: true });
+      navigate(`/user/book/assigned/${booking._id}`, { replace: true });
     } else if (
       booking.status === BOOKING_STATUS.CANCELLED ||
       booking.status === BOOKING_STATUS.NO_DRIVERS_FOUND

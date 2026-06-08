@@ -95,10 +95,34 @@ const STATUSES_DRIVER_CAN_CANCEL = Object.freeze([
 /**
  * Look up the booking that belongs to `driverId` and verify the driver is
  * authorised to act on it. The same guard is used by every transition below.
+ *
+ * Populates `userId` (basic customer profile) and `carId` (vehicle the
+ * driver is meeting) so the sanitized booking returned by each transition
+ * controller keeps the same shape as the initial `GET /driver/bookings/:id`
+ * fetch — otherwise the active-trip page would lose customer/car details
+ * after the first transition (e.g. "Start trip") because the store would
+ * be replaced with a stub that has bare ObjectIds instead of populated
+ * docs.
  */
 async function loadDriverBooking(driverId, bookingId) {
-  const booking = await Booking.findOne({ _id: bookingId, isDeleted: false });
+  const booking = await Booking.findOne({ _id: bookingId, isDeleted: false })
+    .populate('userId', 'name phone_no email profilePicture createdAt')
+    .populate({
+      path: 'carId',
+      select:
+        'vehicleNumber transmission image carTypeId brandId modelId fuelTypeId',
+      populate: [
+        { path: 'carTypeId', select: 'name' },
+        { path: 'brandId', select: 'name' },
+        { path: 'modelId', select: 'name' },
+        { path: 'fuelTypeId', select: 'name' },
+      ],
+    });
   if (!booking) throw new ApiError(404, 'Booking not found');
+  // `driverId` is left as a raw ObjectId here — the auth check below
+  // and every transition's mutate-and-save flow expect that. The
+  // driver's own profile isn't needed in the response (the FE has it
+  // from `useDriverAuthStore`).
   if (!booking.driverId || String(booking.driverId) !== String(driverId)) {
     throw new ApiError(403, 'You are not assigned to this booking');
   }
@@ -123,12 +147,19 @@ async function loadDriverBooking(driverId, bookingId) {
  *                 leak the OTP to anyone tailing the room).
  */
 function buildUpdatePayload(booking, audience = 'room') {
+  // `driverId` is normally a raw ObjectId here, but loadDriverBooking
+  // (and a few other callers) sometimes hand us a populated Mongoose
+  // doc. Stringify the `_id` so the wire payload is always a plain id
+  // string the FE store can compare against its own populated object.
+  const driverIdValue = booking.driverId
+    ? String(booking.driverId._id || booking.driverId)
+    : null;
   const base = {
     bookingId: String(booking._id),
     status: booking.status,
     paymentStatus: booking.paymentStatus,
     paymentMode: booking.paymentMode,
-    driverId: booking.driverId ? String(booking.driverId) : null,
+    driverId: driverIdValue,
     timeline: booking.timeline ? booking.timeline.toObject?.() || booking.timeline : null,
     cancellation: booking.cancellation
       ? booking.cancellation.toObject?.() || booking.cancellation

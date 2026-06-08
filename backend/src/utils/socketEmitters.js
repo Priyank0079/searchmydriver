@@ -24,22 +24,38 @@ function safeEmit(room, event, payload) {
   return true;
 }
 
+/**
+ * Normalize the id argument to a plain string so callers can hand us
+ * either a raw ObjectId, a string, or a populated Mongoose document.
+ * Without this guard `${populatedDoc}` interpolates to `[object Object]`
+ * and the emit lands in a phantom room (no one receives it).
+ */
+function toRoomId(value) {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object' && value._id) return String(value._id);
+  return String(value);
+}
+
 /** Send to all sockets of a specific app user. */
 export function emitToUser(userId, event, payload) {
-  if (!userId) return false;
-  return safeEmit(roomForUser(userId), event, payload);
+  const id = toRoomId(userId);
+  if (!id) return false;
+  return safeEmit(roomForUser(id), event, payload);
 }
 
 /** Send to all sockets of a specific driver. */
 export function emitToDriver(driverId, event, payload) {
-  if (!driverId) return false;
-  return safeEmit(roomForDriver(driverId), event, payload);
+  const id = toRoomId(driverId);
+  if (!id) return false;
+  return safeEmit(roomForDriver(id), event, payload);
 }
 
 /** Send to everyone in a booking room (user + driver + admin observers). */
 export function emitToBooking(bookingId, event, payload) {
-  if (!bookingId) return false;
-  return safeEmit(roomForBooking(bookingId), event, payload);
+  const id = toRoomId(bookingId);
+  if (!id) return false;
+  return safeEmit(roomForBooking(id), event, payload);
 }
 
 /** Broadcast to every staff dashboard. */

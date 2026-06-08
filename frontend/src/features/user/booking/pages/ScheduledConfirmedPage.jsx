@@ -68,19 +68,23 @@ const ScheduledConfirmedPage = () => {
 
   // Status-driven redirects. Mirror of the SearchingDriverPage table.
   const bookingStatus = booking?.status;
+  const bookingIdForRedirect = booking?._id;
   const paymentMethod = booking?.paymentMethod;
   useEffect(() => {
     if (!bookingStatus) return;
+    const assignedRoute = bookingIdForRedirect
+      ? `/user/book/assigned/${bookingIdForRedirect}`
+      : '/user/book/assigned';
     switch (bookingStatus) {
       case BOOKING_STATUS.SEARCHING:
         navigate('/user/book/searching', { replace: true });
         break;
       case BOOKING_STATUS.DRIVER_ASSIGNED:
-        navigate('/user/book/assigned', { replace: true });
+        navigate(assignedRoute, { replace: true });
         break;
       case BOOKING_STATUS.AWAITING_PAYMENT:
         if (paymentMethod === 'wallet') {
-          navigate('/user/book/assigned', { replace: true });
+          navigate(assignedRoute, { replace: true });
         } else {
           navigate('/user/book/payment', { replace: true });
         }
@@ -97,7 +101,7 @@ const ScheduledConfirmedPage = () => {
       default:
         break;
     }
-  }, [bookingStatus, paymentMethod, navigate, clearActiveBooking, fetchWallet]);
+  }, [bookingStatus, bookingIdForRedirect, paymentMethod, navigate, clearActiveBooking, fetchWallet]);
 
   const pickupAt = booking?.hourly?.scheduledStartAt
     ? new Date(booking.hourly.scheduledStartAt)

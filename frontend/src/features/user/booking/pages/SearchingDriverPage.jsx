@@ -43,13 +43,17 @@ const SearchingDriverPage = () => {
   }, [booking, fetchActive]);
 
   const bookingStatus = booking?.status;
+  const bookingIdForRedirect = booking?._id;
   const serviceType = booking?.serviceType;
   const paymentMethod = booking?.paymentMethod;
   useEffect(() => {
     if (!bookingStatus) return;
+    const assignedRoute = bookingIdForRedirect
+      ? `/user/book/assigned/${bookingIdForRedirect}`
+      : '/user/book/assigned';
     switch (bookingStatus) {
       case BOOKING_STATUS.DRIVER_ASSIGNED:
-        navigate('/user/book/assigned');
+        navigate(assignedRoute);
         break;
       case BOOKING_STATUS.AWAITING_PAYMENT:
         // Wallet-paid bookings should never land here — but if the
@@ -57,7 +61,7 @@ const SearchingDriverPage = () => {
         // reason (legacy extension flow, etc.) we treat it as
         // assigned and let the assigned page handle the pay sheet.
         if (paymentMethod === 'wallet') {
-          navigate('/user/book/assigned');
+          navigate(assignedRoute);
         } else {
           navigate('/user/book/payment');
         }
@@ -106,6 +110,7 @@ const SearchingDriverPage = () => {
     }
   }, [
     bookingStatus,
+    bookingIdForRedirect,
     serviceType,
     paymentMethod,
     navigate,

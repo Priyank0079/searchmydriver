@@ -42,11 +42,17 @@ const DriverReachedPage = () => {
   useEffect(() => {
     if (!booking?.status) return;
     if (booking.status === BOOKING_STATUS.STARTED) {
-      navigate('/user/tracking/in-progress', { replace: true });
+      // In-progress UX now lives on the assigned page (it shows the
+      // live map for STARTED too) — id-scoped so refresh keeps the
+      // same booking even when the user has multiple active rides.
+      const target = booking._id
+        ? `/user/book/assigned/${booking._id}`
+        : '/user/book/assigned';
+      navigate(target, { replace: true });
     } else if (booking.status === BOOKING_STATUS.COMPLETED) {
       navigate('/user/tracking/completed', { replace: true });
     }
-  }, [booking?.status, navigate]);
+  }, [booking?.status, booking?._id, navigate]);
 
   const driverName = driverObj?.name || 'Your driver';
   const driverRating = driverObj?.rating;
