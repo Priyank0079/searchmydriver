@@ -27,8 +27,10 @@ const buildDefaultForm = (serviceType) => ({
   waitingCharge: {
     freeWaitingMinutes: 15,
     chargePerMinute: 2,
-    noShowPromptMinutes: 30,
+    noShowPromptMinutes: 15,
     noShowGraceMinutes: 5,
+    maxNoShowPrompts: 2,
+    maxBillableMinutes: 45,
   },
   customHours: {
     enabled: false,
@@ -270,7 +272,7 @@ const ServicePricingModal = ({ isOpen, onClose, serviceType, existing, onSaved }
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                   <Input
-                    label="No-show prompt after (min from arrival)"
+                    label="Re-prompt interval (min)"
                     type="number"
                     min={1}
                     value={form.waitingCharge.noShowPromptMinutes}
@@ -281,7 +283,7 @@ const ServicePricingModal = ({ isOpen, onClose, serviceType, existing, onSaved }
                     }
                   />
                   <Input
-                    label="Auto-complete grace (min to respond)"
+                    label="Final grace window (min)"
                     type="number"
                     min={1}
                     value={form.waitingCharge.noShowGraceMinutes}
@@ -292,13 +294,76 @@ const ServicePricingModal = ({ isOpen, onClose, serviceType, existing, onSaved }
                     }
                   />
                 </div>
-                <p className="text-[11px] text-text-muted mt-2 leading-snug">
-                  After {form.waitingCharge.noShowPromptMinutes || 0} min of waiting we
-                  ping the customer asking if they&apos;re still coming. If they
-                  don&apos;t answer within {form.waitingCharge.noShowGraceMinutes || 0}{' '}
-                  min the trip is auto-closed and the driver gets paid in full
-                  plus the waiting charge.
-                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                  <Input
+                    label="Max re-prompts (before final)"
+                    type="number"
+                    min={0}
+                    max={5}
+                    value={form.waitingCharge.maxNoShowPrompts}
+                    onChange={(e) =>
+                      updateNested('waitingCharge', {
+                        maxNoShowPrompts: Number(e.target.value),
+                      })
+                    }
+                  />
+                  <Input
+                    label="Max billable wait (min)"
+                    type="number"
+                    min={0}
+                    value={form.waitingCharge.maxBillableMinutes}
+                    onChange={(e) =>
+                      updateNested('waitingCharge', {
+                        maxBillableMinutes: Number(e.target.value),
+                      })
+                    }
+                  />
+                </div>
+                {/*
+                  Buffer + cadence preview. The buffer (= maxBillable ×
+                  perMinute) is debited from the user's wallet at booking
+                  creation; only the actually-consumed portion stays with
+                  the platform, the rest is refunded to the wallet at
+                  trip-end. The worst-case minutes calculation must stay
+                  in lockstep with the backend validator in
+                  pricing.service.js → validateWaitingCharge.
+                */}
+                {(() => {
+                  const wc = form.waitingCharge || {};
+                  const promptM = Number(wc.noShowPromptMinutes) || 0;
+                  const graceM = Number(wc.noShowGraceMinutes) || 0;
+                  const maxP = Number(wc.maxNoShowPrompts) || 0;
+                  const maxB = Number(wc.maxBillableMinutes) || 0;
+                  const perMin = Number(wc.chargePerMinute) || 0;
+                  const worstCase = (maxP + 1) * promptM + graceM;
+                  const buffer = Math.round(maxB * perMin * 100) / 100;
+                  const ok = maxB >= worstCase;
+                  return (
+                    <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-snug">
+                      <div className="flex items-center justify-between font-semibold text-text">
+                        <span>Pre-collected buffer</span>
+                        <span>₹{buffer.toFixed(2)}</span>
+                      </div>
+                      <p className="text-text-muted mt-1">
+                        Free wait {wc.freeWaitingMinutes || 0} min → reminder
+                        every {promptM} min (up to {maxP} re-prompts) →
+                        final {graceM} min grace → auto-complete. Worst-case
+                        billable wait: <span className="font-medium text-text">{worstCase} min</span>.
+                      </p>
+                      <p
+                        className={`mt-1 ${
+                          ok
+                            ? 'text-emerald-700'
+                            : 'text-rose-600 font-semibold'
+                        }`}
+                      >
+                        {ok
+                          ? `Buffer covers worst case (${maxB} min ≥ ${worstCase} min).`
+                          : `Buffer is short by ${worstCase - maxB} min — raise "Max billable wait" to at least ${worstCase}.`}
+                      </p>
+                    </div>
+                  );
+                })()}
               </Section>
 
               <Section

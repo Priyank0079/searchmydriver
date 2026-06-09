@@ -36,6 +36,20 @@ export const WALLET_TXN_SOURCE = Object.freeze({
   BOOKING_REFUND: 'booking_refund',
   /** Refund issued because no drivers were found / system cancel. */
   BOOKING_NO_DRIVERS_REFUND: 'booking_no_drivers_refund',
+  /**
+   * Debit for the actual waiting time accrued at pickup. Cuts from the
+   * portion the wallet held aside at booking creation; the unused part
+   * of that hold is simply released (no ledger row needed).
+   */
+  WAITING_CHARGE: 'waiting_charge',
+  /**
+   * @deprecated Pre-hold model only — the buffer is no longer collected
+   * upfront, so no refund txn is written. Kept in the enum for back-compat
+   * with any pre-hold bookings that may still be in flight.
+   */
+  WAITING_BUFFER_REFUND: 'waiting_buffer_refund',
+  /** Debit when an extension fareDelta is paid from the wallet. */
+  BOOKING_EXTENSION_PAYMENT: 'booking_extension_payment',
   /** Credit for a cancellation fee being waived (rare; admin-driven). */
   CANCELLATION_FEE_WAIVED: 'cancellation_fee_waived',
 });

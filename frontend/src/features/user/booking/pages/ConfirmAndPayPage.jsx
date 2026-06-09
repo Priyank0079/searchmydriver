@@ -131,9 +131,20 @@ const ConfirmAndPayPage = () => {
     { onResult: (data) => setFareEstimate(data) },
   );
 
-  const total = Number(estimate?.fareBreakdown?.totalPayable || 0);
+  // `total` is the *full wallet requirement*: fare charged immediately
+  // + the waiting reserve we hold against `wallet.heldRupees`. Even
+  // though the buffer isn't debited, the user must have it in the
+  // wallet for the booking to start.
+  const fareTotal = Number(estimate?.fareBreakdown?.totalPayable || 0);
+  const bufferRupees = Number(estimate?.waitingBuffer?.bufferRupees || 0);
+  const total = Math.round((fareTotal + bufferRupees) * 100) / 100;
+  // We compare against *available* balance (balance − heldRupees from
+  // other active bookings) so a user with funds locked in another
+  // booking's buffer can't accidentally over-book.
   const balance = Number(wallet.balance || 0);
-  const canPay = balance >= total && total > 0;
+  const heldElsewhere = Number(wallet.heldRupees || 0);
+  const available = Math.max(0, Math.round((balance - heldElsewhere) * 100) / 100);
+  const canPay = available >= total && total > 0;
 
   // Mandatory food acknowledgement gate (hourly only). The slab page
   // is meant to capture this, but a direct landing on /confirm — or a
@@ -153,9 +164,12 @@ const ConfirmAndPayPage = () => {
       return;
     }
 
-    const freshBalance = Number(useUserWalletStore.getState().wallet?.balance || 0);
-    if (freshBalance < total) {
-      setShortfall(Math.max(0, total - freshBalance));
+    const freshWallet = useUserWalletStore.getState().wallet || {};
+    const freshBalance = Number(freshWallet.balance || 0);
+    const freshHeld = Number(freshWallet.heldRupees || 0);
+    const freshAvailable = Math.max(0, freshBalance - freshHeld);
+    if (freshAvailable < total) {
+      setShortfall(Math.max(0, Math.round((total - freshAvailable) * 100) / 100));
       setTopupOpen(true);
       return;
     }
@@ -272,11 +286,15 @@ const ConfirmAndPayPage = () => {
         )}
         <WalletBalanceCard
           balance={balance}
+          available={available}
+          heldElsewhere={heldElsewhere}
+          fareTotal={fareTotal}
+          bufferRupees={bufferRupees}
           total={total}
-          shortBy={Math.max(0, total - balance)}
+          shortBy={Math.max(0, total - available)}
           loading={estimating}
           onAddMoney={() => {
-            setShortfall(Math.max(0, total - balance));
+            setShortfall(Math.max(0, total - available));
             setTopupOpen(true);
           }}
         />
@@ -366,10 +384,20 @@ const ConfirmAndPayPage = () => {
  *   funded     gradient slate card · big checkmark · "Ready to pay"
  *   short      cream/amber card    · clear shortfall callout · CTA
  */
-function WalletBalanceCard({ balance, total, shortBy, loading, onAddMoney }) {
-  const enough = total > 0 && balance >= total;
+function WalletBalanceCard({
+  balance,
+  available,
+  heldElsewhere,
+  fareTotal,
+  bufferRupees,
+  total,
+  shortBy,
+  loading,
+  onAddMoney,
+}) {
+  const enough = total > 0 && available >= total;
   const pct =
-    total > 0 ? Math.min(100, Math.round((balance / total) * 100)) : 0;
+    total > 0 ? Math.min(100, Math.round((available / total) * 100)) : 0;
   const fmt = (n) =>
     `\u20B9${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
@@ -382,18 +410,33 @@ function WalletBalanceCard({ balance, total, shortBy, loading, onAddMoney }) {
               Wallet balance
             </p>
             <p className="text-2xl font-bold mt-1">{fmt(balance)}</p>
+            {heldElsewhere > 0 && (
+              <p className="text-[10px] text-white/60 mt-0.5">
+                {fmt(heldElsewhere)} locked in active bookings · {fmt(available)} available
+              </p>
+            )}
           </div>
           <div className="w-10 h-10 rounded-2xl bg-emerald-400/20 text-emerald-300 flex items-center justify-center shrink-0">
             <CheckCircle2 className="w-5 h-5" />
           </div>
         </div>
-        <div className="mt-4 flex items-center justify-between text-[12px] text-white/80">
-          <span>
-            Fare due <strong className="text-white">{fmt(total)}</strong>
-          </span>
-          <span className="inline-flex items-center gap-1 text-emerald-300 font-semibold">
-            <ShieldCheck className="w-3.5 h-3.5" /> Ready to pay
-          </span>
+        <div className="mt-4 space-y-1 text-[12px] text-white/80">
+          <div className="flex items-center justify-between">
+            <span>Charged from wallet</span>
+            <strong className="text-white">{fmt(fareTotal)}</strong>
+          </div>
+          {bufferRupees > 0 && (
+            <div className="flex items-center justify-between">
+              <span>Reserved for waiting (refundable)</span>
+              <strong className="text-white">{fmt(bufferRupees)}</strong>
+            </div>
+          )}
+          <div className="pt-1 flex items-center justify-between border-t border-white/10 mt-2">
+            <span className="font-semibold text-white">Wallet needed</span>
+            <span className="inline-flex items-center gap-1 text-emerald-300 font-semibold">
+              <ShieldCheck className="w-3.5 h-3.5" /> {fmt(total)}
+            </span>
+          </div>
         </div>
       </div>
     );
@@ -408,7 +451,9 @@ function WalletBalanceCard({ balance, total, shortBy, loading, onAddMoney }) {
           </p>
           <p className="text-2xl font-bold text-text mt-1">{fmt(balance)}</p>
           <p className="text-[11px] text-text-muted mt-0.5">
-            Fare due {fmt(total)}{' '}
+            {heldElsewhere > 0
+              ? `${fmt(heldElsewhere)} locked elsewhere \u00B7 ${fmt(available)} available`
+              : `You need ${fmt(total)} to book this ride`}{' '}
             {loading ? <span className="text-text-muted">…</span> : null}
           </p>
         </div>
@@ -416,6 +461,19 @@ function WalletBalanceCard({ balance, total, shortBy, loading, onAddMoney }) {
           <WalletIcon className="w-5 h-5" />
         </div>
       </div>
+
+      {total > 0 && bufferRupees > 0 && (
+        <div className="mt-3 rounded-2xl bg-white/60 border border-amber-200 px-3 py-2 text-[11px] text-text-secondary space-y-0.5">
+          <div className="flex items-center justify-between">
+            <span>Fare (charged now)</span>
+            <strong className="text-text">{fmt(fareTotal)}</strong>
+          </div>
+          <div className="flex items-center justify-between">
+            <span>Waiting reserve (held in wallet)</span>
+            <strong className="text-text">{fmt(bufferRupees)}</strong>
+          </div>
+        </div>
+      )}
 
       {total > 0 && (
         <div className="mt-3">
@@ -439,7 +497,7 @@ function WalletBalanceCard({ balance, total, shortBy, loading, onAddMoney }) {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-bold text-text">
-              You&apos;re {fmt(shortBy)} short
+              You need {fmt(shortBy)} more in your wallet
             </p>
             <p className="text-[11px] text-text-muted">
               Top up now &mdash; we&apos;ll retry your booking automatically.

@@ -77,6 +77,10 @@ export const deleteServicePricingService = async (id) => {
 };
 
 function validatePricingForType(serviceType, data) {
+  // Waiting-charge policy is shared across service types — every service
+  // gets a buffer collected upfront. Validate before the per-type checks
+  // so a buffer/cadence mismatch is surfaced as a single clear 400.
+  validateWaitingCharge(data.waitingCharge);
   if (serviceType === SERVICE_TYPES.HOURLY) {
     validateSlabs(data.slabs);
     validateCustomHours(data.customHours);
@@ -148,6 +152,52 @@ function validateHourlyStayAllowance(cfg) {
     throw new ApiError(
       400,
       'Accommodation allowance: thresholdHours must be greater than 0',
+    );
+  }
+}
+
+/**
+ * Enforce the buffer-vs-cadence invariant. The buffer collected at
+ * booking creation must always cover the worst-case waiting window the
+ * cadence can produce, otherwise the no-show flow could try to settle
+ * more than what was pre-collected. The worst case is:
+ *
+ *   freeWait gone → (maxNoShowPrompts + 1) prompts × promptMinutes
+ *                 + 1 final graceMinutes
+ *
+ * (`freeWaitingMinutes` is excluded because no minute inside it is
+ * billable — the cap only has to cover the *billable* tail.)
+ */
+function validateWaitingCharge(cfg) {
+  if (!cfg) return; // Mongoose default kicks in.
+  const free = Math.max(0, Number(cfg.freeWaitingMinutes) || 0);
+  const perMin = Math.max(0, Number(cfg.chargePerMinute) || 0);
+  const promptMins = Math.max(0, Number(cfg.noShowPromptMinutes) || 0);
+  const graceMins = Math.max(0, Number(cfg.noShowGraceMinutes) || 0);
+  const maxPrompts = Math.max(0, Math.min(5, Number(cfg.maxNoShowPrompts) || 0));
+  const maxBillable = Math.max(0, Number(cfg.maxBillableMinutes) || 0);
+
+  if (perMin > 0 && maxBillable <= 0) {
+    throw new ApiError(
+      400,
+      'Waiting charge: maxBillableMinutes must be greater than 0 when chargePerMinute is set',
+    );
+  }
+  const worstCase = (maxPrompts + 1) * promptMins + graceMins;
+  if (maxBillable > 0 && maxBillable < worstCase) {
+    throw new ApiError(
+      400,
+      `Waiting charge: maxBillableMinutes (${maxBillable}) must be ≥ ${worstCase} ` +
+        `(= (maxNoShowPrompts+1) × noShowPromptMinutes + noShowGraceMinutes) ` +
+        'so the pre-collected buffer always covers the worst-case wait.',
+    );
+  }
+  // Sanity: free wait shouldn't dwarf the whole cadence — that produces a
+  // free ride that auto-completes without ever reaching the prompt path.
+  if (free > 0 && perMin > 0 && maxBillable > 0 && free >= maxBillable + worstCase) {
+    throw new ApiError(
+      400,
+      'Waiting charge: freeWaitingMinutes is larger than the entire billable window — adjust the cadence.',
     );
   }
 }
@@ -620,10 +670,13 @@ export const estimateFareService = async ({
       subscription,
     });
 
+    const waitingBuffer = buildWaitingBufferPreview(pricing);
+
     return {
       pricingId: pricing._id,
       serviceType: pricing.serviceType,
       serviceName: pricing.name,
+      waitingBuffer,
       selectedSlab: slab
         ? {
             _id: slab._id,
@@ -695,6 +748,7 @@ export const estimateFareService = async ({
       pricingId: pricing._id,
       serviceType: pricing.serviceType,
       serviceName: pricing.name,
+      waitingBuffer: buildWaitingBufferPreview(pricing),
       isNightRide: isNight,
       fareBreakdown: breakdown,
       subscription: serializeSubscriptionForResponse(subscription),
@@ -703,6 +757,27 @@ export const estimateFareService = async ({
 
   throw new ApiError(400, 'Unknown service type');
 };
+
+/**
+ * Compact preview of the waiting-buffer policy for the customer UI.
+ * Surfaces what we'll pre-collect at booking creation, why, and how
+ * the unused portion is refunded — used by `FareCard` to render the
+ * "Waiting buffer (refundable)" line.
+ */
+function buildWaitingBufferPreview(pricing) {
+  const wc = pricing?.waitingCharge || {};
+  const perMin = Math.max(0, Number(wc.chargePerMinute) || 0);
+  const maxBillable = Math.max(0, Number(wc.maxBillableMinutes) || 0);
+  return {
+    bufferRupees: round2(maxBillable * perMin),
+    freeWaitingMinutes: Math.max(0, Number(wc.freeWaitingMinutes) || 0),
+    chargePerMinute: perMin,
+    maxBillableMinutes: maxBillable,
+    maxNoShowPrompts: Math.max(0, Number(wc.maxNoShowPrompts) || 0),
+    noShowPromptMinutes: Math.max(0, Number(wc.noShowPromptMinutes) || 0),
+    noShowGraceMinutes: Math.max(0, Number(wc.noShowGraceMinutes) || 0),
+  };
+}
 
 function serializeSubscriptionForResponse(subscription) {
   if (!subscription) return null;

@@ -144,18 +144,83 @@ const razorpaySchema = new mongoose.Schema(
  * when the payment service computes the amount due — see `payment` below for
  * the running balance.
  */
+/**
+ * Lifecycle of an extension request:
+ *
+ *   pending_otp     — customer hit Extend, server generated a 4-digit
+ *                     code and pushed it to the driver. Waiting for the
+ *                     customer to enter the code (they ask the driver
+ *                     in person, just like the ride-start OTP).
+ *   pending_payment — OTP verified, fareDelta is locked in. Waiting
+ *                     for the customer to confirm payment from wallet.
+ *   accepted        — payment debited; extension is live; bookedHours
+ *                     and timeline updated.
+ *   declined        — driver refused (rare, post-payment is a manual
+ *                     admin path).
+ *   expired         — customer didn't pay/verify within the window.
+ *
+ * Legacy "pending" rows from before this flow are coerced to
+ * `pending_payment` for back-compat (they had fareDelta + accepted by
+ * default; the server now requires the OTP+pay handshake).
+ */
 const extensionSchema = new mongoose.Schema(
   {
     requestedAt: { type: Date, default: Date.now },
     additionalHours: { type: Number, required: true, min: 0.5 },
     fareDelta: { type: Number, required: true, min: 0 },
+    /**
+     * Snapshot of the fare math at initiate time. Captures everything
+     * we need at `accepted` time to (a) credit the driver their share
+     * and (b) reconcile the platform commission ledger without having
+     * to re-query pricing — which may have shifted mid-ride.
+     *
+     *   { subtotal, serviceCharge, serviceChargePercent,
+     *     gst, gstPercent,
+     *     driverEarning, platformCommission, platformCommissionPercent,
+     *     ratePerHour }
+     */
+    breakdown: { type: mongoose.Schema.Types.Mixed, default: {} },
     status: {
       type: String,
-      enum: ['pending', 'accepted', 'declined', 'expired'],
-      default: 'accepted',
+      enum: [
+        'pending_otp',
+        'pending_payment',
+        'accepted',
+        'declined',
+        'expired',
+        // Legacy:
+        'pending',
+      ],
+      default: 'pending_otp',
     },
+    /**
+     * Customer reads this code aloud to the driver, who reads it back
+     * to the customer's screen. We never emit `code` to the customer
+     * directly — the driver app gets it via the EXTENSION_OTP socket
+     * event so it stays a true human handshake.
+     */
+    otp: {
+      code: { type: String, default: '' },
+      generatedAt: { type: Date, default: null },
+      verifiedAt: { type: Date, default: null },
+      attempts: { type: Number, default: 0 },
+      // When the OTP window closes the row auto-expires. The
+      // `bookingExtensionTimeout.service.js` watcher uses this.
+      expiresAt: { type: Date, default: null },
+    },
+    /** WalletTransaction _id for the fareDelta debit (once paid). */
+    paymentTxId: { type: mongoose.Schema.Types.ObjectId, ref: 'WalletTransaction', default: null },
+    paidAt: { type: Date, default: null },
     respondedAt: { type: Date, default: null },
     driverNotifiedAt: { type: Date, default: null },
+    /**
+     * True iff the driver actively dismissed the extension request
+     * from their app (vs. customer-cancel, timeout, or trip end). The
+     * customer-facing UX uses this to show a distinct "Driver couldn't
+     * process this — try again" message rather than the generic
+     * cancel/expire copy.
+     */
+    dismissedByDriver: { type: Boolean, default: false },
   },
   { _id: true, timestamps: false },
 );
@@ -389,10 +454,19 @@ const bookingSchema = new mongoose.Schema(
      * `startTripService` fires using the live admin policy:
      *
      *   billableWait = max(0, waitedMinutes − freeWaitingMinutes)
-     *   waitingCharge = billableWait × chargePerMinute
+     *   billableWait = min(billableWait, maxBillableMinutes)
+     *   chargeRupees = billableWait × perMinuteRupees
      *
-     * Persisted here so completion can add it to the customer's bill
-     * and the admin audit can see exactly what the driver waited.
+     * The buffer (`bufferRupees`) is pre-collected at booking creation
+     * so we never have to chase the customer for the waiting charge.
+     * At trip-end / no-show-auto-complete we settle:
+     *
+     *   bufferConsumedRupees = min(chargeRupees, bufferRupees)
+     *   bufferRefundRupees   = bufferRupees − bufferConsumedRupees
+     *
+     * `bufferRefundRupees` is credited back to the user's wallet via
+     * the same wallet ledger used elsewhere — `bufferRefundTxId` points
+     * at the resulting WalletTransaction row.
      */
     waiting: {
       waitedMinutes: { type: Number, default: 0, min: 0 },
@@ -400,6 +474,15 @@ const bookingSchema = new mongoose.Schema(
       chargeRupees: { type: Number, default: 0, min: 0 },
       freeMinutes: { type: Number, default: 0, min: 0 },
       perMinuteRupees: { type: Number, default: 0, min: 0 },
+      maxBillableMinutes: { type: Number, default: 0, min: 0 },
+      bufferRupees: { type: Number, default: 0, min: 0 },
+      bufferConsumedRupees: { type: Number, default: 0, min: 0 },
+      bufferRefundRupees: { type: Number, default: 0, min: 0 },
+      bufferRefundTxId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'WalletTransaction',
+        default: null,
+      },
       // Set when the no-show flow auto-completes a ride the customer
       // never showed up for. Lets the driver-history UI badge the
       // booking with a "no-show" pill and admin audits filter on it.

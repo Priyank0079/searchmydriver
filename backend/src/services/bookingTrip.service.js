@@ -9,7 +9,6 @@ import {
 import {
   BOOKING_STATUS,
   ACTIVE_BOOKING_STATUSES,
-  BOOKING_TYPE,
   PAYMENT_MODE,
   BOOKING_PAYMENT_STATUS,
   PAYMENT_POLICY,
@@ -42,6 +41,11 @@ import {
   recordPlatformRevenue,
   PLATFORM_REVENUE_SOURCE,
 } from './platformRevenue.service.js';
+import {
+  settleWaitingBuffer,
+  releaseBookingBufferHold,
+  clearPendingExtensionsOnTerminate,
+} from './bookingExtension.service.js';
 
 /**
  * Generate a numeric OTP of the configured length. We zero-pad so codes that
@@ -233,6 +237,49 @@ async function resolveEnRouteLeadMinutes(serviceType) {
 }
 
 /**
+ * Authoritative "are we close enough to pickup time?" guard, used by
+ * every driver-side trip transition (en-route, arrived, start). The
+ * caller passes a human verb so the thrown error reads naturally —
+ * "head out" for en-route, "mark arrival" for arrived, "start the
+ * ride" for start.
+ *
+ * IMPORTANT: we intentionally do NOT key this off `bookingType`.
+ * Earlier versions only blocked when `bookingType === 'scheduled'`,
+ * which created a fail-open hole the moment a row's `bookingType`
+ * field was missing / mis-tagged / migrated from an older shape. The
+ * only fact that matters here is what the customer told us about
+ * pickup time — `hourly.scheduledStartAt`. If that's more than
+ * `leadMinutes` in the future, the driver has no business being on
+ * their way to the pickup yet, full stop.
+ *
+ * Instant bookings get `scheduledStartAt = now` at creation time, so
+ * the guard is a no-op for them in practice (already past the
+ * threshold).
+ *
+ * Returns silently on pass; throws `ApiError(409)` on fail.
+ */
+async function assertWithinScheduledLead(booking, verb) {
+  const startMs = booking?.hourly?.scheduledStartAt
+    ? new Date(booking.hourly.scheduledStartAt).getTime()
+    : NaN;
+  if (!Number.isFinite(startMs)) return; // non-hourly / legacy row
+  const leadMinutes = await resolveEnRouteLeadMinutes(booking.serviceType);
+  const minutesAway = Math.ceil((startMs - Date.now()) / 60_000);
+  if (minutesAway > leadMinutes) {
+    const pickupAt = new Date(startMs);
+    throw new ApiError(
+      409,
+      `Pickup is scheduled for ${pickupAt.toLocaleString()} — you can ${verb} within ${leadMinutes} min of that time (still ${minutesAway} min away).`,
+      {
+        scheduledStartAt: pickupAt.toISOString(),
+        minutesUntilPickup: minutesAway,
+        leadMinutes,
+      },
+    );
+  }
+}
+
+/**
  * driver_assigned → en_route
  *
  * Driver tells us "I've started heading to the pickup". We block this
@@ -262,21 +309,11 @@ export async function markDriverEnRouteService(driverId, bookingId) {
     );
   }
 
-  if (booking.bookingType === BOOKING_TYPE.SCHEDULED) {
-    const startMs = booking?.hourly?.scheduledStartAt
-      ? new Date(booking.hourly.scheduledStartAt).getTime()
-      : NaN;
-    if (Number.isFinite(startMs)) {
-      const leadMinutes = await resolveEnRouteLeadMinutes(booking.serviceType);
-      const minutesAway = Math.ceil((startMs - Date.now()) / 60_000);
-      if (minutesAway > leadMinutes) {
-        throw new ApiError(
-          409,
-          `Pickup is still ${minutesAway} min away — you can head out within ${leadMinutes} min of the scheduled time. Try again closer to pickup.`,
-        );
-      }
-    }
-  }
+  // Time gate — based purely on `hourly.scheduledStartAt`, not on
+  // any `bookingType` flag. See `assertWithinScheduledLead` for the
+  // reasoning. Instant bookings sail through (their scheduled time
+  // is "now") so the check is free for the hot path.
+  await assertWithinScheduledLead(booking, 'head out');
 
   booking.status = BOOKING_STATUS.EN_ROUTE;
   booking.timeline.enRouteAt = new Date();
@@ -355,6 +392,14 @@ function haversineMeters(a, b) {
 export async function markDriverArrivedService(driverId, bookingId, { driverCoords } = {}) {
   const booking = await loadDriverBooking(driverId, bookingId);
   assertStatus(booking, [BOOKING_STATUS.EN_ROUTE], 'mark arrival');
+
+  // Defence-in-depth: the en-route gate already ran, but if a driver
+  // somehow ended up in EN_ROUTE outside the lead window (stale FE
+  // state, scripted request, clock skew between save + arrival), don't
+  // let them lock arrival in. Arrival is what starts the no-show
+  // timers and the customer-facing free-wait window, so a too-early
+  // tap would silently start charging.
+  await assertWithinScheduledLead(booking, 'mark arrival');
 
   const pickupCoords = (() => {
     const c = booking.pickup?.location?.coordinates;
@@ -462,6 +507,11 @@ export async function startTripService(driverId, bookingId, { otp } = {}) {
   const booking = await loadDriverBooking(driverId, bookingId);
   assertStatus(booking, [BOOKING_STATUS.ARRIVED], 'start the ride');
 
+  // Same belt-and-braces guard as `markDriverArrivedService`. The
+  // customer's clock for waiting / billing literally starts ticking
+  // off this transition, so a too-early start would short-charge.
+  await assertWithinScheduledLead(booking, 'start the ride');
+
   const expected = booking.rideStartOtp?.code;
   if (!expected) {
     throw new ApiError(
@@ -536,34 +586,56 @@ async function applyWaitingChargeOnStart(booking, startedAt, flags = {}) {
       waitedMinutes: 0,
       billableMinutes: 0,
       chargeRupees: 0,
-      freeMinutes: 0,
-      perMinuteRupees: 0,
+      // Don't wipe the buffer snapshot — we still need `bufferRupees`
+      // for settlement at trip-end. Only clear the per-charge counters.
       noShow: !!flags.noShow,
     });
     return;
   }
-  let freeMinutes = 0;
-  let perMinute = 0;
-  try {
-    const pricing = await ServicePricing.findOne({
-      serviceType: booking.serviceType,
-      isActive: true,
-    }).lean();
-    freeMinutes = Math.max(
-      0,
-      Number(pricing?.waitingCharge?.freeWaitingMinutes) || 0,
-    );
-    perMinute = Math.max(
-      0,
-      Number(pricing?.waitingCharge?.chargePerMinute) || 0,
-    );
-  } catch (err) {
-    console.warn('[bookingTrip] waiting-charge pricing lookup failed:', err?.message);
+  // Prefer the policy snapshotted onto the booking at creation. Fall
+  // back to live pricing only for legacy bookings created before the
+  // snapshot landed (those won't have `perMinuteRupees` filled in).
+  const snapshot = booking.waiting || {};
+  let freeMinutes = Number(snapshot.freeMinutes);
+  let perMinute = Number(snapshot.perMinuteRupees);
+  const maxBillable = Number(snapshot.maxBillableMinutes) || 0;
+  if (!Number.isFinite(freeMinutes) || !Number.isFinite(perMinute)) {
+    try {
+      const pricing = await ServicePricing.findOne({
+        serviceType: booking.serviceType,
+        isActive: true,
+      }).lean();
+      freeMinutes = Math.max(
+        0,
+        Number(pricing?.waitingCharge?.freeWaitingMinutes) || 0,
+      );
+      perMinute = Math.max(
+        0,
+        Number(pricing?.waitingCharge?.chargePerMinute) || 0,
+      );
+    } catch (err) {
+      console.warn('[bookingTrip] waiting-charge pricing lookup failed:', err?.message);
+      freeMinutes = 0;
+      perMinute = 0;
+    }
   }
+  freeMinutes = Math.max(0, freeMinutes || 0);
+  perMinute = Math.max(0, perMinute || 0);
 
+  // Compute billable in raw milliseconds first, then convert. Doing
+  // `Math.ceil(waitedMs / 60000)` BEFORE subtracting the free window
+  // was the old behaviour and it bit us: a driver who started within
+  // the free wait (say 10s into a 30s free window) saw `waitedMinutes
+  // = 1`, billable = 1 − 0.5 = 0.5, and was billed for 30s of "wait"
+  // that never happened. We now only bill the strictly post-free
+  // duration.
   const waitedMs = Math.max(0, startedAt.getTime() - new Date(arrivedAt).getTime());
-  const waitedMinutes = Math.ceil(waitedMs / 60000);
-  const billableMinutes = Math.max(0, waitedMinutes - freeMinutes);
+  const waitedMinutes = Math.round((waitedMs / 60000) * 100) / 100;
+  const freeMs = Math.max(0, freeMinutes) * 60000;
+  const billableMs = Math.max(0, waitedMs - freeMs);
+  let billableMinutes = billableMs / 60000;
+  if (maxBillable > 0) billableMinutes = Math.min(billableMinutes, maxBillable);
+  billableMinutes = Math.round(billableMinutes * 100) / 100;
   const chargeRupees = Math.round(billableMinutes * perMinute * 100) / 100;
 
   booking.waiting = booking.waiting || {};
@@ -601,6 +673,18 @@ export async function completeTripService(driverId, bookingId) {
   ) {
     booking.paymentStatus = BOOKING_PAYMENT_STATUS.PENDING;
   }
+
+  // Settle the pre-collected waiting buffer: caps `waiting.chargeRupees`
+  // at the buffer and credits the unused portion back to the user's
+  // wallet. Best-effort — wallet failure is logged inside the helper so
+  // trip completion never wedges on a refund.
+  await settleWaitingBuffer(booking);
+
+  // Sweep any mid-flow extension intents (OTP unverified / unpaid).
+  // The customer no longer has the ride active, so a stale row would
+  // leave the driver's OTP banner glued to their screen and would also
+  // be a fraud vector if the FE ever resumed it.
+  await clearPendingExtensionsOnTerminate(booking, 'trip_completed');
 
   await booking.save();
 
@@ -855,6 +939,12 @@ async function terminateBookingByDriver(
     booking.dispatch.pendingOfferIds = [];
     booking.dispatch.currentExpiresAt = null;
   }
+  // Driver-cancel termination — release the customer's reserved
+  // waiting buffer back to spendable (it was never used).
+  await releaseBookingBufferHold(booking);
+  // Also sweep any pending extension intent so the driver banner /
+  // customer modal don't outlive the booking.
+  await clearPendingExtensionsOnTerminate(booking, 'driver_cancelled');
   await booking.save();
 
   cancelPaymentTimeout(booking._id);

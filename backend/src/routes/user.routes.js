@@ -34,7 +34,10 @@ import {
   cancelBooking,
   createBookingPayment,
   verifyBookingPayment,
-  createBookingExtension,
+  initiateBookingExtension,
+  verifyBookingExtensionOtp,
+  payBookingExtension,
+  cancelBookingExtension,
   respondToNoShowPrompt,
 } from '../controllers/booking.controller.js';
 import {
@@ -78,7 +81,13 @@ router.get('/bookings/:id', getBookingById);
 router.post('/bookings/:id/cancel', cancelBooking);
 router.post('/bookings/:id/pay', createBookingPayment);
 router.post('/bookings/:id/verify-payment', verifyBookingPayment);
-router.post('/bookings/:id/extensions', createBookingExtension);
+// Extension flow is a 3-step handshake (initiate → driver OTP →
+// customer verifies → customer pays). The old single-shot endpoint is
+// gone; the service throws 410 if anything still calls it.
+router.post('/bookings/:id/extensions/initiate', initiateBookingExtension);
+router.post('/bookings/:id/extensions/verify-otp', verifyBookingExtensionOtp);
+router.post('/bookings/:id/extensions/pay', payBookingExtension);
+router.post('/bookings/:id/extensions/cancel', cancelBookingExtension);
 router.post('/bookings/:id/noshow/respond', respondToNoShowPrompt);
 
 // Wallet — read + Razorpay top-up. Mutations go through the

@@ -136,6 +136,18 @@ const userSchema = new mongoose.Schema(
       balance: { type: Number, default: 0, min: 0 },
       totalCredited: { type: Number, default: 0, min: 0 },
       totalSpent: { type: Number, default: 0, min: 0 },
+      /**
+       * Soft-held portion of `balance` reserved against active bookings'
+       * waiting-charge buffer. The money stays in the wallet (`balance`
+       * is NOT decremented) but the user cannot spend it elsewhere
+       * because every debit checks `balance − heldRupees ≥ amount`.
+       *
+       * Lifecycle:
+       *   booking created → heldRupees += booking.waiting.bufferRupees
+       *   trip completes  → actual waiting debited from balance, hold released
+       *   booking cancel  → hold released (no debit)
+       */
+      heldRupees: { type: Number, default: 0, min: 0 },
       currency: { type: String, default: 'INR', trim: true },
     },
 

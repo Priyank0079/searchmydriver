@@ -41,10 +41,18 @@ const WalletPage = () => {
     }).catch(() => {});
   };
 
-  const balanceLabel = useMemo(
-    () => `₹${Number(wallet.balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`,
-    [wallet.balance],
-  );
+  // Show the truly-spendable amount as the headline number. The raw
+  // `balance` and the locked-against-bookings amount appear below it so
+  // the user can see why they may have less to spend than they expect.
+  const heldRupees = Number(wallet.heldRupees || 0);
+  const balance = Number(wallet.balance || 0);
+  const available =
+    wallet.availableRupees != null
+      ? Number(wallet.availableRupees)
+      : Math.max(0, balance - heldRupees);
+  const fmt = (n) =>
+    `\u20B9${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+  const balanceLabel = useMemo(() => fmt(available), [available]);
 
   return (
     <div className="flex-1 flex flex-col bg-bg min-h-dvh">
@@ -84,6 +92,11 @@ const WalletPage = () => {
             Available balance
           </p>
           <p className="text-3xl font-bold mt-1">{balanceLabel}</p>
+          {heldRupees > 0 && (
+            <p className="text-[11px] text-emerald-200 mt-1">
+              {fmt(heldRupees)} held against active bookings &middot; total balance {fmt(balance)}
+            </p>
+          )}
           <div className="mt-4 grid grid-cols-2 gap-3 text-[11px] text-white/80">
             <div>
               <p className="uppercase tracking-wide">Lifetime added</p>

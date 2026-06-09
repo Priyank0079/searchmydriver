@@ -15,6 +15,7 @@ import {
   ArrowLeft,
   Calendar,
   Car,
+  Pencil,
 } from 'lucide-react';
 import Card from '../../../../components/Card';
 import Button from '../../../../components/Button';
@@ -101,9 +102,13 @@ const DriverAssignedPage = () => {
   );
   const applyUpdate = useUserActiveBookingStore((s) => s.applyUpdate);
   const cancelBooking = useUserActiveBookingStore((s) => s.cancelBooking);
-  const createExtension = useUserActiveBookingStore((s) => s.createExtension);
+  const initiateExtension = useUserActiveBookingStore((s) => s.initiateExtension);
+  const verifyExtensionOtp = useUserActiveBookingStore((s) => s.verifyExtensionOtp);
+  const payExtension = useUserActiveBookingStore((s) => s.payExtension);
+  const cancelExtension = useUserActiveBookingStore((s) => s.cancelExtension);
   const draftReset = useBookingDraftStore((s) => s.reset);
   const fetchWallet = useUserWalletStore((s) => s.fetchWallet);
+  const wallet = useUserWalletStore((s) => s.wallet);
   const { emit, isConnected } = useSocket();
 
   const [cancelling, setCancelling] = useState(false);
@@ -150,6 +155,40 @@ const DriverAssignedPage = () => {
     applyUpdate(payload);
   });
 
+  // Driver hit Dismiss on the OTP banner. We need to:
+  //   1. Tell the customer in plain English (toast).
+  //   2. Stamp `extensionRejection` so the open ExtendRideModal can
+  //      show an inline "Driver couldn't accept this — try again"
+  //      state, with the same `extensionId` that was just declined.
+  //   3. Let `applyUpdate` (via the BOOKING_UPDATED echo the server
+  //      also emits) refresh the booking so the pending row is no
+  //      longer pending and the sticky banner falls away.
+  const [extensionRejection, setExtensionRejection] = useState(null);
+  useSocketEvent(S2C_EVENTS.BOOKING_EXTENSION_RESOLVED, (payload) => {
+    if (payload?.stage !== 'dismissed_by_driver') return;
+    if (booking?._id && String(booking._id) !== String(payload.bookingId)) return;
+    setExtensionRejection({
+      extensionId: payload.extensionId,
+      additionalHours: payload.additionalHours,
+      fareDelta: payload.fareDelta,
+      at: Date.now(),
+    });
+    toast.error(
+      'Driver dismissed this extension. You can try again.',
+      { duration: 5000 },
+    );
+    // Force-refresh the booking — the BOOKING_UPDATED echo handles
+    // it too, but pulling explicitly avoids a flicker where the
+    // sticky banner briefly shows a now-declined row.
+    refreshCurrentOrActive?.().catch(() => {});
+    // Reopen the modal so the customer immediately sees the
+    // dismissed state + Retry CTA. If they don't want to retry,
+    // closing the modal is one tap. This is friendlier than leaving
+    // them with just a toast.
+    setExtensionPromptDismissedAt(null);
+    setExtensionPromptOpen(true);
+  });
+
   // Scheduled-ride countdown reminder. The same event is consumed on
   // SearchingDriverPage; here it covers the case where a driver was
   // already assigned (e.g. 15-minute reminder fires while the booking
@@ -164,9 +203,11 @@ const DriverAssignedPage = () => {
   });
 
   // No-show prompt: backend pings us when the driver has been at the
-  // pickup for `noShowPromptMinutes` without the trip starting. We
-  // open a modal asking the customer if they're still coming, with a
-  // deadline matching the server-side auto-complete timer.
+  // pickup past the free-wait window and the user hasn't shown up. The
+  // modal renders a server-anchored deadline countdown. Cadence is:
+  //   prompt 1 → user says yes → prompt 2 → … → prompt N+1 (final) →
+  //   grace → auto-complete. `isFinal: true` switches the copy to a
+  //   terminal warning since a "yes" no longer resets the cycle.
   const [noShowPrompt, setNoShowPrompt] = useState(null);
   useSocketEvent(S2C_EVENTS.BOOKING_NOSHOW_PROMPT, (payload) => {
     if (!payload?.bookingId) return;
@@ -176,6 +217,9 @@ const DriverAssignedPage = () => {
     setNoShowPrompt({
       promptDeadlineAt: payload.promptDeadlineAt,
       graceMinutes: payload.graceMinutes,
+      promptIndex: payload.promptIndex,
+      maxPrompts: payload.maxPrompts,
+      isFinal: !!payload.isFinal,
     });
   });
   // Re-attach the prompt on page reload — backend already stamped the
@@ -196,9 +240,18 @@ const DriverAssignedPage = () => {
       return;
     }
     if (!noShowPrompt) {
-      setNoShowPrompt({ promptDeadlineAt: deadline, graceMinutes: null });
+      const firedFor = Number(booking?.noShow?.firedFor || 0);
+      setNoShowPrompt({
+        promptDeadlineAt: deadline,
+        graceMinutes: null,
+        promptIndex: firedFor || null,
+        maxPrompts: null,
+        // Without the live payload we can't tell isFinal for sure;
+        // the modal copy degrades gracefully (no terminal warning).
+        isFinal: false,
+      });
     }
-  }, [booking?.noShow?.promptDeadlineAt, booking?.noShow?.customerResponse]);
+  }, [booking?.noShow?.promptDeadlineAt, booking?.noShow?.customerResponse, booking?.noShow?.firedFor]);
 
   const respondToNoShow = useUserActiveBookingStore((s) => s.respondToNoShow);
   const handleNoShowAnswer = async (answer) => {
@@ -382,6 +435,38 @@ const DriverAssignedPage = () => {
     setExtensionPromptOpen(true);
   }, [rideTimer.shouldPromptExtension, extensionPromptOpen, extensionPromptDismissedAt]);
 
+  // Pick the most recent extension still in a handshake state. This is
+  // what powers both the modal's resume-on-open and the sticky banner
+  // that nudges the customer back to finish payment when they close
+  // the modal mid-flow.
+  const pendingExtension = useMemo(() => {
+    const list = booking?.extensions || [];
+    // Scan back-to-front so the freshest intent wins (we only ever have
+    // one open at a time anyway — initiate refuses to stack).
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      const e = list[i];
+      if (e?.status === 'pending_otp' || e?.status === 'pending_payment') {
+        return e;
+      }
+    }
+    return null;
+  }, [booking?.extensions]);
+
+  // Auto-reopen the modal the instant a pending_payment lands and the
+  // sheet isn't already up — covers the "user closed it but the OTP is
+  // already burned" case so the next render brings them straight to Pay.
+  useEffect(() => {
+    if (!pendingExtension) return;
+    if (extensionPromptOpen) return;
+    if (pendingExtension.status !== 'pending_payment') return;
+    // Respect the recent-dismissal cooldown so a stubborn user isn't
+    // re-prompted constantly. The sticky banner below stays visible the
+    // whole time so they can come back when they're ready.
+    if (extensionPromptDismissedAt && Date.now() - extensionPromptDismissedAt < 30_000) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot resume
+    setExtensionPromptOpen(true);
+  }, [pendingExtension, extensionPromptOpen, extensionPromptDismissedAt]);
+
   const handleCancel = async () => {
     if (cancelling) return;
     setCancelConfirmOpen(true);
@@ -459,8 +544,14 @@ const DriverAssignedPage = () => {
   const isPaid = booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID;
   const isAwaitingPayment = booking.status === BOOKING_STATUS.AWAITING_PAYMENT;
   const baseTotal = booking.fareSnapshot?.total || 0;
+  // Only count extensions the customer has actually paid for.
+  // Pending OTP / pending payment rows are intent, not commitment —
+  // showing them in the headline total before the customer agreed +
+  // paid was confusing ("why did the price just jump when I haven't
+  // paid?").
   const extensionsTotal = (booking.extensions || []).reduce(
-    (sum, ext) => sum + (ext?.fareDelta || 0),
+    (sum, ext) =>
+      sum + (ext?.status === 'accepted' ? Number(ext.fareDelta) || 0 : 0),
     0,
   );
   const total = baseTotal + extensionsTotal;
@@ -572,6 +663,35 @@ const DriverAssignedPage = () => {
         <div className="relative z-10 flex justify-center pointer-events-none" style={{ marginTop: 'auto' }}>
           {/* This is absolutely positioned in the middle third of the screen */}
         </div>
+      )}
+
+      {/* ═══════════════════════════════════════════
+          LAYER 3.5 — Pending extension nudge
+          Surfaces when there's an extension still mid-handshake
+          (driver has the OTP / customer hasn't paid) but the modal
+          is closed. Tap = reopen the modal at the right step.
+          ═══════════════════════════════════════════ */}
+      {pendingExtension && !extensionPromptOpen && (
+        <PendingExtensionBanner
+          extension={pendingExtension}
+          onResume={() => {
+            setExtensionPromptDismissedAt(null);
+            setExtensionPromptOpen(true);
+          }}
+          onChangeHours={async () => {
+            try {
+              await cancelExtension({ extensionId: pendingExtension._id });
+              setExtensionPromptDismissedAt(null);
+              setExtensionPromptOpen(true);
+            } catch (err) {
+              toast.error(
+                err?.response?.data?.message ||
+                  err?.message ||
+                  'Could not cancel extension',
+              );
+            }
+          }}
+        />
       )}
 
       {/* ═══════════════════════════════════════════
@@ -860,9 +980,36 @@ const DriverAssignedPage = () => {
         onClose={() => {
           setExtensionPromptOpen(false);
           setExtensionPromptDismissedAt(Date.now());
+          // Refresh wallet on close so the next time the user re-opens
+          // the modal (or browses to their wallet) they see the up-to-
+          // date held / available amounts.
+          fetchWallet().catch(() => {});
         }}
-        onSubmit={(hours) => createExtension(hours)}
+        onInitiate={(hours) => initiateExtension(hours)}
+        onVerifyOtp={(args) => verifyExtensionOtp(args)}
+        onPay={async (args) => {
+          const result = await payExtension(args);
+          // Wallet just took a debit — sync the global wallet snapshot
+          // so the home / wallet pages don't show stale numbers.
+          fetchWallet().catch(() => {});
+          return result;
+        }}
+        onCancelExtension={async (args) => {
+          await cancelExtension(args);
+          // The cancel updates the booking server-side and the patch
+          // arrives via socket; pulling wallet too is defensive.
+          fetchWallet().catch(() => {});
+        }}
+        pendingExtension={pendingExtension}
+        extensionRejection={extensionRejection}
+        onClearRejection={() => setExtensionRejection(null)}
+        onWalletRefresh={() => fetchWallet().catch(() => {})}
         extraHourRate={extraHourRate}
+        walletBalance={
+          wallet?.availableRupees != null
+            ? Number(wallet.availableRupees)
+            : Math.max(0, Number(wallet?.balance || 0) - Number(wallet?.heldRupees || 0))
+        }
         remainingMinutes={
           rideTimer.remainingSeconds != null
             ? Math.ceil(rideTimer.remainingSeconds / 60)
@@ -875,6 +1022,9 @@ const DriverAssignedPage = () => {
       <NoShowPromptModal
         open={Boolean(noShowPrompt)}
         deadline={noShowPrompt?.promptDeadlineAt}
+        promptIndex={noShowPrompt?.promptIndex}
+        maxPrompts={noShowPrompt?.maxPrompts}
+        isFinal={noShowPrompt?.isFinal}
         onYes={() => handleNoShowAnswer('on_my_way')}
         onNo={() => handleNoShowAnswer('not_coming')}
       />
@@ -1079,7 +1229,15 @@ function formatRideClock(seconds) {
  * urgency, and forces an explicit Yes / No answer (no overlay-click
  * dismiss — silence is what triggers auto-complete).
  */
-function NoShowPromptModal({ open, deadline, onYes, onNo }) {
+function NoShowPromptModal({
+  open,
+  deadline,
+  promptIndex,
+  maxPrompts,
+  isFinal,
+  onYes,
+  onNo,
+}) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!open) return undefined;
@@ -1100,30 +1258,65 @@ function NoShowPromptModal({ open, deadline, onYes, onNo }) {
       ? `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
       : '—';
 
+  // The final prompt is terminal — saying yes no longer resets the
+  // cycle, so we swap to a warning theme and reword the copy.
+  //
+  // Clamp the displayed index so a misbehaving (or pre-fix) backend
+  // never shows a nonsensical "Reminder 5 of 3". Any prompt beyond the
+  // final one is rendered as the final.
+  const showProgress = Number.isFinite(promptIndex) && Number.isFinite(maxPrompts);
+  const totalPrompts = showProgress ? Number(maxPrompts) + 1 : null;
+  const displayIndex = showProgress
+    ? Math.min(Number(promptIndex), totalPrompts)
+    : null;
+
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
       <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl animate-fade-in-up">
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center">
+          <div
+            className={`w-12 h-12 rounded-full flex items-center justify-center ${
+              isFinal ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+            }`}
+          >
             <Clock className="w-6 h-6" />
           </div>
-          <div>
-            <p className="text-base font-bold text-text">Are you on your way?</p>
+          <div className="flex-1 min-w-0">
+            <p className="text-base font-bold text-text">
+              {isFinal ? 'Last reminder — are you coming?' : 'Are you on your way?'}
+            </p>
             <p className="text-xs text-text-muted mt-0.5">
-              Your driver has been waiting at the pickup.
+              {showProgress
+                ? `Reminder ${displayIndex} of ${totalPrompts}`
+                : 'Your driver has been waiting at the pickup.'}
             </p>
           </div>
         </div>
         <p className="text-sm text-text-secondary leading-snug">
-          If you don&rsquo;t respond, the trip will be closed out as a no-show
-          and you&rsquo;ll be charged the full fare including the waiting time.
+          {isFinal
+            ? `If you don't respond in time, the trip will be auto-closed as a no-show. The driver gets paid in full and the waiting time is deducted from your refundable buffer.`
+            : `Tap "Yes" to keep your ride. If you don't respond, we'll check in again. After ${(maxPrompts != null ? maxPrompts : 'a few')} reminders the ride is auto-closed.`}
         </p>
         {remainingSec != null && (
-          <div className="mt-4 rounded-2xl bg-amber-50 border border-amber-200 px-4 py-3 flex items-center justify-between">
-            <span className="text-xs text-amber-800 font-medium">
-              Auto-close in
+          <div
+            className={`mt-4 rounded-2xl px-4 py-3 flex items-center justify-between ${
+              isFinal
+                ? 'bg-red-50 border border-red-200'
+                : 'bg-amber-50 border border-amber-200'
+            }`}
+          >
+            <span
+              className={`text-xs font-medium ${
+                isFinal ? 'text-red-800' : 'text-amber-800'
+              }`}
+            >
+              {isFinal ? 'Auto-close in' : 'Next reminder in'}
             </span>
-            <span className="text-xl font-bold text-amber-700 tabular-nums">
+            <span
+              className={`text-xl font-bold tabular-nums ${
+                isFinal ? 'text-red-700' : 'text-amber-700'
+              }`}
+            >
               {countdown}
             </span>
           </div>
@@ -1136,6 +1329,87 @@ function NoShowPromptModal({ open, deadline, onYes, onNo }) {
             No, I&rsquo;m not coming
           </Button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Persistent CTA chip that nudges the customer back to finish an
+ * extension they dismissed mid-handshake. Hides itself the moment the
+ * modal opens so the user only sees one entry point at a time.
+ *
+ *   pending_otp     → "Driver shared a code · Continue"
+ *   pending_payment → "Extension ready · Pay ₹X"
+ *
+ * Primary tap → reopen the modal at the right step.
+ * Secondary tap → cancel server-side and reopen at the hours picker
+ * so the customer can pick a different duration.
+ */
+function PendingExtensionBanner({ extension, onResume, onChangeHours }) {
+  const isPay = extension?.status === 'pending_payment';
+  return (
+    <div className="relative z-20 px-3 pb-2 pointer-events-auto">
+      <div
+        className={`rounded-2xl shadow-xl border px-3 py-2.5 flex items-center gap-3 ${
+          isPay
+            ? 'bg-emerald-50 border-emerald-200'
+            : 'bg-amber-50 border-amber-200'
+        }`}
+      >
+        <div
+          className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+            isPay ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'
+          }`}
+        >
+          <Clock className="w-4 h-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p
+            className={`text-[12px] font-bold ${
+              isPay ? 'text-emerald-900' : 'text-amber-900'
+            }`}
+          >
+            {isPay
+              ? `Extension ready · Pay \u20B9${extension.fareDelta}`
+              : 'Driver shared a code · Enter to continue'}
+          </p>
+          <p
+            className={`text-[10px] leading-tight ${
+              isPay ? 'text-emerald-800' : 'text-amber-800'
+            }`}
+          >
+            {isPay
+              ? `OTP verified for +${extension.additionalHours}h. Tap to pay or change hours.`
+              : `+${extension.additionalHours}h queued. Ask your driver for the code.`}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onResume}
+          className={`text-[11px] font-bold px-3 h-8 rounded-xl shrink-0 ${
+            isPay
+              ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+              : 'bg-amber-600 text-white hover:bg-amber-700'
+          }`}
+        >
+          {isPay ? 'Pay' : 'Open'}
+        </button>
+        {onChangeHours && (
+          <button
+            type="button"
+            onClick={onChangeHours}
+            aria-label="Change hours"
+            title="Change hours"
+            className={`w-8 h-8 rounded-xl shrink-0 flex items-center justify-center bg-white border ${
+              isPay
+                ? 'border-emerald-200 text-emerald-800 hover:bg-emerald-100'
+                : 'border-amber-200 text-amber-800 hover:bg-amber-100'
+            }`}
+          >
+            <Pencil className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
     </div>
   );

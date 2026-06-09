@@ -97,6 +97,27 @@ export const S2C_EVENTS = Object.freeze({
   BOOKING_EXTENSION_RESOLVED: 'booking:extension:resolved',
 
   /**
+   * Customer hit Extend → server generated a 4-digit OTP. Pushed to the
+   * driver app so they can read it back to the customer who types it in.
+   *
+   * Payload: `{ bookingId, extensionId, otp, additionalHours,
+   *            fareDelta, expiresAt }`
+   *
+   * The OTP is included in clear text because driver↔customer handshake
+   * is the whole point of this event (just like RIDE_START_OTP today).
+   */
+  BOOKING_EXTENSION_OTP: 'booking:extension:otp',
+
+  /**
+   * Extension paid and accepted. Drives the driver UI to extend the
+   * remaining-time bar and the user UI to dismiss the modal.
+   *
+   * Payload: `{ bookingId, extension, extensions, paymentStatus,
+   *            amountDue, effectiveTotal, walletBalance }`
+   */
+  BOOKING_EXTENSION_PAID: 'booking:extension:paid',
+
+  /**
    * No-show flow: driver has been at pickup past `noShowPromptMinutes`
    * without the trip starting. User app shows a modal asking "are you
    * coming?". Payload carries `{ bookingId, promptDeadlineAt }` so the

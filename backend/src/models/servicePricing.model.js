@@ -23,18 +23,48 @@ const waitingChargeSchema = new mongoose.Schema(
     freeWaitingMinutes: { type: Number, default: 15, min: 0 },
     chargePerMinute: { type: Number, default: 2, min: 0 },
     /**
-     * Minutes after arrival to wait before pinging the customer with a
-     * "Are you coming?" prompt. Triggered by the no-show scheduler.
+     * Minutes between consecutive "Are you coming?" prompts to the
+     * customer after the free-wait window expires. The first prompt
+     * fires `freeWaitingMinutes + noShowPromptMinutes` after arrival.
+     * If the customer responds "on my way" we re-arm another prompt
+     * the same number of minutes later. After `maxNoShowPrompts` such
+     * cycles the next prompt becomes terminal — see below.
      */
-    noShowPromptMinutes: { type: Number, default: 30, min: 0 },
+    noShowPromptMinutes: { type: Number, default: 15, min: 0 },
     /**
-     * Grace minutes the customer has to respond to the no-show prompt
-     * once it fires. After this window expires (or the customer says
+     * Grace minutes the customer has to respond to the FINAL (terminal)
+     * no-show prompt. After this window expires (or the customer says
      * "no") the trip is auto-completed — the driver gets paid in full
-     * for waiting (no-show fee covered by the standard waiting +
-     * fare math), and the booking is closed.
+     * plus the accrued waiting charge (capped by the pre-collected
+     * buffer, see below).
      */
     noShowGraceMinutes: { type: Number, default: 5, min: 0 },
+    /**
+     * Hard cap on how many times we re-prompt before the cycle goes
+     * terminal. 0 reproduces the legacy single-prompt behaviour
+     * (one prompt → grace → auto-complete). With the default of 2:
+     *   prompt #1 → user says yes →
+     *   prompt #2 → user says yes →
+     *   prompt #3 (terminal) → grace → auto-complete.
+     */
+    maxNoShowPrompts: { type: Number, default: 2, min: 0, max: 5 },
+    /**
+     * Hard ceiling on billable wait minutes. Drives both the bill cap
+     * (we never charge for more than this many minutes of wait,
+     * regardless of cadence) and the buffer size collected at booking
+     * creation:
+     *   bufferRupees = maxBillableMinutes × chargePerMinute
+     *
+     * The buffer is debited from the wallet alongside the base fare so
+     * we always have money in hand for the no-show case. The unused
+     * portion is credited back to the wallet at trip-end.
+     *
+     * The pricing validator enforces
+     *   maxBillableMinutes ≥ (maxNoShowPrompts + 1) × noShowPromptMinutes
+     *                      + noShowGraceMinutes
+     * so the buffer always covers the worst-case cadence.
+     */
+    maxBillableMinutes: { type: Number, default: 45, min: 0 },
   },
   { _id: false },
 );

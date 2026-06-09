@@ -50,9 +50,21 @@ export async function getWalletService(userId) {
   if (!userId) throw new ApiError(400, 'userId is required');
   const user = await User.findById(userId).select('wallet name').lean();
   if (!user) throw new ApiError(404, 'User not found');
-  const wallet = user.wallet || { balance: 0, totalCredited: 0, totalSpent: 0, currency: 'INR' };
+  const wallet = user.wallet || {
+    balance: 0,
+    totalCredited: 0,
+    totalSpent: 0,
+    heldRupees: 0,
+    currency: 'INR',
+  };
+  const balance = round2(wallet.balance || 0);
+  const heldRupees = round2(wallet.heldRupees || 0);
   return {
-    balance: round2(wallet.balance || 0),
+    balance,
+    heldRupees,
+    // Spendable balance for new bookings / top-down debits. The held
+    // portion is locked against active bookings' waiting buffers.
+    availableRupees: round2(Math.max(0, balance - heldRupees)),
     totalCredited: round2(wallet.totalCredited || 0),
     totalSpent: round2(wallet.totalSpent || 0),
     currency: wallet.currency || 'INR',
@@ -134,12 +146,20 @@ export async function creditWalletService({
 
 /**
  * Debit `amount` rupees from the user's wallet if and only if the
- * balance covers it. Returns the persisted WalletTransaction document.
+ * available balance covers it. Returns the persisted WalletTransaction
+ * document.
+ *
+ * "Available" = `balance − heldRupees`. The held portion is locked
+ * against active bookings' waiting-charge buffer and cannot be spent on
+ * anything else. The settle path (`settleWaitingBuffer`) bypasses this
+ * check via `bypassHeld: true` because it is precisely the operation
+ * that turns held funds into a real debit.
  *
  * Throws `ApiError(402, 'Insufficient wallet balance', { ... })` with
- * `{ requiredAmount, walletBalance, shortBy }` in `data` when the
- * balance is too low — the FE uses this to prompt a top-up of exactly
- * the right amount.
+ * `{ requiredAmount, walletBalance, availableRupees, heldRupees,
+ * shortBy }` in `data` when the available balance is too low — the FE
+ * uses this to prompt a top-up of exactly the right amount and explain
+ * the held portion.
  */
 export async function debitWalletService({
   userId,
@@ -149,31 +169,64 @@ export async function debitWalletService({
   refType = '',
   refId = '',
   initiatedBy = null,
+  /**
+   * If true, the held portion of the wallet is treated as spendable for
+   * this debit. Used by the waiting-buffer settlement path which is
+   * authorised to convert a previously-held amount into a real debit.
+   * Defaults to false so all other paths honour the hold.
+   */
+  bypassHeld = false,
 }) {
   const amt = ensurePositive(amount, 'amount');
   if (!Object.values(WALLET_TXN_SOURCE).includes(source)) {
     throw new ApiError(400, 'Invalid wallet transaction source');
   }
 
-  // Atomic guard: only debit if balance >= amount. If the filter fails
-  // we re-read the latest balance to give the FE an accurate shortfall.
-  const updated = await User.findOneAndUpdate(
-    {
-      _id: userId,
-      isDeleted: false,
-      'wallet.balance': { $gte: amt },
-    },
-    { $inc: { 'wallet.balance': -amt, 'wallet.totalSpent': amt } },
-    { new: true, projection: { wallet: 1 } },
-  );
+  // Atomic guard. Two modes:
+  //   bypassHeld=false (default): require balance − heldRupees ≥ amt so
+  //                               the held portion is protected.
+  //   bypassHeld=true:            require balance ≥ amt (raw). The
+  //                               waiting-buffer settle uses this.
+  //
+  // MongoDB lacks a native `$expr` in update filters across versions
+  // we support, so we use a small server-side guard re-read on the
+  // bypassHeld=false path.
+  let updated = null;
+  if (bypassHeld) {
+    updated = await User.findOneAndUpdate(
+      { _id: userId, isDeleted: false, 'wallet.balance': { $gte: amt } },
+      { $inc: { 'wallet.balance': -amt, 'wallet.totalSpent': amt } },
+      { new: true, projection: { wallet: 1 } },
+    );
+  } else {
+    // Atomic-with-condition using $expr — supported since MongoDB 4.2.
+    updated = await User.findOneAndUpdate(
+      {
+        _id: userId,
+        isDeleted: false,
+        $expr: {
+          $gte: [
+            { $subtract: ['$wallet.balance', { $ifNull: ['$wallet.heldRupees', 0] }] },
+            amt,
+          ],
+        },
+      },
+      { $inc: { 'wallet.balance': -amt, 'wallet.totalSpent': amt } },
+      { new: true, projection: { wallet: 1 } },
+    );
+  }
 
   if (!updated) {
     const wallet = await getWalletService(userId).catch(() => null);
     const balance = wallet?.balance || 0;
+    const heldRupees = wallet?.heldRupees || 0;
+    const availableRupees = wallet?.availableRupees || 0;
     throw new ApiError(402, 'Insufficient wallet balance', {
       requiredAmount: amt,
       walletBalance: round2(balance),
-      shortBy: round2(Math.max(0, amt - balance)),
+      heldRupees: round2(heldRupees),
+      availableRupees: round2(availableRupees),
+      shortBy: round2(Math.max(0, amt - availableRupees)),
     });
   }
 
@@ -189,6 +242,90 @@ export async function debitWalletService({
     status: WALLET_TXN_STATUS.SUCCESS,
     initiatedBy: initiatedBy || null,
   });
+}
+
+/**
+ * Soft-hold `amount` rupees on the user's wallet. The balance is NOT
+ * decremented — only `heldRupees` goes up, which makes `debitWalletService`
+ * refuse other spends that would dip into the held portion.
+ *
+ * Used at booking creation to reserve the waiting-charge buffer without
+ * pre-charging the customer. Released by `releaseWalletHoldService` (on
+ * cancel) or by the settle path (which consumes part of the hold as a
+ * real debit and releases the rest).
+ *
+ * Throws `ApiError(402, ...)` with the same shape as `debitWalletService`
+ * when there isn't enough available balance to cover the hold.
+ *
+ * No WalletTransaction is written for holds — they're transient (no
+ * actual money movement). The booking's `waiting.bufferRupees` field is
+ * the authoritative record of what's held against which booking.
+ */
+export async function holdWalletService({ userId, amount }) {
+  const amt = ensurePositive(amount, 'amount');
+  const updated = await User.findOneAndUpdate(
+    {
+      _id: userId,
+      isDeleted: false,
+      $expr: {
+        $gte: [
+          { $subtract: ['$wallet.balance', { $ifNull: ['$wallet.heldRupees', 0] }] },
+          amt,
+        ],
+      },
+    },
+    { $inc: { 'wallet.heldRupees': amt } },
+    { new: true, projection: { wallet: 1 } },
+  );
+  if (!updated) {
+    const wallet = await getWalletService(userId).catch(() => null);
+    const balance = wallet?.balance || 0;
+    const heldRupees = wallet?.heldRupees || 0;
+    const availableRupees = wallet?.availableRupees || 0;
+    throw new ApiError(402, 'Insufficient wallet balance to reserve waiting buffer', {
+      requiredAmount: amt,
+      walletBalance: round2(balance),
+      heldRupees: round2(heldRupees),
+      availableRupees: round2(availableRupees),
+      shortBy: round2(Math.max(0, amt - availableRupees)),
+    });
+  }
+  return {
+    balance: round2(updated.wallet?.balance || 0),
+    heldRupees: round2(updated.wallet?.heldRupees || 0),
+  };
+}
+
+/**
+ * Release a previously-held amount back to spendable. Idempotent under
+ * `Math.max(0, ...)` — if the wallet has somehow drifted (e.g. an admin
+ * adjusted heldRupees manually) we never let the counter go negative.
+ *
+ * `amount` is rupees-to-release. Returning a positive number is fine
+ * but uncommon; the standard pattern is release-what-you-held.
+ */
+export async function releaseWalletHoldService({ userId, amount }) {
+  const amt = ensurePositive(amount, 'amount');
+  // Clamp at the current heldRupees so we never go negative even if the
+  // caller asks to release more than is held.
+  const updated = await User.findOneAndUpdate(
+    { _id: userId, isDeleted: false },
+    [
+      {
+        $set: {
+          'wallet.heldRupees': {
+            $max: [0, { $subtract: [{ $ifNull: ['$wallet.heldRupees', 0] }, amt] }],
+          },
+        },
+      },
+    ],
+    { new: true, projection: { wallet: 1 } },
+  );
+  if (!updated) return null;
+  return {
+    balance: round2(updated.wallet?.balance || 0),
+    heldRupees: round2(updated.wallet?.heldRupees || 0),
+  };
 }
 
 /* ------------------------------------------------------------------ */

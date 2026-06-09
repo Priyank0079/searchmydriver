@@ -11,6 +11,10 @@ import {
   emitToDriver,
   emitToBooking,
 } from '../utils/socketEmitters.js';
+import {
+  settleWaitingBuffer,
+  clearPendingExtensionsOnTerminate,
+} from './bookingExtension.service.js';
 
 /**
  * No-show timer service.
@@ -70,13 +74,22 @@ export async function schedulePromptTimer(bookingId, arrivedAt = new Date()) {
   cancelNoShowSchedule(bookingId);
 
   const booking = await Booking.findById(bookingId)
-    .select('serviceType status')
+    .select('serviceType status noShow')
     .lean();
   if (!booking) return;
   if (booking.status !== BOOKING_STATUS.ARRIVED) return;
 
   const policy = await loadWaitingPolicy(booking.serviceType);
-  const promptMs = Math.max(0, policy.noShowPromptMinutes) * 60_000;
+  const firedFor = Number(booking.noShow?.firedFor || 0);
+  // First prompt fires AFTER the free-wait window expires +
+  // `noShowPromptMinutes` of accrual buffer. Subsequent prompts (after
+  // the user said "on my way") use just `noShowPromptMinutes` so the
+  // cadence feels consistent.
+  const baseMinutes =
+    firedFor === 0
+      ? policy.freeWaitingMinutes + policy.noShowPromptMinutes
+      : policy.noShowPromptMinutes;
+  const promptMs = Math.max(0, baseMinutes) * 60_000;
   const fireAt = new Date(arrivedAt).getTime() + promptMs;
   const delay = Math.max(0, fireAt - Date.now());
 
@@ -90,8 +103,15 @@ export async function schedulePromptTimer(bookingId, arrivedAt = new Date()) {
 }
 
 /**
- * PHASE A fire — flag the booking, ping the customer, and queue
- * PHASE B for the auto-complete deadline.
+ * PHASE A fire — flag the booking and ping the customer.
+ *
+ * Cadence: the first N = `maxNoShowPrompts` prompts are non-terminal —
+ * if the customer doesn't answer within `noShowPromptMinutes` we just
+ * fire the next prompt. The (N+1)-th prompt is *terminal*: a missed
+ * response within `noShowGraceMinutes` auto-completes the ride.
+ *
+ * `firedFor` records the running prompt number so the FE can show
+ * "Reminder 2 of 3" and the cadence survives restarts.
  */
 async function firePrompt(bookingId) {
   noShowTimers.delete(key(bookingId));
@@ -99,16 +119,26 @@ async function firePrompt(bookingId) {
   const booking = await Booking.findById(bookingId);
   if (!booking) return;
   if (booking.status !== BOOKING_STATUS.ARRIVED) return;
-  // If the customer already said they're on the way (manual response
-  // before the timer fired), respect their decision and reschedule.
-  if (booking.noShow?.customerResponse === 'on_my_way') {
-    return schedulePromptTimer(bookingId, new Date());
-  }
+  // NOTE: we deliberately do NOT short-circuit here on
+  // `customerResponse === 'on_my_way'`. After the user says yes,
+  // `recordCustomerOnMyWay` reschedules a fresh prompt — this fire IS
+  // that fresh prompt and must go through. The previous response is
+  // overwritten by the new prompt state below, which is the audit-safe
+  // way to keep the cadence going. Race protection against double-fires
+  // is handled by `noShowTimers` (Map-keyed by bookingId).
 
   const policy = await loadWaitingPolicy(booking.serviceType);
-  const now = new Date();
-  const deadline = new Date(now.getTime() + policy.noShowGraceMinutes * 60_000);
   const firedFor = Number(booking.noShow?.firedFor || 0) + 1;
+  const maxPrompts = policy.maxNoShowPrompts;
+  // Final prompt = (maxNoShowPrompts + 1)-th. Before that, a missed
+  // response just queues the next prompt; on the final one, it
+  // auto-completes.
+  const isFinalPrompt = firedFor > maxPrompts;
+  const now = new Date();
+  const windowMinutes = isFinalPrompt
+    ? policy.noShowGraceMinutes
+    : policy.noShowPromptMinutes;
+  const deadline = new Date(now.getTime() + windowMinutes * 60_000);
 
   booking.noShow = {
     promptSentAt: now,
@@ -123,39 +153,77 @@ async function firePrompt(bookingId) {
     bookingId: String(booking._id),
     promptSentAt: now,
     promptDeadlineAt: deadline,
-    graceMinutes: policy.noShowGraceMinutes,
+    graceMinutes: windowMinutes,
+    promptIndex: firedFor,
+    maxPrompts,
+    isFinal: isFinalPrompt,
   };
   emitToUser(booking.userId, S2C_EVENTS.BOOKING_NOSHOW_PROMPT, payload);
   emitToBooking(booking._id, S2C_EVENTS.BOOKING_NOSHOW_PROMPT, payload);
 
-  // Schedule PHASE B for the deadline.
+  // Final prompt → auto-complete on grace expiry.
+  // Non-final → fire the next prompt at the window.
+  const nextHandler = isFinalPrompt
+    ? () =>
+        autoCompleteForNoShow(bookingId).catch((err) =>
+          console.warn('[noShow] auto-complete failed:', err?.message),
+        )
+    : () =>
+        firePrompt(bookingId).catch((err) =>
+          console.warn('[noShow] reprompt failed:', err?.message),
+        );
   const handle = setTimeout(
-    () =>
-      autoCompleteForNoShow(bookingId).catch((err) =>
-        console.warn('[noShow] auto-complete failed:', err?.message),
-      ),
+    nextHandler,
     Math.max(0, deadline.getTime() - Date.now()),
   );
-  noShowTimers.set(key(bookingId), { phase: 'autoComplete', handle });
+  noShowTimers.set(key(bookingId), {
+    phase: isFinalPrompt ? 'autoComplete' : 'reprompt',
+    handle,
+  });
 }
 
 /**
- * Customer responded "Yes, on my way". Cancels PHASE B, marks the
- * response, and reschedules PHASE A from now so we get another
- * `noShowPromptMinutes` of patience before pinging again.
+ * Customer responded "Yes, on my way".
+ *
+ * On a non-final prompt: cancel the current timer, mark the response,
+ * and reschedule the next prompt for `noShowPromptMinutes` from now —
+ * the cap (`maxNoShowPrompts`) is preserved through `firedFor` so the
+ * cycle still terminates after N "yes" responses.
+ *
+ * On a FINAL prompt (already past the cap): the response is recorded
+ * for audit but does NOT reset the grace timer — auto-complete still
+ * fires when the grace window elapses. This is how we stop the cycle
+ * from being extended indefinitely.
  */
 export async function recordCustomerOnMyWay(bookingId) {
-  cancelNoShowSchedule(bookingId);
+  const booking = await Booking.findById(bookingId).select(
+    'serviceType noShow status',
+  );
+  if (!booking) return;
+  if (booking.status !== BOOKING_STATUS.ARRIVED) return;
+
+  const policy = await loadWaitingPolicy(booking.serviceType);
+  const firedFor = Number(booking.noShow?.firedFor || 0);
+  const isPastCap = firedFor > policy.maxNoShowPrompts;
+
   await Booking.updateOne(
     { _id: bookingId },
     {
       $set: {
         'noShow.customerResponse': 'on_my_way',
         'noShow.respondedAt': new Date(),
-        'noShow.promptDeadlineAt': null,
+        ...(isPastCap ? {} : { 'noShow.promptDeadlineAt': null }),
       },
     },
   );
+
+  if (isPastCap) {
+    // Don't reschedule — the existing auto-complete timer must be
+    // allowed to fire so we never end up in a "yes I'm coming"
+    // infinite-loop after the cap.
+    return;
+  }
+  cancelNoShowSchedule(bookingId);
   await schedulePromptTimer(bookingId, new Date());
 }
 
@@ -195,35 +263,62 @@ async function autoCompleteForNoShow(bookingId) {
   // Race: if the trip already started (driver entered the OTP), let
   // the normal flow take over.
   if (booking.status !== BOOKING_STATUS.ARRIVED) return;
-  // Race: customer just said yes between deadline and now.
-  if (booking.noShow?.customerResponse === 'on_my_way') {
-    return schedulePromptTimer(bookingId, new Date());
-  }
+
+  // IMPORTANT: we deliberately do NOT short-circuit on
+  // `customerResponse === 'on_my_way'` here. The auto-complete timer
+  // is only ever scheduled by the FINAL prompt (the (N+1)-th fire),
+  // and per the cadence contract a "yes" past the cap is recorded for
+  // audit only — it must NOT reset the grace window or we end up in
+  // an infinite prompt → "yes" → reschedule → prompt → "yes" loop
+  // (the previous defensive check was exactly that bug; the timer Map
+  // already serialises against double-fires for the legitimate race).
 
   const now = new Date();
   const arrivedAt = booking.timeline?.arrivedAt
     ? new Date(booking.timeline.arrivedAt)
     : now;
 
-  // Stamp the waiting charge based on the full wait window.
+  // Stamp the waiting charge based on the full wait window, capped by
+  // the booking's snapshotted `maxBillableMinutes` (which the pricing
+  // validator guarantees can be fully covered by the pre-collected
+  // buffer). Fall back to the live policy for fields the booking
+  // snapshot may be missing (legacy bookings created before the buffer
+  // landed).
   const policy = await loadWaitingPolicy(booking.serviceType);
+  const snapshot = booking.waiting || {};
+  const freeMinutes = Number(snapshot.freeMinutes) || policy.freeWaitingMinutes;
+  const perMinute = Number(snapshot.perMinuteRupees) || policy.chargePerMinute;
+  const maxBillable = Number(snapshot.maxBillableMinutes) || 0;
   const waitedMs = Math.max(0, now.getTime() - arrivedAt.getTime());
   const waitedMinutes = Math.ceil(waitedMs / 60_000);
-  const billable = Math.max(0, waitedMinutes - policy.freeWaitingMinutes);
-  const charge = Math.round(billable * policy.chargePerMinute * 100) / 100;
+  let billable = Math.max(0, waitedMinutes - freeMinutes);
+  if (maxBillable > 0) billable = Math.min(billable, maxBillable);
+  const charge = Math.round(billable * perMinute * 100) / 100;
   booking.waiting = booking.waiting || {};
   Object.assign(booking.waiting, {
     waitedMinutes,
     billableMinutes: billable,
     chargeRupees: charge,
-    freeMinutes: policy.freeWaitingMinutes,
-    perMinuteRupees: policy.chargePerMinute,
+    freeMinutes,
+    perMinuteRupees: perMinute,
     noShow: true,
   });
 
   booking.status = BOOKING_STATUS.COMPLETED;
   booking.timeline.completedAt = now;
   booking.timeline.startedAt = booking.timeline.startedAt || arrivedAt;
+
+  // Settle the pre-collected buffer. Caps `chargeRupees` at
+  // `bufferRupees` (belt-and-braces — the per-minute math above is
+  // already bounded by maxBillableMinutes) and credits the unused
+  // portion back to the user's wallet.
+  await settleWaitingBuffer(booking);
+
+  // Defensive: a no-show can't have an in-flight extension (extensions
+  // require STARTED), but sweep anyway so any future flow change
+  // can't leak a stale pending row.
+  await clearPendingExtensionsOnTerminate(booking, 'no_show_auto_complete');
+
   await booking.save();
 
   // Free the driver for new dispatches.
@@ -284,18 +379,30 @@ export async function resumeNoShowScheduleIfNeeded(booking) {
   if (!booking) return;
   if (booking.status !== BOOKING_STATUS.ARRIVED) return;
   if (noShowTimers.has(key(booking._id))) return;
-  // If we already prompted and have a deadline, resume PHASE B.
+  // If we already prompted and have a live deadline, resume the right
+  // phase for the current prompt index. The (maxNoShowPrompts+1)-th
+  // prompt's deadline drives auto-complete; earlier prompts' deadlines
+  // drive the next reprompt.
   const deadline = booking.noShow?.promptDeadlineAt;
   if (deadline) {
+    const policy = await loadWaitingPolicy(booking.serviceType);
+    const firedFor = Number(booking.noShow?.firedFor || 0);
+    const isFinalPrompt = firedFor > policy.maxNoShowPrompts;
     const remaining = Math.max(0, new Date(deadline).getTime() - Date.now());
-    const handle = setTimeout(
-      () =>
-        autoCompleteForNoShow(booking._id).catch((err) =>
-          console.warn('[noShow] resumed auto-complete failed:', err?.message),
-        ),
-      remaining,
-    );
-    noShowTimers.set(key(booking._id), { phase: 'autoComplete', handle });
+    const handler = isFinalPrompt
+      ? () =>
+          autoCompleteForNoShow(booking._id).catch((err) =>
+            console.warn('[noShow] resumed auto-complete failed:', err?.message),
+          )
+      : () =>
+          firePrompt(booking._id).catch((err) =>
+            console.warn('[noShow] resumed reprompt failed:', err?.message),
+          );
+    const handle = setTimeout(handler, remaining);
+    noShowTimers.set(key(booking._id), {
+      phase: isFinalPrompt ? 'autoComplete' : 'reprompt',
+      handle,
+    });
     return;
   }
   // Otherwise, resume PHASE A using the original arrivedAt anchor.
@@ -320,7 +427,9 @@ async function loadWaitingPolicy(serviceType) {
   return {
     freeWaitingMinutes: Math.max(0, Number(w.freeWaitingMinutes ?? 15)),
     chargePerMinute: Math.max(0, Number(w.chargePerMinute ?? 2)),
-    noShowPromptMinutes: Math.max(1, Number(w.noShowPromptMinutes ?? 30)),
+    noShowPromptMinutes: Math.max(1, Number(w.noShowPromptMinutes ?? 15)),
     noShowGraceMinutes: Math.max(1, Number(w.noShowGraceMinutes ?? 5)),
+    maxNoShowPrompts: Math.max(0, Math.min(5, Number(w.maxNoShowPrompts ?? 2))),
+    maxBillableMinutes: Math.max(0, Number(w.maxBillableMinutes ?? 45)),
   };
 }

@@ -37,6 +37,14 @@ export const S2C_EVENTS = Object.freeze({
   BOOKING_DRIVER_REASSIGNING: 'booking:driver:reassigning',
   BOOKING_EXTENSION_OFFERED: 'booking:extension:offered',
   BOOKING_EXTENSION_RESOLVED: 'booking:extension:resolved',
+  // Driver receives the OTP to read out to the customer who's trying
+  // to extend their ride. Payload: { bookingId, extensionId, otp,
+  // additionalHours, fareDelta, expiresAt }
+  BOOKING_EXTENSION_OTP: 'booking:extension:otp',
+  // Extension paid successfully. Payload includes the full extension
+  // sub-doc + updated extensions list so the UI can extend its
+  // remaining-time bar without a refetch.
+  BOOKING_EXTENSION_PAID: 'booking:extension:paid',
   BOOKING_NOSHOW_PROMPT: 'booking:noshow:prompt',
 
   NOTIFICATION: 'notification:new',

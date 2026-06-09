@@ -111,7 +111,12 @@ const ReviewBookingPage = () => {
     setFareEstimate,
   ]);
 
-  const total = estimate?.fareBreakdown?.totalPayable ?? 0;
+  // Headline total on the CTA = fare + pre-collected waiting buffer.
+  // The buffer is debited from the wallet alongside the fare and the
+  // unused portion is refunded at trip-end (see settleWaitingBuffer).
+  const fareTotal = estimate?.fareBreakdown?.totalPayable ?? 0;
+  const bufferRupees = Number(estimate?.waitingBuffer?.bufferRupees || 0);
+  const total = Math.round((fareTotal + bufferRupees) * 100) / 100;
 
   // No booking creation here — that lives on /user/book/confirm where we
   // also surface the wallet balance and pay-from-wallet CTA.
@@ -270,7 +275,10 @@ function FareCard({ estimate, estimating, error }) {
       ],
     ].filter(([, v]) => Number(v || 0) !== 0);
   }, [estimate]);
-  const total = estimate?.fareBreakdown?.totalPayable || 0;
+  const fareTotal = estimate?.fareBreakdown?.totalPayable || 0;
+  const buffer = estimate?.waitingBuffer || null;
+  const bufferRupees = Number(buffer?.bufferRupees || 0);
+  const grandTotal = Math.round((fareTotal + bufferRupees) * 100) / 100;
 
   return (
     <Card>
@@ -293,9 +301,51 @@ function FareCard({ estimate, estimating, error }) {
           ))}
           <div className="h-px bg-border-light my-1" />
           <div className="flex items-center justify-between">
-            <span className="text-sm font-bold text-text">Total</span>
-            <span className="text-lg font-bold text-text">₹{total}</span>
+            <span className="text-sm font-semibold text-text">Fare total</span>
+            <span className="text-base font-semibold text-text">₹{fareTotal}</span>
           </div>
+          {/*
+            Pre-collected waiting buffer line. Backed by
+            estimate.waitingBuffer (see pricing.service.js →
+            buildWaitingBufferPreview). The buffer is debited from the
+            wallet alongside the fare and refunded at trip-end.
+          */}
+          {bufferRupees > 0 && (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-text-secondary">
+                  Waiting reserve
+                  <span className="ml-1 text-[10px] uppercase tracking-wide text-emerald-600 font-semibold">
+                    Held, not charged
+                  </span>
+                </span>
+                <span className="text-sm text-text">₹{bufferRupees}</span>
+              </div>
+              <p className="text-[11px] text-text-muted -mt-1">
+                Stays locked in your wallet — used only if the driver
+                waits beyond {buffer?.freeWaitingMinutes || 0} min at
+                pickup (₹{buffer?.chargePerMinute || 0}/min, up to{' '}
+                {buffer?.maxBillableMinutes || 0} min). Unused amount is
+                unlocked after the trip.
+              </p>
+              <div className="h-px bg-border-light my-1" />
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-text">
+                  Wallet needed
+                </span>
+                <span className="text-base font-bold text-text">₹{grandTotal}</span>
+              </div>
+              <p className="text-[11px] text-text-muted -mt-1">
+                Charged now: ₹{fareTotal}. Reserved: ₹{bufferRupees}.
+              </p>
+            </>
+          )}
+          {bufferRupees <= 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-bold text-text">Total</span>
+              <span className="text-lg font-bold text-text">₹{fareTotal}</span>
+            </div>
+          )}
         </div>
       )}
     </Card>

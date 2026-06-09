@@ -35,6 +35,8 @@ const ROW_ORDER = [
 
 const FareCard = ({ estimate, estimating = false, error = null, dense = false, footnote = null, title = 'Fare estimate' }) => {
   const breakdown = estimate?.fareBreakdown || {};
+  const buffer = estimate?.waitingBuffer || null;
+  const bufferRupees = Number(buffer?.bufferRupees || 0);
   const rows = useMemo(
     () =>
       ROW_ORDER.map(([label, picker]) => [label, picker(breakdown)]).filter(
@@ -42,7 +44,8 @@ const FareCard = ({ estimate, estimating = false, error = null, dense = false, f
       ),
     [breakdown],
   );
-  const total = breakdown.totalPayable || 0;
+  const fareTotal = breakdown.totalPayable || 0;
+  const grandTotal = Math.round((fareTotal + bufferRupees) * 100) / 100;
 
   return (
     <Card>
@@ -67,9 +70,53 @@ const FareCard = ({ estimate, estimating = false, error = null, dense = false, f
           ))}
           <div className="h-px bg-border-light my-1" />
           <div className="flex items-center justify-between">
-            <span className="text-sm font-bold text-text">Total</span>
-            <span className="text-lg font-bold text-text">₹{total}</span>
+            <span className="text-sm font-semibold text-text">Fare total</span>
+            <span className="text-base font-semibold text-text">₹{fareTotal}</span>
           </div>
+          {/*
+            Pre-collected waiting buffer. Shown as a separate row so the
+            user understands the difference between the fare and the
+            refundable hold. Unused portion is auto-credited to the
+            wallet after the trip ends (settleWaitingBuffer in the
+            backend).
+          */}
+          {bufferRupees > 0 && (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-text-secondary">
+                  Waiting reserve
+                  <span className="ml-1 text-[10px] uppercase tracking-wide text-emerald-600 font-semibold">
+                    Held, not charged
+                  </span>
+                </span>
+                <span className="text-sm text-text">₹{bufferRupees}</span>
+              </div>
+              <p className="text-[11px] text-text-muted -mt-1">
+                ₹{bufferRupees} stays in your wallet and can&rsquo;t be
+                spent elsewhere — used only if the driver waits beyond{' '}
+                {buffer?.freeWaitingMinutes || 0} min at pickup
+                (₹{buffer?.chargePerMinute || 0}/min, up to{' '}
+                {buffer?.maxBillableMinutes || 0} min). Anything not used
+                is unlocked after the trip.
+              </p>
+              <div className="h-px bg-border-light my-1" />
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-text">
+                  Wallet needed
+                </span>
+                <span className="text-base font-bold text-text">₹{grandTotal}</span>
+              </div>
+              <p className="text-[11px] text-text-muted -mt-1">
+                Charged now: ₹{fareTotal}. Reserved: ₹{bufferRupees}.
+              </p>
+            </>
+          )}
+          {bufferRupees <= 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-bold text-text">Total</span>
+              <span className="text-lg font-bold text-text">₹{fareTotal}</span>
+            </div>
+          )}
           {footnote && <p className="text-[11px] text-text-muted">{footnote}</p>}
         </div>
       )}

@@ -180,6 +180,20 @@ const useDriverActiveTripStore = create((set, get) => ({
     invalidateDashboardCaches();
     return booking;
   },
+  /**
+   * Driver dismisses a pending customer extension (the OTP banner's
+   * Dismiss button). Backend marks the extension declined +
+   * `dismissedByDriver=true` and emits a socket event the customer
+   * can react to.
+   */
+  dismissExtension(extensionId) {
+    if (!extensionId) throw new Error('extensionId is required');
+    return get()._runTransition(
+      'dismiss-extension',
+      'extensions/dismiss',
+      { extensionId },
+    );
+  },
 }));
 
 export default useDriverActiveTripStore;

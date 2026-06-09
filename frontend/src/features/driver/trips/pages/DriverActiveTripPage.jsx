@@ -6,6 +6,7 @@ import {
   CalendarClock,
   Car as CarIcon,
   CheckCircle2,
+  Clock,
   Flag,
   Fuel,
   Loader2,
@@ -128,6 +129,7 @@ const DriverActiveTripPage = () => {
   const fetchActive = useDriverActiveTripStore((s) => s.fetchActive);
   const applyUpdate = useDriverActiveTripStore((s) => s.applyUpdate);
   const clear = useDriverActiveTripStore((s) => s.clear);
+  const dismissExtension = useDriverActiveTripStore((s) => s.dismissExtension);
 
   // When the trip completes/cancels, also clear the incoming-offer store's
   // `activeBooking` mirror so the rest of the driver app sees a clean slate.
@@ -153,6 +155,79 @@ const DriverActiveTripPage = () => {
   useSocketEvent(S2C_EVENTS.BOOKING_UPDATED, (payload) => {
     applyUpdate(payload);
   });
+
+  // Extension OTP banner — the customer hit "extend" in their app. We
+  // show them the 4-digit code so they can read it back to the customer
+  // (mirrors the ride-start OTP flow). Local state because this is
+  // ephemeral, transient UI that fades when the customer pays.
+  const [extensionOtpBanner, setExtensionOtpBanner] = useState(null);
+  useSocketEvent(S2C_EVENTS.BOOKING_EXTENSION_OTP, (payload) => {
+    if (!payload?.otp) return;
+    setExtensionOtpBanner({
+      bookingId: payload.bookingId,
+      extensionId: payload.extensionId,
+      otp: String(payload.otp),
+      additionalHours: payload.additionalHours,
+      fareDelta: payload.fareDelta,
+      expiresAt: payload.expiresAt
+        ? new Date(payload.expiresAt).getTime()
+        : Date.now() + 5 * 60 * 1000,
+      stage: 'otp', // 'otp' → 'verified' → 'paid'
+    });
+  });
+
+  // Lifecycle updates for an in-flight extension:
+  //   - 'otp_verified' → customer typed the code; flip banner to amber
+  //     "waiting for payment".
+  //   - 'cancelled'    → customer abandoned the extension (closed the
+  //     modal + chose "Change hours" or the OTP window expired). We
+  //     drop the banner immediately so the driver isn't stuck reading
+  //     a stale code that no longer works.
+  useSocketEvent(S2C_EVENTS.BOOKING_EXTENSION_RESOLVED, (payload) => {
+    if (!payload) return;
+    if (payload.stage === 'otp_verified') {
+      setExtensionOtpBanner((b) =>
+        b && String(b.extensionId) === String(payload.extensionId)
+          ? { ...b, stage: 'verified' }
+          : b,
+      );
+      return;
+    }
+    if (payload.stage === 'cancelled' || payload.stage === 'dismissed_by_driver') {
+      // 'cancelled'           → customer abandoned via "Change hours".
+      // 'dismissed_by_driver' → this driver (possibly on another
+      //                          device) hit Dismiss; echo clears
+      //                          the banner everywhere.
+      setExtensionOtpBanner((b) =>
+        b && String(b.extensionId) === String(payload.extensionId) ? null : b,
+      );
+    }
+  });
+
+  // Customer paid → mark banner as paid then drop it after a beat.
+  useSocketEvent(S2C_EVENTS.BOOKING_EXTENSION_PAID, (payload) => {
+    setExtensionOtpBanner((b) => {
+      if (!b || String(b.extensionId) !== String(payload?.extension?._id || '')) return b;
+      return { ...b, stage: 'paid' };
+    });
+    // Re-fetch booking so the driver UI gets the longer trip clock.
+    if (payload?.bookingId) {
+      fetchById(payload.bookingId).catch(() => {});
+    }
+    setTimeout(() => setExtensionOtpBanner(null), 2500);
+  });
+
+  // Auto-dismiss expired banners so a stale OTP doesn't linger.
+  useEffect(() => {
+    if (!extensionOtpBanner?.expiresAt) return undefined;
+    const ms = extensionOtpBanner.expiresAt - Date.now();
+    if (ms <= 0) {
+      setExtensionOtpBanner(null);
+      return undefined;
+    }
+    const t = setTimeout(() => setExtensionOtpBanner(null), ms);
+    return () => clearTimeout(t);
+  }, [extensionOtpBanner?.expiresAt]);
 
   // Join the booking room — same pattern as the user side. The driver
   // receives the same room broadcasts as the user, which is useful for
@@ -262,37 +337,59 @@ const DriverActiveTripPage = () => {
     return () => clearInterval(id);
   }, [booking?._id]);
 
-  // Time gate on the `Start to pickup` CTA for SCHEDULED bookings.
-  // Mirrors `markDriverEnRouteService` on the backend: a driver can only
-  // flip into EN_ROUTE within `RIDE_BUFFER_MINUTES` of the scheduled
-  // pickup. Tapping earlier would lock them out of every other dispatch
-  // wave (the radius search filters on `isOnTrip = false`) for hours
-  // while they sit doing nothing — which is exactly the dead-zone bug
-  // we hit when this CTA had no time guard.
+  // Time gate on every pre-trip CTA (Start to pickup, I have arrived,
+  // Start ride). Mirrors `assertWithinScheduledLead` on the backend.
   //
-  // The driver app doesn't have the user-side per-service pricing
-  // override handy, so we use the platform default. The backend still
-  // enforces the override authoritatively, so a stricter admin policy
-  // will surface as a 409 toast rather than silently going through.
-  const isFutureScheduled =
-    booking?.bookingType === BOOKING_TYPE.SCHEDULED &&
-    !!booking?.hourly?.scheduledStartAt;
-  const scheduledStartMs = isFutureScheduled
+  // The gate is keyed off `hourly.scheduledStartAt` ONLY — not off
+  // `bookingType`. That field has historically been the gate's
+  // weakest link: any row where it was missing/mistagged turned the
+  // guard off and the driver could fire transitions for a ride
+  // scheduled tomorrow. By gating on the time itself we close that
+  // hole — instant bookings store `scheduledStartAt = now` so they
+  // sail through naturally.
+  //
+  // The driver app doesn't have the per-service pricing override
+  // handy here, so we use the platform default. The backend still
+  // enforces any stricter admin override; a too-early tap would
+  // surface a clean 409 toast.
+  const scheduledStartMs = booking?.hourly?.scheduledStartAt
     ? new Date(booking.hourly.scheduledStartAt).getTime()
     : NaN;
   const enRouteUnlockMinutes = SCHEDULED_BOOKING.RIDE_BUFFER_MINUTES;
   const minutesUntilPickup = Number.isFinite(scheduledStartMs)
     ? Math.ceil((scheduledStartMs - Date.now()) / 60_000)
     : null;
+  // The gate fires whenever pickup is meaningfully in the future, on
+  // every pre-trip status (DRIVER_ASSIGNED → ARRIVED). Once the trip
+  // is STARTED the gate is moot — we don't want to retroactively
+  // block anything mid-ride.
+  const isPreTrip =
+    status === BOOKING_STATUS.DRIVER_ASSIGNED ||
+    status === BOOKING_STATUS.EN_ROUTE ||
+    status === BOOKING_STATUS.ARRIVED;
   const enRouteTooEarly =
-    isFutureScheduled &&
-    status === BOOKING_STATUS.DRIVER_ASSIGNED &&
+    isPreTrip &&
     Number.isFinite(scheduledStartMs) &&
     minutesUntilPickup > enRouteUnlockMinutes;
 
   const handleAdvance = useCallback(async () => {
     if (!config?.cta) return;
     const action = config.cta.action;
+    // Single bail for all pre-trip actions when the scheduled-time
+    // gate is still closed — saves duplicating the same toast across
+    // every branch below.
+    if (enRouteTooEarly) {
+      const verb =
+        action === 'markEnRoute'
+          ? 'head out'
+          : action === 'markArrived'
+            ? 'mark arrival'
+            : 'start the ride';
+      toast.error(
+        `Pickup is still ${minutesUntilPickup} min away — you can ${verb} within ${enRouteUnlockMinutes} min of the scheduled time.`,
+      );
+      return;
+    }
     // ARRIVED → opens the OTP entry sheet instead of calling startTrip
     // directly. The sheet itself drives the POST once the driver enters
     // the code the customer reads out.
@@ -316,12 +413,6 @@ const DriverActiveTripPage = () => {
       } catch (err) {
         toast.error(err?.response?.data?.message || err?.message || 'Could not mark arrival');
       }
-      return;
-    }
-    if (action === 'markEnRoute' && enRouteTooEarly) {
-      toast.error(
-        `Pickup is still ${minutesUntilPickup} min away — you can head out within ${enRouteUnlockMinutes} min of the scheduled time.`,
-      );
       return;
     }
     try {
@@ -566,6 +657,45 @@ const DriverActiveTripPage = () => {
             arrivedAt={booking.timeline?.arrivedAt}
             freeMinutes={booking.waiting?.freeMinutes}
             perMinuteRupees={booking.waiting?.perMinuteRupees}
+            maxBillableMinutes={booking.waiting?.maxBillableMinutes}
+            bufferRupees={booking.waiting?.bufferRupees}
+          />
+        )}
+
+        {/* Extension OTP banner — pushed via socket when the customer
+            taps "extend" in their app. The driver reads the 4-digit
+            code out loud, the customer types it in, then pays. We keep
+            the banner small but visually prominent because the
+            customer is literally waiting for the driver to read it. */}
+        {extensionOtpBanner && (
+          <ExtensionOtpBanner
+            banner={extensionOtpBanner}
+            onDismiss={async () => {
+              // For 'otp' and 'verified' stages there's a live row on
+              // the booking that needs to be torn down server-side —
+              // otherwise the customer's app keeps thinking the
+              // extension is in progress. The 'paid' banner is
+              // ephemeral UI only (no open intent) so we just close
+              // the card locally.
+              const stage = extensionOtpBanner.stage;
+              if (
+                (stage === 'otp' || stage === 'verified') &&
+                extensionOtpBanner.extensionId
+              ) {
+                try {
+                  await dismissExtension(extensionOtpBanner.extensionId);
+                  toast.success('Extension dismissed');
+                } catch (err) {
+                  toast.error(
+                    err?.response?.data?.message ||
+                      err?.message ||
+                      'Could not dismiss extension',
+                  );
+                  return; // keep the banner so the driver can retry
+                }
+              }
+              setExtensionOtpBanner(null);
+            }}
           />
         )}
 
@@ -625,24 +755,38 @@ const DriverActiveTripPage = () => {
           </p>
         </Card>
 
-        {/* Extensions */}
-        {Array.isArray(booking.extensions) && booking.extensions.length > 0 && (
-          <Card>
-            <p className="text-[11px] text-text-muted uppercase tracking-wide font-semibold">
-              Extensions
-            </p>
-            <div className="mt-2 space-y-1">
-              {booking.extensions.map((ext) => (
-                <p key={String(ext._id || ext.requestedAt)} className="text-xs text-text-secondary">
-                  +{ext.additionalHours}h ·{' '}
-                  <span className="text-text-muted">
-                    requested {new Date(ext.requestedAt).toLocaleTimeString()}
-                  </span>
-                </p>
-              ))}
-            </div>
-          </Card>
-        )}
+        {/* Paid extensions only. We deliberately skip pending_otp /
+            pending_payment / declined / expired rows: those are the
+            customer's in-flight intents, not money on the books, and
+            showing them here was misleading drivers into thinking
+            they'd been credited for an extension the customer never
+            actually paid for. The live OTP banner above covers the
+            "extension in progress" state separately. */}
+        {(() => {
+          const accepted = (booking.extensions || []).filter(
+            (ext) => ext?.status === 'accepted',
+          );
+          if (!accepted.length) return null;
+          return (
+            <Card>
+              <p className="text-[11px] text-text-muted uppercase tracking-wide font-semibold">
+                Extensions
+              </p>
+              <div className="mt-2 space-y-1">
+                {accepted.map((ext) => (
+                  <p key={String(ext._id || ext.requestedAt)} className="text-xs text-text-secondary">
+                    +{ext.additionalHours}h · &#8377;{ext.fareDelta}
+                    <span className="text-text-muted">
+                      {' '}
+                      ·{' '}
+                      {new Date(ext.paidAt || ext.respondedAt || ext.requestedAt).toLocaleTimeString()}
+                    </span>
+                  </p>
+                ))}
+              </div>
+            </Card>
+          );
+        })()}
 
         {driverPoint && pickupCoords && booking.status !== BOOKING_STATUS.STARTED && (
           <p className="text-[11px] text-text-muted text-center">
@@ -684,12 +828,12 @@ const DriverActiveTripPage = () => {
           </div>
         )}
 
-        {/* Scheduled-pickup countdown banner. Surfaces when the driver is
-            sitting on a future scheduled booking — explains exactly when
-            they can tap "Start to pickup" so they don't accidentally
-            trigger the early-en-route guard (which would otherwise look
-            like a 409 with no obvious cause). Until that window opens
-            the driver remains free to receive non-overlapping offers. */}
+        {/* Scheduled-pickup countdown banner. Surfaces on every pre-trip
+            status while the gate is still closed — so the driver
+            understands why "Start to pickup" / "I have arrived" /
+            "Start ride" is greyed out instead of seeing a mysterious
+            409 toast. Until the window opens the driver stays free
+            to receive other (non-overlapping) offers. */}
         {enRouteTooEarly && (
           <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-3 flex items-start gap-3">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-indigo-100 text-indigo-700">
@@ -698,11 +842,23 @@ const DriverActiveTripPage = () => {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-bold text-indigo-900">
                 Pickup {formatScheduledLead(minutesUntilPickup)} away
+                {Number.isFinite(scheduledStartMs) && (
+                  <span className="block text-[11px] font-normal text-indigo-700/90 mt-0.5">
+                    {new Date(scheduledStartMs).toLocaleString([], {
+                      weekday: 'short',
+                      day: 'numeric',
+                      month: 'short',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                )}
               </p>
-              <p className="text-[12px] leading-snug mt-0.5 text-indigo-800">
-                You can tap <span className="font-semibold">Start to pickup</span> within{' '}
-                {enRouteUnlockMinutes} min of the scheduled time. Until then you stay
-                available for other rides.
+              <p className="text-[12px] leading-snug mt-1 text-indigo-800">
+                The trip CTA unlocks within{' '}
+                <span className="font-semibold">{enRouteUnlockMinutes} min</span>{' '}
+                of the scheduled time. Until then you stay available
+                for other rides.
               </p>
             </div>
           </div>
@@ -736,7 +892,12 @@ const DriverActiveTripPage = () => {
               paymentBlocker ||
               busy === 'cancel' ||
               (config.cta.action === 'markArrived' && !arrivalReady) ||
-              (config.cta.action === 'markEnRoute' && enRouteTooEarly)
+              // The scheduled-time gate applies to every pre-trip
+              // action (en-route, arrived, start) — not just
+              // `markEnRoute`. `enRouteTooEarly` is already
+              // status-aware (DRIVER_ASSIGNED → ARRIVED), so this
+              // line transparently blocks all three.
+              enRouteTooEarly
             }
             loading={busy === config.cta.action}
             icon={config.cta.icon}
@@ -870,15 +1031,135 @@ function formatGraceRemaining(minutes) {
 /**
  * Live waiting-timer tile shown on the driver's Active Trip screen
  * once the booking hits ARRIVED. Ticks the wait every second and
- * flips colour the moment the free wait expires so the driver can
- * see when the customer's bill starts climbing.
+ * flips colour as the wait crosses three thresholds:
+ *
+ *   green  →  inside `freeMinutes`     (no charge accruing)
+ *   amber  →  past free, inside cap    (charge accruing, buffer covering)
+ *   red    →  at/past `maxBillableMinutes` (charge capped, buffer fully used)
+ *
+ * The "Buffer remaining" line lets the driver see how much head-room
+ * is left on the customer's pre-collected buffer — pure transparency
+ * for the driver, not a UI affordance for any action.
  *
  * Props:
- *   arrivedAt        ISO timestamp the driver hit "I've arrived".
- *   freeMinutes      Admin-configured free wait window (minutes).
- *   perMinuteRupees  Admin-configured per-minute charge.
+ *   arrivedAt           ISO timestamp the driver hit "I've arrived".
+ *   freeMinutes         Admin-configured free wait window (minutes).
+ *   perMinuteRupees     Admin-configured per-minute charge.
+ *   maxBillableMinutes  Hard cap on billable wait. After this point the
+ *                       customer's bill stops climbing (the buffer is
+ *                       sized to cover exactly this many minutes).
+ *   bufferRupees        Total buffer collected upfront, for display.
  */
-function WaitingTimerCard({ arrivedAt, freeMinutes, perMinuteRupees }) {
+/**
+ * Banner the driver sees while the customer is mid-way through the
+ * extension handshake. Renders the OTP code prominently so it can be
+ * read aloud, and updates as the customer verifies + pays.
+ *
+ *   stage 'otp'       → big code, "Read this out to the customer"
+ *   stage 'verified'  → "Customer entered code, waiting for payment…"
+ *   stage 'paid'      → "Extended by Xh — keep going!"
+ */
+function ExtensionOtpBanner({ banner, onDismiss }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const expiresInSec = Math.max(
+    0,
+    Math.ceil((banner.expiresAt - now) / 1000),
+  );
+  const mm = Math.floor(expiresInSec / 60)
+    .toString()
+    .padStart(1, '0');
+  const ss = (expiresInSec % 60).toString().padStart(2, '0');
+
+  if (banner.stage === 'paid') {
+    return (
+      <Card className="bg-emerald-50 border border-emerald-200">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shrink-0">
+            <CheckCircle2 className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-emerald-900">
+              Extension paid &middot; +{banner.additionalHours}h
+            </p>
+            <p className="text-[12px] text-emerald-800">
+              Customer paid ₹{banner.fareDelta}. Trip clock just got{' '}
+              {banner.additionalHours}h longer.
+            </p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  if (banner.stage === 'verified') {
+    return (
+      <Card className="bg-amber-50 border border-amber-200">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-amber-500 text-white flex items-center justify-center shrink-0">
+            <Clock className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold text-amber-900">
+              Waiting for customer payment…
+            </p>
+            <p className="text-[12px] text-amber-800">
+              Code accepted. They&rsquo;re paying ₹{banner.fareDelta} for{' '}
+              +{banner.additionalHours}h.
+            </p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="bg-gradient-to-br from-indigo-600 to-indigo-700 text-white border border-indigo-700/30">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-wide text-white/70">
+            Customer wants to extend
+          </p>
+          <p className="text-sm font-bold mt-0.5">
+            +{banner.additionalHours}h &middot; ₹{banner.fareDelta}
+          </p>
+        </div>
+        <span className="text-[11px] font-medium text-white/80 bg-white/15 rounded-full px-2 py-0.5">
+          {mm}:{ss}
+        </span>
+      </div>
+      <div className="bg-white/10 rounded-2xl p-3 text-center">
+        <p className="text-[10px] uppercase tracking-wide text-white/70">
+          Read this code to the customer
+        </p>
+        <p className="text-3xl font-extrabold tracking-[0.4em] mt-1 select-all">
+          {banner.otp}
+        </p>
+      </div>
+      <p className="text-[11px] text-white/80 mt-2 leading-snug">
+        They&rsquo;ll type this in their app. Once verified, they pay from their wallet and your trip clock extends automatically.
+      </p>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="mt-2 w-full h-9 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-semibold"
+      >
+        Dismiss
+      </button>
+    </Card>
+  );
+}
+
+function WaitingTimerCard({
+  arrivedAt,
+  freeMinutes,
+  perMinuteRupees,
+  maxBillableMinutes,
+  bufferRupees,
+}) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -888,14 +1169,18 @@ function WaitingTimerCard({ arrivedAt, freeMinutes, perMinuteRupees }) {
 
   const free = Math.max(0, Number(freeMinutes) || 0);
   const perMin = Math.max(0, Number(perMinuteRupees) || 0);
+  const maxBillable = Math.max(0, Number(maxBillableMinutes) || 0);
+  const buffer = Math.max(0, Number(bufferRupees) || 0);
   const waitedMs = Math.max(0, now - new Date(arrivedAt).getTime());
   const waitedSec = Math.floor(waitedMs / 1000);
   const waitedMin = waitedMs / 60_000;
-  const billableMin = Math.max(0, Math.ceil(waitedMin - free));
+  let billableMin = Math.max(0, Math.ceil(waitedMin - free));
+  if (maxBillable > 0) billableMin = Math.min(billableMin, maxBillable);
   const chargedRupees = Math.round(billableMin * perMin * 100) / 100;
   const inFreeWindow = waitedMin <= free;
+  const atCap = maxBillable > 0 && billableMin >= maxBillable;
+  const bufferLeft = Math.max(0, Math.round((buffer - chargedRupees) * 100) / 100);
 
-  // Display formatting
   const m = Math.floor(waitedSec / 60);
   const s = waitedSec % 60;
   const display = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
@@ -904,10 +1189,18 @@ function WaitingTimerCard({ arrivedAt, freeMinutes, perMinuteRupees }) {
   const remS = remainingFreeSec % 60;
   const remainingFree = `${remM}m ${String(remS).padStart(2, '0')}s`;
 
-  const tone = inFreeWindow
-    ? 'border-l-emerald-500 bg-emerald-50/40'
-    : 'border-l-amber-500 bg-amber-50/60';
-  const headlineTone = inFreeWindow ? 'text-emerald-700' : 'text-amber-700';
+  let tone;
+  let headlineTone;
+  if (inFreeWindow) {
+    tone = 'border-l-emerald-500 bg-emerald-50/40';
+    headlineTone = 'text-emerald-700';
+  } else if (atCap) {
+    tone = 'border-l-red-500 bg-red-50/60';
+    headlineTone = 'text-red-700';
+  } else {
+    tone = 'border-l-amber-500 bg-amber-50/60';
+    headlineTone = 'text-amber-700';
+  }
 
   return (
     <Card className={`border-l-4 ${tone}`}>
@@ -923,7 +1216,9 @@ function WaitingTimerCard({ arrivedAt, freeMinutes, perMinuteRupees }) {
             <p className="text-[11px] text-text-muted mt-0.5">
               {inFreeWindow
                 ? `Free wait \u00B7 ${remainingFree} until charges start`
-                : `Past free wait of ${free} min`}
+                : atCap
+                  ? `Past cap of ${maxBillable} min \u00B7 no further charge`
+                  : `Past free wait of ${free} min`}
             </p>
           )}
         </div>
@@ -933,7 +1228,7 @@ function WaitingTimerCard({ arrivedAt, freeMinutes, perMinuteRupees }) {
           </p>
           <p
             className={`text-base font-bold mt-1 ${
-              chargedRupees > 0 ? 'text-amber-700' : 'text-text-muted'
+              chargedRupees > 0 ? headlineTone : 'text-text-muted'
             }`}
           >
             {'\u20B9'}
@@ -947,6 +1242,24 @@ function WaitingTimerCard({ arrivedAt, freeMinutes, perMinuteRupees }) {
           )}
         </div>
       </div>
+      {/* Pre-collected buffer hint — purely informational, lets the
+          driver see they're protected up to the cap. */}
+      {buffer > 0 && (
+        <div className="mt-3 pt-3 border-t border-border-light flex items-center justify-between">
+          <span className="text-[11px] text-text-muted">
+            Reserved for waiting
+          </span>
+          <span
+            className={`text-[11px] font-semibold ${
+              bufferLeft === 0 ? 'text-red-600' : 'text-text'
+            }`}
+          >
+            {'\u20B9'}
+            {bufferLeft} left of {'\u20B9'}
+            {buffer}
+          </span>
+        </div>
+      )}
     </Card>
   );
 }

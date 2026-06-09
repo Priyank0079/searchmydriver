@@ -243,18 +243,66 @@ const useUserActiveBookingStore = create((set, get) => ({
   },
 
   /**
-   * User chose to extend the ride past the originally booked duration.
-   * Server appends an entry to `booking.extensions[]` and emits a patch.
+   * Phase 1 of the extension handshake. Server generates the OTP, hands
+   * it to the driver via socket, and returns the fareDelta locked in
+   * for the rest of the flow. Returns `{ booking, extension, breakdown }`.
    */
-  async createExtension(additionalHours) {
+  async initiateExtension(additionalHours) {
     const id = get().booking?._id;
     if (!id) throw new Error('No active booking');
-    const res = await api.post(`/auth/bookings/${id}/extensions`, {
+    const res = await api.post(`/auth/bookings/${id}/extensions/initiate`, {
       additionalHours,
     });
-    const booking = res?.data?.data?.booking || null;
-    if (booking) set({ booking });
-    return booking;
+    const data = res?.data?.data || {};
+    if (data.booking) set({ booking: data.booking });
+    return data;
+  },
+
+  /**
+   * Phase 2 of the extension handshake. Customer enters the 4-digit
+   * code the driver read out to them.
+   */
+  async verifyExtensionOtp({ extensionId, otp }) {
+    const id = get().booking?._id;
+    if (!id) throw new Error('No active booking');
+    const res = await api.post(`/auth/bookings/${id}/extensions/verify-otp`, {
+      extensionId,
+      otp,
+    });
+    const data = res?.data?.data || {};
+    if (data.booking) set({ booking: data.booking });
+    return data;
+  },
+
+  /**
+   * Phase 3 of the extension handshake. Customer confirms and pays the
+   * fareDelta from their wallet.
+   */
+  async payExtension({ extensionId }) {
+    const id = get().booking?._id;
+    if (!id) throw new Error('No active booking');
+    const res = await api.post(`/auth/bookings/${id}/extensions/pay`, {
+      extensionId,
+    });
+    const data = res?.data?.data || {};
+    if (data.booking) set({ booking: data.booking });
+    return data;
+  },
+
+  /**
+   * Discard an open extension intent (used by "Change hours" or when
+   * the user wants to abandon a verified-but-unpaid extension). After
+   * this the next initiate is allowed.
+   */
+  async cancelExtension({ extensionId }) {
+    const id = get().booking?._id;
+    if (!id) throw new Error('No active booking');
+    const res = await api.post(`/auth/bookings/${id}/extensions/cancel`, {
+      extensionId,
+    });
+    const data = res?.data?.data || {};
+    if (data.booking) set({ booking: data.booking });
+    return data;
   },
 
   /**

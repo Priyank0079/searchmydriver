@@ -48,6 +48,7 @@ import {
   driverStartTrip,
   driverCompleteTrip,
   driverCancelBooking,
+  driverDismissBookingExtension,
 } from '../controllers/booking.controller.js';
 
 const router = express.Router();
@@ -104,5 +105,10 @@ router.post('/bookings/:id/arrived', protectDriver, driverMarkArrived);
 router.post('/bookings/:id/start', protectDriver, driverStartTrip);
 router.post('/bookings/:id/complete', protectDriver, driverCompleteTrip);
 router.post('/bookings/:id/cancel', protectDriver, driverCancelBooking);
+router.post(
+  '/bookings/:id/extensions/dismiss',
+  protectDriver,
+  driverDismissBookingExtension,
+);
 
 export default router;

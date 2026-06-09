@@ -165,7 +165,11 @@ const PaymentPage = () => {
     );
   }
 
-  const total = booking.fareSnapshot?.total || 0;
+  const fareTotal = booking.fareSnapshot?.total || 0;
+  // Waiting buffer is *held* in the wallet (no debit yet) — surfaced on
+  // this legacy Razorpay screen for parity with the wallet flow.
+  const bufferRupees = Number(booking.waiting?.bufferRupees || 0);
+  const total = fareTotal;
   const busy = creatingOrder || checkoutLoading || cancelling;
 
   return (
@@ -203,6 +207,11 @@ const PaymentPage = () => {
             <div className="text-right">
               <p className="text-xs text-text-muted">Amount due</p>
               <p className="text-lg font-bold text-text">₹{total}</p>
+              {bufferRupees > 0 && (
+                <p className="text-[10px] text-emerald-600 font-medium mt-0.5">
+                  + ₹{bufferRupees} held in wallet as waiting reserve
+                </p>
+              )}
             </div>
           </div>
         </Card>
@@ -261,7 +270,7 @@ const PaymentPage = () => {
           disabled={busy || expired}
           onClick={handlePay}
         >
-          Pay ₹{total}
+          {`Pay \u20B9${total}`}
         </Button>
         <button
           type="button"

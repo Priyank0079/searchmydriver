@@ -13,7 +13,11 @@ import {
   listAdminBookingsService,
 } from '../services/booking.service.js';
 import {
-  createExtensionService,
+  initiateExtensionService,
+  verifyExtensionOtpService,
+  payExtensionService,
+  cancelExtensionService,
+  dismissExtensionByDriverService,
 } from '../services/bookingExtension.service.js';
 import {
   recordCustomerOnMyWay,
@@ -209,16 +213,86 @@ export const driverCancelBooking = asyncHandler(async (req, res) => {
 /* ------------------------------------------------------------------ */
 
 /**
- * POST /auth/bookings/:id/extensions
+ * POST /auth/bookings/:id/extensions/initiate
  *
- * User accepts the in-ride "your time is ending — extend?" prompt. Body:
- *   { additionalHours: number }   // minimum 0.5
+ * Phase 1 of the 3-step extension handshake. Customer picks the
+ * additional hours; backend computes fareDelta + generates an OTP that
+ * is pushed to the driver via socket. Returns the customer-safe row
+ * (no OTP code) for the FE to drive its multi-step modal.
+ *
+ *   body: { additionalHours: number }   // minimum 0.5
  */
-export const createBookingExtension = asyncHandler(async (req, res) => {
-  const booking = await createExtensionService(req.user._id, req.params.id, req.body);
+export const initiateBookingExtension = asyncHandler(async (req, res) => {
+  const result = await initiateExtensionService(req.user._id, req.params.id, req.body);
   return res
     .status(201)
-    .json(new ApiResponse(201, { booking }, 'Ride extended'));
+    .json(new ApiResponse(201, result, 'Extension initiated. Ask your driver for the code.'));
+});
+
+/**
+ * POST /auth/bookings/:id/extensions/verify-otp
+ *
+ * Phase 2. Customer types the 4-digit code the driver read out.
+ *   body: { extensionId, otp }
+ */
+export const verifyBookingExtensionOtp = asyncHandler(async (req, res) => {
+  const result = await verifyExtensionOtpService(req.user._id, req.params.id, req.body);
+  return res
+    .status(200)
+    .json(new ApiResponse(200, result, 'Code verified. Proceed to pay.'));
+});
+
+/**
+ * POST /auth/bookings/:id/extensions/pay
+ *
+ * Phase 3. Customer confirms payment from wallet. The fareDelta is
+ * debited atomically; on success the row becomes `accepted` and the
+ * booking is broadcast to all parties.
+ *
+ *   body: { extensionId }
+ */
+export const payBookingExtension = asyncHandler(async (req, res) => {
+  const result = await payExtensionService(req.user._id, req.params.id, req.body);
+  return res
+    .status(200)
+    .json(new ApiResponse(200, result, 'Extension paid'));
+});
+
+/**
+ * POST /auth/bookings/:id/extensions/cancel
+ *
+ * Drop an open extension intent (either `pending_otp` or
+ * `pending_payment`). Used by the "Change hours" / dismiss-mid-flow
+ * paths so the next initiate isn't blocked by a stale row.
+ *
+ *   body: { extensionId }
+ */
+export const cancelBookingExtension = asyncHandler(async (req, res) => {
+  const result = await cancelExtensionService(req.user._id, req.params.id, req.body);
+  return res
+    .status(200)
+    .json(new ApiResponse(200, result, 'Extension cancelled'));
+});
+
+/**
+ * POST /driver/bookings/:id/extensions/dismiss
+ *
+ * Driver-side endpoint. The driver is dismissing the customer's
+ * extension request before the customer either verifies the OTP or
+ * pays. We mark the row declined + `dismissedByDriver` so the
+ * customer's app can show a "Driver dismissed — try again" state.
+ *
+ *   body: { extensionId }
+ */
+export const driverDismissBookingExtension = asyncHandler(async (req, res) => {
+  const result = await dismissExtensionByDriverService(
+    req.driver._id,
+    req.params.id,
+    req.body,
+  );
+  return res
+    .status(200)
+    .json(new ApiResponse(200, result, 'Extension dismissed'));
 });
 
 /**

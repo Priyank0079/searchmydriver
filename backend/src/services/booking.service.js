@@ -1,7 +1,10 @@
 import Booking, { BOOKING_PAYMENT_METHOD } from '../models/booking.model.js';
 import { ApiError } from '../utils/apiError.js';
 import { generateBookingNumber } from '../utils/orderNumber.util.js';
-import { estimateFareService } from './pricing.service.js';
+import {
+  estimateFareService,
+  getServicePricingByTypeService,
+} from './pricing.service.js';
 import {
   cancelPaymentTimeout,
   releaseDriverFromBooking,
@@ -21,8 +24,15 @@ import {
   REFUND_INITIATED_BY,
 } from './refund.service.js';
 import {
+  releaseBookingBufferHold,
+  clearPendingExtensionsOnTerminate,
+} from './bookingExtension.service.js';
+import {
   debitWalletService,
   creditWalletService,
+  holdWalletService,
+  releaseWalletHoldService,
+  getWalletService,
 } from './wallet.service.js';
 import { WALLET_TXN_SOURCE } from '../models/walletTransaction.model.js';
 import {
@@ -112,6 +122,48 @@ function buildFareSnapshot(estimate) {
 }
 
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+
+/**
+ * Snapshot the live waiting-charge policy for a service onto the
+ * booking's `waiting` sub-doc at creation time. The buffer rupees
+ * (= maxBillableMinutes × chargePerMinute) is what gets collected
+ * upfront alongside the fare. Per-minute / free-wait / max-billable
+ * are stamped here too so the live driver UI can render the ticker
+ * and the no-show settlement uses the *same* policy the customer
+ * was charged under, even if the admin tweaks pricing mid-flight.
+ *
+ * Returns a fully-shaped `booking.waiting` POJO — callers just spread
+ * it onto the Booking.create payload.
+ */
+async function buildWaitingChargeSnapshot(serviceType) {
+  let pricing = null;
+  try {
+    pricing = await getServicePricingByTypeService(serviceType);
+  } catch (err) {
+    console.warn(
+      '[booking] waiting-charge snapshot pricing lookup failed:',
+      err?.message,
+    );
+  }
+  const cfg = pricing?.waitingCharge || {};
+  const freeMinutes = Math.max(0, Number(cfg.freeWaitingMinutes) || 0);
+  const perMinuteRupees = Math.max(0, Number(cfg.chargePerMinute) || 0);
+  const maxBillableMinutes = Math.max(0, Number(cfg.maxBillableMinutes) || 0);
+  const bufferRupees = round2(maxBillableMinutes * perMinuteRupees);
+  return {
+    waitedMinutes: 0,
+    billableMinutes: 0,
+    chargeRupees: 0,
+    freeMinutes,
+    perMinuteRupees,
+    maxBillableMinutes,
+    bufferRupees,
+    bufferConsumedRupees: 0,
+    bufferRefundRupees: 0,
+    bufferRefundTxId: null,
+    noShow: false,
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /* Find existing active booking                                        */
@@ -657,20 +709,83 @@ export async function createBookingService(userId, body) {
     throw new ApiError(500, 'Fare engine returned a zero total. Check pricing configuration.');
   }
 
+  // Snapshot the live waiting-charge policy so the buffer is locked in
+  // at booking-creation time — a mid-flight admin tweak can't shift the
+  // amount we reserved against the user's wallet.
+  const waitingSnapshot = await buildWaitingChargeSnapshot(serviceType);
+
   const bookingNumber = generateBookingNumber();
 
-  // Pay-then-search: atomically debit the wallet BEFORE creating the
-  // booking. If the user is short the helper throws ApiError(402, ...)
-  // with `{ requiredAmount, walletBalance, shortBy }` in `err.data` so
-  // the FE can deep-link the user to the right top-up amount.
+  // Pay-then-search with a soft hold for the waiting buffer:
+  //   1. Pre-check the wallet can cover fare + buffer (so a short wallet
+  //      surfaces a single clear "you need ₹X" error, before any side
+  //      effects).
+  //   2. Debit only the fare (the buffer is NOT debited — see below).
+  //   3. Hold the buffer (`wallet.heldRupees += bufferRupees`). The
+  //      money stays in the wallet but `availableRupees = balance −
+  //      heldRupees` drops, so the user can't spend it elsewhere.
+  //
+  // The hold is settled at trip-end: the actual accrued waiting charge
+  // is debited (via `bypassHeld: true`) and the rest of the hold is
+  // released back to spendable.
+  const fareTotal = round2(fareSnapshot.total);
+  const bufferRupees = round2(waitingSnapshot.bufferRupees);
+  const requiredAmount = round2(fareTotal + bufferRupees);
+
+  const walletSnapshot = await getWalletService(userId);
+  if ((walletSnapshot?.availableRupees ?? 0) < requiredAmount) {
+    const available = walletSnapshot?.availableRupees ?? 0;
+    const heldRupees = walletSnapshot?.heldRupees ?? 0;
+    const message =
+      bufferRupees > 0
+        ? `You need \u20B9${requiredAmount} in your wallet to book this ride (\u20B9${fareTotal} fare + \u20B9${bufferRupees} refundable waiting reserve).`
+        : `You need \u20B9${requiredAmount} in your wallet to book this ride.`;
+    throw new ApiError(402, message, {
+      requiredAmount,
+      fareAmount: fareTotal,
+      bufferAmount: bufferRupees,
+      walletBalance: walletSnapshot?.balance || 0,
+      heldRupees,
+      availableRupees: available,
+      shortBy: round2(Math.max(0, requiredAmount - available)),
+    });
+  }
+
   const walletTx = await debitWalletService({
     userId,
-    amount: fareSnapshot.total,
+    amount: fareTotal,
     source: WALLET_TXN_SOURCE.BOOKING_PAYMENT,
     description: `Booking ${bookingNumber} \u2014 ${serviceType}`,
     refType: 'Booking',
     refId: bookingNumber, // _id isn't known yet; we patch refId below.
   });
+
+  // Hold the buffer. If this fails (e.g. another concurrent booking
+  // grabbed the available wallet between our pre-check and now), undo
+  // the fare debit so the user isn't left with money missing AND no
+  // booking.
+  if (bufferRupees > 0) {
+    try {
+      await holdWalletService({ userId, amount: bufferRupees });
+    } catch (holdErr) {
+      try {
+        await creditWalletService({
+          userId,
+          amount: fareTotal,
+          source: WALLET_TXN_SOURCE.BOOKING_REFUND,
+          description: `Refund \u2014 booking ${bookingNumber} hold failed`,
+          refType: 'Booking',
+          refId: bookingNumber,
+        });
+      } catch (refundErr) {
+        console.error(
+          '[booking] CRITICAL: failed to credit wallet after hold-failure rollback:',
+          refundErr,
+        );
+      }
+      throw holdErr;
+    }
+  }
 
   // Best-effort lookup of every zone the pickup falls inside. Stamped
   // on the booking so the admin emergency-pool filter (team_member only
@@ -720,15 +835,17 @@ export async function createBookingService(userId, body) {
             }
           : null,
       fareSnapshot,
-      // Booking is already paid up-front via the wallet. Skip the
-      // legacy AWAITING_PAYMENT detour entirely — the dispatcher's
-      // `alreadyPaid` branch in acceptBookingService keeps the new
-      // driver on a clean DRIVER_ASSIGNED transition.
+      waiting: waitingSnapshot,
+      // Booking is already paid up-front via the wallet. Only the fare
+      // total was debited; the waiting buffer is held against
+      // `wallet.heldRupees` (no money has left the wallet for it).
+      // The settle path debits the actual waiting charge at trip-end
+      // and releases the rest of the hold.
       paymentMode: PAYMENT_MODE.PRE_RIDE,
       paymentMethod: BOOKING_PAYMENT_METHOD.WALLET,
       paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
       payment: {
-        amountPaidRupees: fareSnapshot.total,
+        amountPaidRupees: fareTotal,
         attempts: 0,
         walletTxId: walletTx._id,
       },
@@ -743,14 +860,19 @@ export async function createBookingService(userId, body) {
     // debited the wallet — we never want money silently stuck in the
     // ledger without a booking to back it up.
     try {
+      // Roll back the fare debit AND release the buffer hold so the
+      // user is whole again.
       await creditWalletService({
         userId,
-        amount: fareSnapshot.total,
+        amount: fareTotal,
         source: WALLET_TXN_SOURCE.BOOKING_REFUND,
         description: `Refund \u2014 booking ${bookingNumber} failed to create`,
         refType: 'Booking',
         refId: bookingNumber,
       });
+      if (bufferRupees > 0) {
+        await releaseWalletHoldService({ userId, amount: bufferRupees });
+      }
     } catch (refundErr) {
       console.error(
         '[booking] CRITICAL: failed to credit wallet after booking-create rollback:',
@@ -847,6 +969,13 @@ export async function cancelBookingByUserService(userId, bookingId, reason = '')
   if (wasPaid && paidViaWallet && refundAmount > 0) {
     booking.paymentStatus = BOOKING_PAYMENT_STATUS.REFUNDED;
   }
+  // Release the waiting-buffer hold (if any). The buffer was reserved
+  // at booking creation against `wallet.heldRupees`; a cancel means it
+  // never gets used, so the whole hold goes back to spendable.
+  await releaseBookingBufferHold(booking);
+  // And sweep any pending extension intent (OTP unverified / unpaid)
+  // — the booking is gone, the driver banner must go too.
+  await clearPendingExtensionsOnTerminate(booking, 'user_cancelled');
   await booking.save();
 
   // Stop any pay-deadline timer and release the assigned driver so the
@@ -1011,6 +1140,13 @@ export async function adminMarkNoDriversFoundService(bookingId) {
   if (wasPaid && paidViaWallet && refundAmount > 0) {
     booking.paymentStatus = BOOKING_PAYMENT_STATUS.REFUNDED;
   }
+  // No-driver-found terminates the booking — release any reserved
+  // waiting buffer back into the user's spendable wallet.
+  await releaseBookingBufferHold(booking);
+  // (Defensive — extensions only exist post-STARTED, but the
+  // earlier-stage helper is idempotent and protects us against
+  // future flow changes.)
+  await clearPendingExtensionsOnTerminate(booking, 'no_drivers_found');
   await booking.save();
 
   if (wasPaid && refundAmount > 0) {

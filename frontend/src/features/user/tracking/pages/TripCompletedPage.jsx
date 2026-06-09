@@ -27,8 +27,10 @@ const TripCompletedPage = () => {
   const totalFare = useMemo(() => {
     if (!booking) return null;
     const base = booking.fareSnapshot?.total || 0;
+    // Only paid extensions belong in the trip total.
     const extensions = (booking.extensions || []).reduce(
-      (sum, ext) => sum + (ext?.fareDelta || 0),
+      (sum, ext) =>
+        sum + (ext?.status === 'accepted' ? Number(ext.fareDelta) || 0 : 0),
       0,
     );
     return base + extensions || null;

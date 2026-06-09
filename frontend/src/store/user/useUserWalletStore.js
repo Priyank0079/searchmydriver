@@ -20,9 +20,34 @@ import api from '../../utils/api';
 
 const EMPTY_WALLET = {
   balance: 0,
+  // Portion of `balance` reserved against active bookings' waiting buffer.
+  // Subtract this from `balance` to get the truly spendable amount.
+  heldRupees: 0,
+  availableRupees: 0,
   totalCredited: 0,
   totalSpent: 0,
   currency: 'INR',
+};
+
+// Normalise the server's wallet shape into a fully-defaulted object so
+// every consumer (top-bar badge, confirm screen, wallet page) can rely
+// on the held/available fields existing even on old API responses.
+const normaliseWallet = (wallet, prev = EMPTY_WALLET) => {
+  const w = wallet || {};
+  const balance = Number(w.balance) || 0;
+  const heldRupees = Number(w.heldRupees) || 0;
+  const available =
+    w.availableRupees != null
+      ? Number(w.availableRupees) || 0
+      : Math.max(0, Math.round((balance - heldRupees) * 100) / 100);
+  return {
+    balance,
+    heldRupees,
+    availableRupees: available,
+    totalCredited: Number(w.totalCredited) || 0,
+    totalSpent: Number(w.totalSpent) || 0,
+    currency: w.currency || prev.currency || 'INR',
+  };
 };
 
 const useUserWalletStore = create((set, get) => ({
@@ -39,14 +64,7 @@ const useUserWalletStore = create((set, get) => ({
   /** Replace the wallet snapshot wholesale (used after a verified top-up). */
   applyWallet(wallet) {
     if (!wallet) return;
-    set((state) => ({
-      wallet: {
-        balance: Number(wallet.balance) || 0,
-        totalCredited: Number(wallet.totalCredited) || 0,
-        totalSpent: Number(wallet.totalSpent) || 0,
-        currency: wallet.currency || state.wallet.currency || 'INR',
-      },
-    }));
+    set((state) => ({ wallet: normaliseWallet(wallet, state.wallet) }));
   },
 
   async fetchWallet() {
@@ -55,17 +73,12 @@ const useUserWalletStore = create((set, get) => ({
       const res = await api.get('/auth/wallet');
       const wallet = res?.data?.data?.wallet || EMPTY_WALLET;
       const limits = res?.data?.data?.limits || get().limits;
-      set({
-        wallet: {
-          balance: Number(wallet.balance) || 0,
-          totalCredited: Number(wallet.totalCredited) || 0,
-          totalSpent: Number(wallet.totalSpent) || 0,
-          currency: wallet.currency || 'INR',
-        },
+      set((state) => ({
+        wallet: normaliseWallet(wallet, state.wallet),
         limits,
         loading: false,
         fetched: true,
-      });
+      }));
       return wallet;
     } catch (err) {
       const message =
