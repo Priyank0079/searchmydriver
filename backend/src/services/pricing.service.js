@@ -8,6 +8,7 @@ import {
   SUBSCRIPTION_DISCOUNT_TYPES,
   SUBSCRIPTION_STATUS,
 } from '../constants/serviceTypes.js';
+import { normaliseOutstationPolicy } from './bookingOutstationCancellation.service.js';
 
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
@@ -77,30 +78,52 @@ export const deleteServicePricingService = async (id) => {
 };
 
 function validatePricingForType(serviceType, data) {
-  // Waiting-charge policy is shared across service types — every service
-  // gets a buffer collected upfront. Validate before the per-type checks
-  // so a buffer/cadence mismatch is surfaced as a single clear 400.
-  validateWaitingCharge(data.waitingCharge);
+  // Waiting-charge / no-show buffer is a HOURLY-only concept: the
+  // driver arrives → waits → bills the customer if they no-show. The
+  // outstation flow is scheduled days in advance and has its own
+  // time-based cancellation policy (see `cancellation.outstation`), so
+  // we skip the cadence validation for it AND force-zero the
+  // waitingCharge values so a stale form payload can't sneak a buffer
+  // onto an outstation pricing doc.
   if (serviceType === SERVICE_TYPES.HOURLY) {
+    validateWaitingCharge(data.waitingCharge);
     validateSlabs(data.slabs);
     validateCustomHours(data.customHours);
     validateHourlyFoodAllowance(data.foodAllowance);
     validateHourlyStayAllowance(data.stayAllowance);
   } else if (serviceType === SERVICE_TYPES.OUTSTATION) {
+    data.waitingCharge = ZERO_WAITING_CHARGE();
     const o = data.outstation || {};
     if (o.dailyRate == null || o.dailyRate < 0) {
       throw new ApiError(400, 'Outstation: dailyRate must be a non-negative number');
     }
+    if (o.allowancePerNight != null && o.allowancePerNight < 0) {
+      throw new ApiError(
+        400,
+        'Outstation: allowancePerNight must be a non-negative number',
+      );
+    }
     if (o.minDays && o.maxDays && o.maxDays > 0 && o.maxDays < o.minDays) {
       throw new ApiError(400, 'Outstation: maxDays must be greater than minDays');
     }
-    if (o.kmIncludedPerDay > 0 && (!o.extraKmRate || o.extraKmRate < 0)) {
-      throw new ApiError(
-        400,
-        'Outstation: extraKmRate is required when kmIncludedPerDay is set',
-      );
-    }
   }
+}
+
+/**
+ * Canonical "no waiting buffer" payload used to neutralise the
+ * waitingCharge sub-doc for service types that don't have a driver-
+ * arrival → wait → bill cycle (currently outstation). Returning a
+ * fresh object on each call so callers can mutate freely.
+ */
+function ZERO_WAITING_CHARGE() {
+  return {
+    freeWaitingMinutes: 0,
+    chargePerMinute: 0,
+    noShowPromptMinutes: 0,
+    noShowGraceMinutes: 0,
+    maxNoShowPrompts: 0,
+    maxBillableMinutes: 0,
+  };
 }
 
 function validateSlabs(slabs) {
@@ -516,13 +539,35 @@ export function calculateHourlyFare({
 
 // ─── OUTSTATION fare ──────────────────────────────────────────────────────────
 
+/**
+ * Outstation pricing model:
+ *   subtotal = dailyRate × days
+ *            + (customerArrangesAll ? 0 : allowancePerNight × nights)
+ *
+ * `customerArrangesAll` is the customer's single all-or-nothing
+ * commitment to arrange BOTH the driver's food AND stay themselves.
+ * It's derived from `foodProvided && stayProvided` so the legacy
+ * two-flag client payload still works — the customer UI today only
+ * exposes one toggle that flips both flags in lockstep.
+ *
+ * Toll & parking are NEVER added to the outstation fare. The customer
+ * pays those directly to the driver during the trip; the booking flow
+ * surfaces a notice but no rupee is added here.
+ *
+ * The legacy line items (`extraKmCharge`, `nightHaltTotal`,
+ * `foodAllowanceTotal`, `stayChargeTotal`, `tollParking`) are kept in
+ * the response shape — always 0 — so older clients reading those
+ * fields don't crash.
+ */
 export function calculateOutstationFare({
   pricing,
   days = 1,
-  actualKm = 0,
+  // `actualKm` and `tollParking` accepted for back-compat with older
+  // callers; both are no-ops in the new pricing model.
+  actualKm: _actualKm = 0, // eslint-disable-line no-unused-vars
   foodProvided = true,
   stayProvided = true,
-  tollParking = 0,
+  tollParking: _tollParking = 0, // eslint-disable-line no-unused-vars
   subscription = null,
 } = {}) {
   if (!pricing) throw new ApiError(400, 'Service pricing is required for fare calculation');
@@ -531,57 +576,54 @@ export function calculateOutstationFare({
   const tripDays = Math.max(1, Math.ceil(days));
   const nights = Math.max(0, tripDays - 1);
 
-  const dailyRateTotal = (o.dailyRate || 0) * tripDays;
+  const dailyRate = Number(o.dailyRate) || 0;
+  const allowancePerNight = Number(o.allowancePerNight) || 0;
 
-  // Extra km (only when kmIncludedPerDay > 0)
-  let extraKm = 0;
-  let extraKmCharge = 0;
-  if (o.kmIncludedPerDay > 0 && actualKm > 0) {
-    const includedTotal = o.kmIncludedPerDay * tripDays;
-    extraKm = Math.max(0, actualKm - includedTotal);
-    extraKmCharge = extraKm * (o.extraKmRate || 0);
-  }
+  const dailyRateTotal = dailyRate * tripDays;
 
-  const nightHaltTotal = (o.nightHaltCharge || 0) * nights;
+  // Single all-or-nothing toggle on the customer side. Convention:
+  //   foodProvided/stayProvided === true   → that need is taken care
+  //                                          of (by the customer or
+  //                                          included in base) → no
+  //                                          allowance charged for it
+  //   foodProvided/stayProvided === false  → that need is NOT taken
+  //                                          care of → allowance must
+  //                                          be charged
+  // Only when BOTH flags are explicitly `true` do we waive the
+  // per-night allowance. The booking-create defaults remain
+  // `?? true` upstream so legacy clients that omit the flags keep
+  // their "no extra charge" behaviour.
+  const customerArrangesAll = foodProvided === true && stayProvided === true;
+  const allowanceTotal = customerArrangesAll
+    ? 0
+    : allowancePerNight * nights;
 
-  const foodAllowanceTotal =
-    pricing.foodAllowance?.enabled && foodProvided === false
-      ? (pricing.foodAllowance.amount || 0) * tripDays
-      : 0;
-
-  const stayChargeTotal =
-    stayProvided === false ? (o.stayChargePerNight || 0) * nights : 0;
-
-  const toll = pricing.tollParkingEnabled ? Math.max(0, tollParking || 0) : 0;
-
-  const subtotal =
-    dailyRateTotal +
-    extraKmCharge +
-    nightHaltTotal +
-    foodAllowanceTotal +
-    stayChargeTotal +
-    toll;
-
+  const subtotal = dailyRateTotal + allowanceTotal;
   const layers = applyPlatformLayers(subtotal, pricing, subscription);
 
   return {
     serviceType: SERVICE_TYPES.OUTSTATION,
     days: tripDays,
     nights,
-    dailyRate: round2(o.dailyRate || 0),
+    // ── New shape ──
+    dailyRate: round2(dailyRate),
     dailyRateTotal: round2(dailyRateTotal),
-    kmIncludedTotal: round2((o.kmIncludedPerDay || 0) * tripDays),
-    extraKm: round2(extraKm),
-    extraKmCharge: round2(extraKmCharge),
-    nightHaltCharge: round2(o.nightHaltCharge || 0),
-    nightHaltTotal: round2(nightHaltTotal),
-    foodAllowancePerDay: round2(pricing.foodAllowance?.amount || 0),
-    foodAllowanceTotal: round2(foodAllowanceTotal),
-    stayChargePerNight: round2(o.stayChargePerNight || 0),
-    stayChargeTotal: round2(stayChargeTotal),
-    tollParking: round2(toll),
-    foodProvided,
-    stayProvided,
+    allowancePerNight: round2(allowancePerNight),
+    allowanceTotal: round2(allowanceTotal),
+    customerArrangesAll,
+    foodProvided: foodProvided === true,
+    stayProvided: stayProvided === true,
+    // ── Legacy fields (always 0 in the new model) ──
+    kmIncludedTotal: 0,
+    extraKm: 0,
+    extraKmCharge: 0,
+    nightHaltCharge: 0,
+    nightHaltTotal: 0,
+    foodAllowancePerDay: 0,
+    foodAllowanceTotal: 0,
+    stayChargePerNight: 0,
+    stayChargeTotal: 0,
+    tollParking: 0,
     subtotal: round2(subtotal),
     ...layers,
   };
@@ -748,10 +790,31 @@ export const estimateFareService = async ({
       pricingId: pricing._id,
       serviceType: pricing.serviceType,
       serviceName: pricing.name,
-      waitingBuffer: buildWaitingBufferPreview(pricing),
+      // Outstation has no pickup-side waiting policy \u2014 the driver
+      // travels with the customer for the entire round trip, so there's
+      // no "free wait \u2192 per-min ticker" moment to bill for. We
+      // return an empty buffer descriptor so the customer-facing
+      // FareCard hides the "Waiting reserve" line and the wallet check
+      // doesn't pre-hold money that will never be used.
+      waitingBuffer: {
+        bufferRupees: 0,
+        freeWaitingMinutes: 0,
+        chargePerMinute: 0,
+        maxBillableMinutes: 0,
+        maxNoShowPrompts: 0,
+        noShowPromptMinutes: 0,
+        noShowGraceMinutes: 0,
+      },
       isNightRide: isNight,
       fareBreakdown: breakdown,
       subscription: serializeSubscriptionForResponse(subscription),
+      // Outstation cancellation policy snapshot — surfaced so the
+      // review/confirm page can render a "Cancellation policy"
+      // summary without a separate fetch. Mirrors the
+      // `cancellation.outstation` sub-doc on `ServicePricing`.
+      cancellationPolicy: {
+        outstation: normaliseOutstationPolicy(pricing.cancellation?.outstation),
+      },
     };
   }
 

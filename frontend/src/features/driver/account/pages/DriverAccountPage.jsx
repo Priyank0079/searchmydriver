@@ -1,5 +1,6 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import {
   User,
   FileText,
@@ -21,10 +22,13 @@ import {
   Circle,
   Calendar,
   Briefcase,
+  Compass,
 } from 'lucide-react';
 import Card from '../../../../components/Card';
 import Avatar from '../../../../components/Avatar';
 import Badge from '../../../../components/Badge';
+import Toggle from '../../../../components/Toggle';
+import api from '../../../../utils/api';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
 import { useDriverProfileStore } from '../../../../store/driver/useDriverProfileStore';
 import { useDriverHomeSummaryStore } from '../../../../store/driver/useDriverTripsStore';
@@ -248,6 +252,11 @@ const DriverAccountPage = () => {
         />
       )}
 
+      <OutstationOptInCard
+        initial={!!driver?.availableForOutstation}
+        updatedAt={driver?.outstationAvailabilityUpdatedAt || null}
+      />
+
       {MENU_GROUPS.map((group) => (
         <div key={group.title}>
           <p className="px-1 mb-2 text-[11px] uppercase tracking-wide font-semibold text-text-muted">
@@ -342,6 +351,105 @@ function StatsRow({ today, wallet }) {
           </p>
         </Card>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Driver-side opt-in for the admin-managed outstation queue. Toggling
+ * this on means dispatchers can pick this driver for multi-day round
+ * trips; toggling off hides the driver from the picker entirely.
+ *
+ * We do an optimistic UI flip so the toggle feels instant, and roll
+ * back if the API rejects (e.g. network down). The persisted profile
+ * store is also refetched on success so the surfaced state matches
+ * the server.
+ */
+function OutstationOptInCard({ initial, updatedAt }) {
+  const refetchProfile = useDriverProfileStore((s) => s.fetch);
+  const profileKey = buildCacheKey('driver-profile', {});
+  const [available, setAvailable] = useState(initial);
+  const [saving, setSaving] = useState(false);
+
+  // Re-sync local state if the server profile changes (e.g. another
+  // device toggled the same field, or the initial fetch landed after
+  // the component mounted). Mirroring server-owned state is exactly
+  // the case the rule explicitly allows \u2014 silenced with the
+  // same convention used elsewhere in this codebase.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirroring server-fetched value
+    setAvailable(initial);
+  }, [initial]);
+
+  const onChange = async (next) => {
+    if (saving) return;
+    setAvailable(next);
+    setSaving(true);
+    try {
+      await api.put('/driver/preferences/outstation-availability', {
+        available: next,
+      });
+      toast.success(
+        next
+          ? "You're now visible for outstation trips"
+          : "You've opted out of outstation trips",
+      );
+      refetchProfile?.(profileKey, {}, { force: true });
+    } catch (err) {
+      setAvailable(!next);
+      toast.error(
+        err?.response?.data?.message ||
+          "Couldn't update your outstation preference",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <p className="px-1 mb-2 text-[11px] uppercase tracking-wide font-semibold text-text-muted">
+        Trip preferences
+      </p>
+      <Card padding="p-4">
+        <div className="flex items-start gap-3">
+          <div
+            className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+              available ? 'bg-primary/15' : 'bg-bg'
+            }`}
+          >
+            <Compass
+              className={`w-5 h-5 ${
+                available ? 'text-primary' : 'text-text-secondary'
+              }`}
+            />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-text">
+                  Available for outstation
+                </p>
+                <p className="text-[11px] text-text-muted mt-0.5 leading-snug">
+                  Outstation trips are multi-day round trips assigned to
+                  you by the admin. Turn this on if you can take overnight
+                  jobs \u2014 you can switch it off any time.
+                </p>
+                {updatedAt && (
+                  <p className="text-[10px] text-text-muted mt-1.5">
+                    Last updated {formatDate(updatedAt)}
+                  </p>
+                )}
+              </div>
+              <Toggle
+                checked={available}
+                onChange={onChange}
+                disabled={saving}
+              />
+            </div>
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }

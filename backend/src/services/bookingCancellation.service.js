@@ -1,5 +1,12 @@
 import ServicePricing from '../models/servicePricing.model.js';
 import { BOOKING_STATUS } from '../constants/bookingStatus.js';
+import { SERVICE_TYPES } from '../constants/serviceTypes.js';
+import {
+  DEFAULT_OUTSTATION_POLICY,
+  computeOutstationDriverCancellation,
+  computeOutstationUserCancellation,
+  normaliseOutstationPolicy,
+} from './bookingOutstationCancellation.service.js';
 
 /**
  * Cancellation-fee computation.
@@ -41,6 +48,7 @@ const DEFAULT_POLICY = Object.freeze({
   driverCancellationPenalty: 50,
   driverGraceMinutes: 2,
   driverDailyFreeCancellations: 3,
+  outstation: DEFAULT_OUTSTATION_POLICY,
 });
 
 /**
@@ -114,6 +122,11 @@ export async function loadCancellationPolicy(serviceType) {
       typeof cfg.driverDailyFreeCancellations === 'number'
         ? Math.max(0, cfg.driverDailyFreeCancellations)
         : DEFAULT_POLICY.driverDailyFreeCancellations,
+    // Outstation has its own TIME-driven policy. Always present (filled
+    // with the schema defaults when the admin hasn't customised it) so
+    // every downstream caller can read `policy.outstation.<knob>`
+    // without a presence check.
+    outstation: normaliseOutstationPolicy(cfg.outstation),
   };
 }
 
@@ -154,6 +167,25 @@ export function splitCancellationFee(feeCharged, policy) {
  * exactly to `feeCharged`.
  */
 export function computeUserCancellation(booking, policy) {
+  // Outstation runs on a TIME-driven policy that's wildly different
+  // from the hourly STATUS-driven one. We branch here so the existing
+  // hourly call-sites keep working untouched.
+  if (booking?.serviceType === SERVICE_TYPES.OUTSTATION) {
+    const outstation = computeOutstationUserCancellation(
+      booking,
+      policy?.outstation,
+    );
+    const { driverShare, companyShare } = splitCancellationFee(
+      outstation.feeCharged,
+      policy,
+    );
+    return {
+      ...outstation,
+      driverShare,
+      companyShare,
+    };
+  }
+
   const paid = round2(Number(booking?.payment?.amountPaidRupees) || 0);
   const status = booking?.status;
   const tripStarted = status === BOOKING_STATUS.STARTED;
@@ -263,6 +295,21 @@ export function evaluateDriverCancelChance(driver, booking, policy, now = new Da
  * audit the decision.
  */
 export function computeDriverCancellation(booking, policy, chance = null) {
+  // Outstation: hours-until-pickup tiered policy, independent of the
+  // hourly grace/chance model. We still surface `refundAmount` (mirror
+  // of the user-side preview) so the FE shows what the customer gets.
+  if (booking?.serviceType === SERVICE_TYPES.OUTSTATION) {
+    const outstation = computeOutstationDriverCancellation(
+      booking,
+      policy?.outstation,
+    );
+    const userBreakdown = computeUserCancellation(booking, policy);
+    return {
+      ...outstation,
+      refundAmount: userBreakdown.refundAmount,
+    };
+  }
+
   const paid = round2(Number(booking?.payment?.amountPaidRupees) || 0);
   const tripStarted = booking?.status === BOOKING_STATUS.STARTED;
   const fullPenalty = round2(Number(policy?.driverCancellationPenalty) || 0);

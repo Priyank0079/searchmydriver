@@ -399,3 +399,38 @@ export const getProfileService = async (driverId) => {
   };
   return doc;
 };
+
+/**
+ * Driver-side toggle for "I can take outstation (round-trip) bookings".
+ *
+ * Outstation rides are manually dispatched from the admin queue (see
+ * `bookingOutstationAssignment.service.js`). The picker only lists
+ * drivers with `availableForOutstation === true`, so flipping this
+ * flag off means the driver won't appear in the queue at all \u2014
+ * useful for drivers who only want short local hourly trips, or who
+ * are unavailable for multi-day trips this week.
+ *
+ * Returns the same shape `getProfileService` returns so the caller
+ * can hand the result straight back to the FE store.
+ */
+export const updateOutstationAvailabilityService = async (
+  driverId,
+  { available },
+) => {
+  const next = !!available;
+  const driver = await Driver.findByIdAndUpdate(
+    driverId,
+    {
+      $set: {
+        availableForOutstation: next,
+        outstationAvailabilityUpdatedAt: new Date(),
+      },
+    },
+    { new: true },
+  ).populate(vehicleExperiencePopulate);
+  if (!driver) {
+    throw new ApiError(404, 'Driver not found');
+  }
+  driver.documents = dedupeDocumentsByType(driver.documents);
+  return driver.toObject();
+};

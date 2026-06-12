@@ -6,7 +6,12 @@ import { Loader2 } from 'lucide-react';
 import { MAX_USER_CARS } from '../utils/constants';
 import { userNeedsPhone } from '../features/auth/utils/authNavigation';
 
-const ONBOARDING_PATHS = ['/user/add-car', '/user/my-cars', '/user/checklist'];
+// `/user/checklist` is the only page that's strictly part of the
+// one-time onboarding funnel — once the user has finished it, we
+// bounce them back to home if they revisit. The garage pages
+// (`/user/add-car`, `/user/my-cars`) double as everyday "manage my
+// vehicles" surfaces, so they must remain reachable post-onboarding
+// (e.g. when the customer hits "Add car" from the booking flow).
 const GARAGE_PATHS = ['/user/my-cars', '/user/add-car'];
 
 const UserOnboardingGuard = () => {
@@ -83,8 +88,18 @@ const UserOnboardingGuard = () => {
   const onPath = (paths) => paths.some((p) => path.startsWith(p));
 
   if (hasChecklist) {
-    if (onPath(ONBOARDING_PATHS)) {
+    // Completed user trying to revisit the checklist — send them home.
+    // Garage paths and the dashboard remain accessible.
+    if (path.startsWith('/user/checklist')) {
       return <Navigate to="/user/home" replace />;
+    }
+    // Already at the car cap — send them to the garage instead of an
+    // add-car form that the API would reject anyway.
+    if (
+      carCount >= MAX_USER_CARS &&
+      path.startsWith('/user/add-car')
+    ) {
+      return <Navigate to="/user/my-cars" replace />;
     }
     return <Outlet />;
   }

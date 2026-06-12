@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Clock, Check, Loader2, Utensils, BedDouble } from 'lucide-react';
+import {
+  ArrowLeft,
+  Clock,
+  Check,
+  Loader2,
+  HandCoins,
+  RefreshCw,
+  CalendarRange,
+  AlertCircle,
+} from 'lucide-react';
 import Card from '../../../../components/Card';
 import Button from '../../../../components/Button';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
@@ -8,6 +17,12 @@ import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
 import { useUserServicePricingsStore } from '../../../../store/user/useUserPricingStore';
 import { SERVICE_TYPES } from '../../../../constants/serviceTypes';
 import useBookingDraftStore from '../../../../store/user/useBookingDraftStore';
+import {
+  computeOutstationDuration,
+  defaultPickupInputValue,
+  defaultReturnInputValue,
+  toDateTimeInputValue,
+} from '../../../../utils/outstationSchedule';
 
 /**
  * Step 3 — pick duration (hourly) or date range (outstation).
@@ -51,7 +66,7 @@ const SelectDurationPage = () => {
         pricing={servicePricing}
         draft={hourlyDraft}
         onPatch={setHourly}
-        onContinue={() => navigate('/user/book/review')}
+        onContinue={() => navigate('/user/book/confirm')}
       />
     );
   }
@@ -61,7 +76,7 @@ const SelectDurationPage = () => {
       pricing={servicePricing}
       draft={outstationDraft}
       onPatch={setOutstation}
-      onContinue={() => navigate('/user/book/review')}
+      onContinue={() => navigate('/user/book/confirm')}
     />
   );
 };
@@ -169,45 +184,96 @@ function HourlyBranch({ pricing, draft, onPatch, onContinue }) {
 
 function OutstationBranch({ pricing, draft, onPatch, onContinue }) {
   const navigate = useNavigate();
-  const [startDate, setStartDate] = useState(draft.startDate || todayIso());
-  const [endDate, setEndDate] = useState(draft.endDate || tomorrowIso());
-  const [destination, setDestination] = useState(draft.destinationAddress || '');
-  const [needsStay, setNeedsStay] = useState(draft.needsStay ?? true);
-  const [needsFood, setNeedsFood] = useState(draft.needsFood ?? true);
+  const initialPickup =
+    toDateTimeInputValue(draft.pickupAt || draft.startDate) ||
+    defaultPickupInputValue();
+  const initialReturn =
+    toDateTimeInputValue(draft.expectedReturnAt || draft.endDate) ||
+    defaultReturnInputValue(initialPickup);
 
-  const days = useMemo(() => {
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const ms = end.getTime() - start.getTime();
-    return Math.max(1, Math.ceil(ms / (24 * 60 * 60 * 1000)) + 1);
-  }, [startDate, endDate]);
-  const nights = Math.max(0, days - 1);
+  const [pickupAt, setPickupAt] = useState(initialPickup);
+  const [expectedReturnAt, setExpectedReturnAt] = useState(initialReturn);
+  const [destination, setDestination] = useState(draft.destinationAddress || '');
+  // Single all-or-nothing toggle: the customer commits to arranging
+  // BOTH the driver's food AND stay themselves to skip the per-night
+  // allowance. We mirror the boolean into both `needsFood` and
+  // `needsStay` for the backend (it AND's them in the engine — both
+  // must be `true` for the allowance to be waived).
+  const initialArranges = draft.needsFood === true && draft.needsStay === true;
+  const [customerArrangesAll, setCustomerArrangesAll] = useState(initialArranges);
+
+  // Days = number of distinct calendar dates the trip spans; nights =
+  // days \u2212 1. Shared with the backend so the provisional fare
+  // here matches the server's authoritative breakdown on Review.
+  const { days, nights } = useMemo(
+    () => computeOutstationDuration(pickupAt, expectedReturnAt),
+    [pickupAt, expectedReturnAt],
+  );
+
+  // Auto-bump return when pickup pushes past it; keeps the diff
+  // non-negative without forcing a separate validation message.
+  const onPickupChange = (value) => {
+    setPickupAt(value);
+    if (
+      value &&
+      expectedReturnAt &&
+      new Date(value).getTime() >= new Date(expectedReturnAt).getTime()
+    ) {
+      setExpectedReturnAt(defaultReturnInputValue(value));
+    }
+  };
 
   const handleContinue = () => {
+    const pickupIso = new Date(pickupAt).toISOString();
+    const returnIso = new Date(expectedReturnAt).toISOString();
+    // Both flags flip together so the backend's AND check waives the
+    // allowance only when the customer commits to arranging
+    // everything (food AND stay). Convention: `true` here = "this
+    // need is arranged by the customer" → no allowance.
     onPatch({
       destinationAddress: destination.trim(),
-      startDate: new Date(startDate).toISOString(),
-      endDate: new Date(endDate).toISOString(),
+      pickupAt: pickupIso,
+      expectedReturnAt: returnIso,
+      startDate: pickupIso,
+      endDate: returnIso,
       days,
       nights,
-      needsStay,
-      needsFood,
+      needsStay: customerArrangesAll,
+      needsFood: customerArrangesAll,
     });
     onContinue();
   };
 
-  const dailyRate = pricing?.outstation?.dailyRate || 0;
-  const provisionalTotal = dailyRate * days;
+  // Inline provisional breakdown — same math the server-side
+  // calculateOutstationFare uses (pre-platform subtotal). The
+  // customer sees the full breakdown with GST + service charge on
+  // the Review screen.
+  const o = pricing?.outstation || {};
+  const dailyRate = Number(o.dailyRate) || 0;
+  const allowancePerNight = Number(o.allowancePerNight) || 0;
+
+  const lineDaily = dailyRate * days;
+  const lineAllowance = customerArrangesAll ? 0 : allowancePerNight * nights;
+  const provisionalTotal = lineDaily + lineAllowance;
 
   return (
     <div className="flex-1 flex flex-col bg-bg min-h-dvh">
       <Header
-        title="Trip details"
-        subtitle="We use these to estimate your fare — the final bill is settled at the end."
+        title="Round trip details"
+        subtitle="Pick your travel window — we drop you back at pickup at the end."
         onBack={() => navigate(-1)}
       />
 
       <div className="flex-1 p-4 space-y-4">
+        <div className="rounded-2xl bg-primary/5 border border-primary/20 px-3 py-2 flex items-start gap-2">
+          <RefreshCw className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+          <p className="text-[12px] leading-snug text-primary/90">
+            <strong className="font-semibold">Round trip:</strong> the driver
+            stays with you the whole trip and brings you back to your pickup
+            on day {days}.
+          </p>
+        </div>
+
         <Card>
           <label className="block text-xs font-semibold text-text-muted mb-2">Destination</label>
           <input
@@ -222,28 +288,35 @@ function OutstationBranch({ pricing, draft, onPatch, onContinue }) {
         <Card>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-text-muted mb-2">Start date</label>
+              <label className="block text-xs font-semibold text-text-muted mb-2">
+                Pickup time
+              </label>
               <input
-                type="date"
-                value={startDate.slice(0, 10)}
-                min={todayIso().slice(0, 10)}
-                onChange={(e) => setStartDate(`${e.target.value}T08:00`)}
+                type="datetime-local"
+                value={pickupAt}
+                min={defaultPickupInputValue()}
+                onChange={(e) => onPickupChange(e.target.value)}
                 className="w-full h-11 bg-gray-50 border border-border rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-text-muted mb-2">End date</label>
+              <label className="block text-xs font-semibold text-text-muted mb-2">
+                Expected return
+              </label>
               <input
-                type="date"
-                value={endDate.slice(0, 10)}
-                min={startDate.slice(0, 10)}
-                onChange={(e) => setEndDate(`${e.target.value}T20:00`)}
+                type="datetime-local"
+                value={expectedReturnAt}
+                min={pickupAt}
+                onChange={(e) => setExpectedReturnAt(e.target.value)}
                 className="w-full h-11 bg-gray-50 border border-border rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
               />
             </div>
           </div>
           <div className="mt-3 flex items-center justify-between bg-bg rounded-xl px-3 py-2">
-            <span className="text-xs text-text-muted">Total</span>
+            <span className="text-xs text-text-muted inline-flex items-center gap-1.5">
+              <CalendarRange className="w-3.5 h-3.5" />
+              Trip length
+            </span>
             <span className="text-sm font-bold text-text">
               {days} day{days > 1 ? 's' : ''} · {nights} night{nights === 1 ? '' : 's'}
             </span>
@@ -251,40 +324,94 @@ function OutstationBranch({ pricing, draft, onPatch, onContinue }) {
         </Card>
 
         <Card>
-          <h3 className="text-sm font-semibold text-text mb-3">Driver accommodation</h3>
+          <h3 className="text-sm font-semibold text-text mb-3">
+            Driver food &amp; stay
+          </h3>
           <ToggleRow
-            icon={BedDouble}
-            label="I will arrange the driver's stay"
+            icon={HandCoins}
+            label="I will arrange the driver's food and stay"
             description={
-              needsStay
-                ? `We'll add ₹${pricing?.outstation?.stayChargePerNight || 0} × ${nights} night${nights === 1 ? '' : 's'} for hotel costs.`
-                : "Great — no extra charge for stay."
+              customerArrangesAll
+                ? 'No allowance charged \u2014 you take care of meals and accommodation directly.'
+                : nights > 0 && allowancePerNight > 0
+                ? `We'll add \u20B9${allowancePerNight} \u00d7 ${nights} night${nights === 1 ? '' : 's'} = \u20B9${lineAllowance} as the driver's allowance (food + stay).`
+                : 'No allowance applies on a same-day trip.'
             }
-            value={!needsStay}
-            onChange={(v) => setNeedsStay(!v)}
+            value={customerArrangesAll}
+            onChange={(v) => setCustomerArrangesAll(v)}
           />
-          <div className="mt-3 pt-3 border-t border-border-light" />
-          <ToggleRow
-            icon={Utensils}
-            label="I will arrange the driver's food"
-            description={
-              needsFood
-                ? `We'll add ₹${pricing?.foodAllowance?.amount || 0} × ${days} day${days === 1 ? '' : 's'} for meals.`
-                : 'Great — no extra charge for food.'
-            }
-            value={!needsFood}
-            onChange={(v) => setNeedsFood(!v)}
-          />
+          <p className="text-[11px] text-text-muted mt-3 pt-3 border-t border-border-light">
+            Turn this on only if you can host the driver for the trip.
+            Otherwise we&rsquo;ll add a per-night allowance covering
+            their food and accommodation.
+          </p>
         </Card>
+
+        {/* Provisional breakdown so the user sees how the number is
+            built before they reach the Review page (which shows the
+            authoritative server-computed breakdown). */}
+        <Card>
+          <h3 className="text-sm font-semibold text-text mb-3">
+            Provisional fare
+          </h3>
+          <div className="space-y-1.5 text-sm">
+            <MiniRow
+              label={`Daily rate \u00d7 ${days} day${days === 1 ? '' : 's'}`}
+              value={`\u20B9${lineDaily}`}
+            />
+            {lineAllowance > 0 && (
+              <MiniRow
+                label={`Driver allowance \u00d7 ${nights} night${nights === 1 ? '' : 's'}`}
+                value={`\u20B9${lineAllowance}`}
+              />
+            )}
+            <div className="h-px bg-border-light my-1" />
+            <MiniRow
+              label="Subtotal (excl. taxes)"
+              value={`\u20B9${provisionalTotal}`}
+              highlight
+            />
+            <p className="text-[11px] text-text-muted">
+              Service charge and GST are added on the next screen.
+            </p>
+          </div>
+        </Card>
+
+        {/* Toll & parking are paid by the customer directly to the
+            driver \u2014 not part of the booking fare. Surfaced here
+            so there are no surprises during the trip. */}
+        <div className="rounded-2xl bg-amber-50 border border-amber-200 px-3 py-2.5 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 text-amber-700 mt-0.5 shrink-0" />
+          <p className="text-[12px] leading-snug text-amber-900">
+            <strong className="font-semibold">Toll &amp; parking:</strong>
+            {' '}
+            charges along the route are paid by you directly to the
+            driver as per actuals. They are not added to this booking
+            fare.
+          </p>
+        </div>
       </div>
 
       <Footer
         primaryLabel="Continue"
-        priceLabel={`₹${provisionalTotal}`}
+        priceLabel={`\u20B9${provisionalTotal}`}
         priceHint="Provisional"
         onClick={handleContinue}
-        disabled={!destination.trim() || !startDate || !endDate || days < 1}
+        disabled={!destination.trim() || !pickupAt || !expectedReturnAt || days < 1}
       />
+    </div>
+  );
+}
+
+function MiniRow({ label, value, highlight }) {
+  return (
+    <div
+      className={`flex items-center justify-between ${
+        highlight ? 'text-text font-semibold' : 'text-text-secondary'
+      }`}
+    >
+      <span>{label}</span>
+      <span>{value}</span>
     </div>
   );
 }
@@ -354,16 +481,6 @@ function pad(n) {
 function defaultIsoForInput() {
   const d = new Date(Date.now() + 30 * 60 * 1000);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function todayIso() {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T08:00`;
-}
-
-function tomorrowIso() {
-  const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T20:00`;
 }
 
 export default SelectDurationPage;

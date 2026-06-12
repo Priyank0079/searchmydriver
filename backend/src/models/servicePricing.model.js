@@ -141,22 +141,146 @@ const customHoursSchema = new mongoose.Schema(
 );
 
 // ─── Outstation-specific block ────────────────────────────────────────────────
+//
+// Pricing model (current):
+//   total = dailyRate × days
+//         + (customer arranges food AND stay ? 0 : allowancePerNight × nights)
+//         + serviceCharge + GST
+//
+// Toll & parking are NOT billed by the platform on outstation — the
+// customer settles those directly with the driver. We surface a notice
+// on the booking flow but never add a rupee for them in the fare.
+//
+// `kmIncludedPerDay`, `extraKmRate`, `nightHaltCharge`, `stayChargePerNight`
+// are retained as deprecated fields so older saved pricing documents
+// keep loading without a migration. They default to 0 and the fare
+// engine ignores them.
 const outstationSchema = new mongoose.Schema(
   {
-    /** Flat ₹ charged per day of the trip. */
+    /** Flat ₹ charged per day of the trip — the only base fare. */
     dailyRate: { type: Number, default: 0, min: 0 },
-    /** Km included in `dailyRate` per day. `0` = unlimited (no per-km charge). */
-    kmIncludedPerDay: { type: Number, default: 0, min: 0 },
-    /** ₹ per km after the daily km limit is exhausted. Ignored if kmIncludedPerDay is 0. */
-    extraKmRate: { type: Number, default: 0, min: 0 },
-    /** ₹ driver bata per night (nights = trip days − 1). */
-    nightHaltCharge: { type: Number, default: 0, min: 0 },
-    /** ₹ per night for driver's accommodation when the customer doesn't arrange stay. */
-    stayChargePerNight: { type: Number, default: 0, min: 0 },
+    /**
+     * Combined per-night driver allowance (food + accommodation +
+     * driver bata rolled into one). Charged for each overnight halt
+     * (nights = days − 1) ONLY when the customer has not opted in to
+     * arranging both the food and stay themselves. When the customer
+     * arranges everything, this is fully waived.
+     */
+    allowancePerNight: { type: Number, default: 0, min: 0 },
     /** Minimum days that can be booked as outstation. */
     minDays: { type: Number, default: 1, min: 1 },
     /** Maximum days that can be booked as outstation (0 = unlimited). */
     maxDays: { type: Number, default: 0, min: 0 },
+
+    // ── Deprecated (retained for back-compat with saved docs) ──
+    /** @deprecated unused — outstation no longer bills extra km. */
+    kmIncludedPerDay: { type: Number, default: 0, min: 0 },
+    /** @deprecated unused — outstation no longer bills extra km. */
+    extraKmRate: { type: Number, default: 0, min: 0 },
+    /** @deprecated absorbed into `allowancePerNight`. */
+    nightHaltCharge: { type: Number, default: 0, min: 0 },
+    /** @deprecated absorbed into `allowancePerNight`. */
+    stayChargePerNight: { type: Number, default: 0, min: 0 },
+  },
+  { _id: false },
+);
+
+/**
+ * Outstation-only cancellation knobs. Outstation is scheduled days in
+ * advance and uses a TIME-driven policy (hours-until-pickup), not the
+ * status-driven hourly model. Kept as a self-contained sub-document so
+ * the hourly flow can evolve independently.
+ *
+ * Each fee tier is a `type` + `amount` pair so admins can pick a flat ₹
+ * deduction or a percentage of the paid fare per tier (the legacy
+ * one-shape-fits-all percent fields have been retired). This is the
+ * single source of truth for outstation cancellations — no other
+ * top-level flat fees (`flatFeeAfterAssignment`, `arrivedFeeAmount`,
+ * `driverCancellationPenalty`) feed the outstation path; those remain
+ * hourly-only.
+ *
+ *   ── Customer side ──
+ *   freeCancellationHoursBeforePickup
+ *                             Hours-before-pickup threshold splitting
+ *                             tier A (above) from tier B (within).
+ *   beforeWindowFeeType / Amount
+ *                             Tier A — > free window. Defaults to a 0%
+ *                             deduction → full refund. Admin can set a
+ *                             flat ₹ or % deduction (e.g. a small
+ *                             processing fee).
+ *   preArrivalFeeType / Amount
+ *                             Tier B — ≤ free window AND driver not yet
+ *                             arrived. Flat ₹ or % of paid.
+ *   arrivedFeeType / Amount   Tier C — driver has arrived at pickup
+ *                             (also covers a STARTED trip). Flat ₹ or %.
+ *   arrivedFeeMinDays         Floor that applies ONLY to tier C:
+ *                             effective fee = max(tier C fee, N ×
+ *                             dailyRate). 0 = disabled (fee only).
+ *
+ *   ── Driver side ──
+ *   driverFreeReassignHoursBeforePickup
+ *                             Tier A threshold — above this, driver
+ *                             cancels free and booking is re-queued.
+ *   driverPenaltyHoursBeforePickup
+ *                             Tier C threshold — at/below this, the
+ *                             full penalty + priority points fire.
+ *   driverMidPenaltyType / Amount
+ *                             Tier B — between the two thresholds.
+ *                             Flat ₹ or % of fare.
+ *   driverPenaltyType / Amount
+ *                             Tier C — inside the penalty window.
+ *                             Flat ₹ or % of fare.
+ *   driverPriorityPenaltyPoints
+ *                             Added to driver.cancellationStats only on
+ *                             tier C cancels. Lowers future dispatch
+ *                             priority.
+ *
+ * Outstation has NO driver grace window / daily free-cancel quota —
+ * those are hourly-only concepts and intentionally absent here.
+ */
+const outstationCancellationSchema = new mongoose.Schema(
+  {
+    freeCancellationHoursBeforePickup: { type: Number, default: 24, min: 0 },
+
+    beforeWindowFeeType: {
+      type: String,
+      enum: ['flat', 'percentage'],
+      default: 'percentage',
+    },
+    beforeWindowFeeAmount: { type: Number, default: 0, min: 0 },
+
+    preArrivalFeeType: {
+      type: String,
+      enum: ['flat', 'percentage'],
+      default: 'percentage',
+    },
+    preArrivalFeeAmount: { type: Number, default: 15, min: 0 },
+
+    arrivedFeeType: {
+      type: String,
+      enum: ['flat', 'percentage'],
+      default: 'percentage',
+    },
+    arrivedFeeAmount: { type: Number, default: 50, min: 0 },
+    arrivedFeeMinDays: { type: Number, default: 1, min: 0 },
+
+    driverFreeReassignHoursBeforePickup: { type: Number, default: 24, min: 0 },
+    driverPenaltyHoursBeforePickup: { type: Number, default: 6, min: 0 },
+
+    driverMidPenaltyType: {
+      type: String,
+      enum: ['flat', 'percentage'],
+      default: 'flat',
+    },
+    driverMidPenaltyAmount: { type: Number, default: 100, min: 0 },
+
+    driverPenaltyType: {
+      type: String,
+      enum: ['flat', 'percentage'],
+      default: 'flat',
+    },
+    driverPenaltyAmount: { type: Number, default: 200, min: 0 },
+    driverPriorityPenaltyPoints: { type: Number, default: 10, min: 0 },
   },
   { _id: false },
 );
@@ -242,6 +366,14 @@ const cancellationSchema = new mongoose.Schema(
      * charges the penalty regardless of the grace window.
      */
     driverDailyFreeCancellations: { type: Number, default: 3, min: 0 },
+
+    /**
+     * Outstation-specific time-driven policy. Lives alongside (not
+     * instead of) the status-driven knobs above so the hourly flow
+     * keeps reading the existing fields and outstation reads from this
+     * sub-doc via `loadCancellationPolicy(serviceType).outstation`.
+     */
+    outstation: { type: outstationCancellationSchema, default: () => ({}) },
   },
   { _id: false },
 );

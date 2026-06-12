@@ -1,13 +1,16 @@
 import { useMemo } from 'react';
 import { Loader2 } from 'lucide-react';
 import Card from '../../../../components/Card';
+import { SERVICE_TYPES } from '../../../../constants/serviceTypes';
 
 /**
  * Renders the line-by-line fare breakdown returned by `/auth/bookings/estimate`.
  *
- * The pricing-engine field names and the UI labels live here — every page
- * that needs to show a fare should consume this component instead of
- * rolling its own table. Zero-valued rows are filtered out for a clean look.
+ * Two row sets are derived from the breakdown — one for HOURLY, one for
+ * OUTSTATION — so the customer sees the same per-multiplier detail the
+ * admin sees in the live preview (Daily rate \u00d7 N days, Night halt
+ * \u00d7 N nights, Driver food \u00d7 N days, etc.). Field names come
+ * straight from `calculateHourlyFare` / `calculateOutstationFare`.
  *
  *   props:
  *     - estimate       full /estimate response (we read `estimate.fareBreakdown`)
@@ -16,34 +19,69 @@ import Card from '../../../../components/Card';
  *     - dense          boolean → tighter spacing (used inline on slab page)
  *     - footnote       optional string under the total (e.g. "incl. food")
  */
-const ROW_ORDER = [
-  ['Base fare', (bd) => bd.packagePrice ?? bd.dailyRateTotal ?? 0],
-  ['Extra hours', (bd) => bd.extraHourCharge],
-  ['Waiting', (bd) => bd.waitingCharge],
-  ['Night charge', (bd) => bd.nightCharge],
-  ['Stay charges', (bd) => bd.stayChargeTotal ?? bd.nightHaltTotal],
-  ['Food allowance', (bd) => bd.foodAllowance ?? bd.foodAllowanceTotal],
-  ['Extra km', (bd) => bd.extraKmCharge],
-  ['Toll & parking', (bd) => bd.tollParking],
-  ['Service charge', (bd) => bd.serviceCharge],
-  ['GST', (bd) => bd.gstAmount],
-  [
-    'Subscription discount',
-    (bd) => (bd.subscriptionDiscount ? -Math.abs(bd.subscriptionDiscount) : 0),
-  ],
-];
+function rupees(n) {
+  const v = Number(n) || 0;
+  const sign = v < 0 ? '-' : '';
+  return `${sign}\u20B9${Math.abs(v)}`;
+}
+
+function buildHourlyRows(bd) {
+  return [
+    ['Base fare', bd.packagePrice || 0],
+    [`Extra hours (${bd.extraHours || 0})`, bd.extraHourCharge, !(bd.extraHours > 0)],
+    ['Waiting', bd.waitingCharge],
+    ['Night charge', bd.nightCharge],
+    ['Stay allowance', bd.stayAllowance],
+    ['Food allowance', bd.foodAllowance],
+    ['Toll & parking', bd.tollParking],
+  ];
+}
+
+function buildOutstationRows(bd) {
+  const days = Number(bd.days) || 1;
+  const nights = Number(bd.nights) || 0;
+  const dailyRate = Number(bd.dailyRate) || 0;
+  const allowancePerNight = Number(bd.allowancePerNight) || 0;
+  return [
+    [
+      `Daily rate ${rupees(dailyRate)} \u00d7 ${days} day${days === 1 ? '' : 's'}`,
+      bd.dailyRateTotal,
+    ],
+    [
+      `Driver allowance ${rupees(allowancePerNight)} \u00d7 ${nights} night${nights === 1 ? '' : 's'}`,
+      bd.allowanceTotal,
+      !(nights > 0 && allowancePerNight > 0 && (Number(bd.allowanceTotal) || 0) > 0),
+    ],
+  ];
+}
 
 const FareCard = ({ estimate, estimating = false, error = null, dense = false, footnote = null, title = 'Fare estimate' }) => {
-  const breakdown = estimate?.fareBreakdown || {};
+  // `breakdown` is wrapped in useMemo so the identity is stable
+  // whenever the estimate hasn't changed — otherwise the
+  // `useMemo(detailRows)` below would re-fire every render
+  // because the `|| {}` fallback returns a fresh object each time.
+  const breakdown = useMemo(
+    () => estimate?.fareBreakdown || {},
+    [estimate],
+  );
   const buffer = estimate?.waitingBuffer || null;
   const bufferRupees = Number(buffer?.bufferRupees || 0);
-  const rows = useMemo(
-    () =>
-      ROW_ORDER.map(([label, picker]) => [label, picker(breakdown)]).filter(
-        ([, v]) => Number(v || 0) !== 0,
-      ),
-    [breakdown],
-  );
+  const isOutstation =
+    (estimate?.serviceType || breakdown.serviceType) === SERVICE_TYPES.OUTSTATION;
+
+  const detailRows = useMemo(() => {
+    const raw = isOutstation
+      ? buildOutstationRows(breakdown)
+      : buildHourlyRows(breakdown);
+    return raw
+      .filter(([, value, suppress]) => !suppress && Number(value || 0) !== 0)
+      .map(([label, value]) => [label, Number(value) || 0]);
+  }, [breakdown, isOutstation]);
+
+  const subtotal = Number(breakdown.subtotal) || 0;
+  const serviceCharge = Number(breakdown.serviceCharge) || 0;
+  const gst = Number(breakdown.gstAmount) || 0;
+  const subscriptionDiscount = Number(breakdown.subscriptionDiscount) || 0;
   const fareTotal = breakdown.totalPayable || 0;
   const grandTotal = Math.round((fareTotal + bufferRupees) * 100) / 100;
 
@@ -60,18 +98,68 @@ const FareCard = ({ estimate, estimating = false, error = null, dense = false, f
 
       {!error && (
         <div className={dense ? 'space-y-1.5' : 'space-y-2.5'}>
-          {rows.map(([label, amount]) => (
+          {/* Per-line breakdown with explicit multipliers (\u00d7 days,
+              \u00d7 nights, etc.) so the customer can audit every rupee. */}
+          {detailRows.map(([label, amount]) => (
             <div key={label} className="flex items-center justify-between">
               <span className="text-sm text-text-secondary">{label}</span>
               <span className={`text-sm ${amount < 0 ? 'text-success' : 'text-text'}`}>
-                {amount < 0 ? '-' : ''}₹{Math.abs(Number(amount || 0))}
+                {rupees(amount)}
               </span>
             </div>
           ))}
+          {detailRows.length > 0 && (
+            <div className="h-px bg-border-light my-1" />
+          )}
+          {/* Pre-platform subtotal — the boundary between trip costs and
+              platform-side charges. Highlighted on outstation where the
+              detail is rich enough to be worth a separator. */}
+          {subtotal > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-text-secondary">Subtotal</span>
+              <span className="text-sm text-text">{rupees(subtotal)}</span>
+            </div>
+          )}
+          {serviceCharge > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-text-secondary">
+                Service charge
+                {breakdown.serviceChargePercent > 0 && (
+                  <span className="ml-1 text-[10px] text-text-muted">
+                    ({breakdown.serviceChargePercent}%)
+                  </span>
+                )}
+              </span>
+              <span className="text-sm text-text">{rupees(serviceCharge)}</span>
+            </div>
+          )}
+          {gst > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-text-secondary">
+                GST
+                {breakdown.gstPercent > 0 && (
+                  <span className="ml-1 text-[10px] text-text-muted">
+                    ({breakdown.gstPercent}%)
+                  </span>
+                )}
+              </span>
+              <span className="text-sm text-text">{rupees(gst)}</span>
+            </div>
+          )}
+          {subscriptionDiscount > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-text-secondary">
+                Subscription discount
+              </span>
+              <span className="text-sm text-success">
+                {rupees(-subscriptionDiscount)}
+              </span>
+            </div>
+          )}
           <div className="h-px bg-border-light my-1" />
           <div className="flex items-center justify-between">
             <span className="text-sm font-semibold text-text">Fare total</span>
-            <span className="text-base font-semibold text-text">₹{fareTotal}</span>
+            <span className="text-base font-semibold text-text">{rupees(fareTotal)}</span>
           </div>
           {/*
             Pre-collected waiting buffer. Shown as a separate row so the
@@ -114,9 +202,16 @@ const FareCard = ({ estimate, estimating = false, error = null, dense = false, f
           {bufferRupees <= 0 && (
             <div className="flex items-center justify-between">
               <span className="text-sm font-bold text-text">Total</span>
-              <span className="text-lg font-bold text-text">₹{fareTotal}</span>
+              <span className="text-lg font-bold text-text">{rupees(fareTotal)}</span>
             </div>
           )}
+          {/*
+            Outstation toll/parking is intentionally NOT shown here
+            anymore — it's surfaced as a confirmation popup the
+            customer must acknowledge when tapping the Pay CTA on
+            the review screen, instead of a passive footnote that's
+            easy to miss.
+          */}
           {footnote && <p className="text-[11px] text-text-muted">{footnote}</p>}
         </div>
       )}

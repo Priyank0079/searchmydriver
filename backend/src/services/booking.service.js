@@ -136,6 +136,28 @@ const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
  * it onto the Booking.create payload.
  */
 async function buildWaitingChargeSnapshot(serviceType) {
+  // Outstation never accrues waiting time. The driver picks the
+  // customer up at the agreed time and stays with them for the whole
+  // round trip \u2014 there's no "free wait \u2192 per-min ticker"
+  // moment like there is on an hourly pickup. So we always emit a
+  // zeroed-out snapshot (no buffer hold, no per-min rate, no max
+  // billable) regardless of what defaults the admin saved on the
+  // outstation pricing doc.
+  if (serviceType === SERVICE_TYPES.OUTSTATION) {
+    return {
+      waitedMinutes: 0,
+      billableMinutes: 0,
+      chargeRupees: 0,
+      freeMinutes: 0,
+      perMinuteRupees: 0,
+      maxBillableMinutes: 0,
+      bufferRupees: 0,
+      bufferConsumedRupees: 0,
+      bufferRefundRupees: 0,
+      bufferRefundTxId: null,
+      noShow: false,
+    };
+  }
   let pricing = null;
   try {
     pricing = await getServicePricingByTypeService(serviceType);
@@ -506,11 +528,30 @@ function validateCreateInput(body) {
     if (!outstation?.destinationAddress?.trim()) {
       throw new ApiError(400, 'Outstation: destinationAddress is required');
     }
-    if (!outstation?.startDate || !outstation?.endDate) {
-      throw new ApiError(400, 'Outstation: startDate and endDate are required');
+    // Accept either the new (pickupAt, expectedReturnAt) datetime pair
+    // OR the legacy (startDate, endDate) pair. The create flow below
+    // normalises to both, so older clients keep working.
+    const start = outstation?.pickupAt || outstation?.startDate;
+    const end = outstation?.expectedReturnAt || outstation?.endDate;
+    if (!start || !end) {
+      throw new ApiError(
+        400,
+        'Outstation: pickupAt and expectedReturnAt are required',
+      );
     }
-    if (!outstation?.days || outstation.days < 1) {
-      throw new ApiError(400, 'Outstation: days must be ≥ 1');
+    const startMs = new Date(start).getTime();
+    const endMs = new Date(end).getTime();
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+      throw new ApiError(
+        400,
+        'Outstation: pickupAt and expectedReturnAt must be valid datetimes',
+      );
+    }
+    if (endMs <= startMs) {
+      throw new ApiError(
+        400,
+        'Outstation: expectedReturnAt must be after pickupAt',
+      );
     }
   }
 }
@@ -524,6 +565,46 @@ function shapePlace(place) {
       coordinates: [place.location.coordinates[0], place.location.coordinates[1]],
     },
   };
+}
+
+/**
+ * Round-trip outstation duration.
+ *
+ *   Days  = number of DISTINCT calendar dates the trip spans
+ *           (server-local time). Same-day = 1, overnight = 2, etc.
+ *           e.g. pickup Mon 09:00 → return Wed 06:00 ⇒ 3 days.
+ *           e.g. pickup Mon 08:00 → return Mon 20:00 ⇒ 1 day.
+ *   Nights = days − 1 (one less night than days, since the customer
+ *           is back home on the final day).
+ *
+ * The two arguments are intentionally named generically (`pickupAt`,
+ * `expectedReturnAt`) but accept the legacy `(startDate, endDate)`
+ * pair too — both flows use the same calendar-day model.
+ *
+ * Returns `{ days: 1, nights: 0 }` when either bound is missing or
+ * invalid so a downstream fare estimate never blows up on null math.
+ */
+export function computeOutstationDuration(pickupAt, expectedReturnAt) {
+  if (!pickupAt || !expectedReturnAt) return { days: 1, nights: 0 };
+  const start = new Date(pickupAt);
+  const end = new Date(expectedReturnAt);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return { days: 1, nights: 0 };
+  }
+  if (end.getTime() <= start.getTime()) return { days: 1, nights: 0 };
+
+  // Strip the time component so the diff is in WHOLE calendar days.
+  // Math.round (not floor) shrugs off DST quirks where the local-day
+  // difference is 23h 59m or 24h 01m.
+  const startMidnight = new Date(start);
+  startMidnight.setHours(0, 0, 0, 0);
+  const endMidnight = new Date(end);
+  endMidnight.setHours(0, 0, 0, 0);
+  const calendarSpan = Math.round(
+    (endMidnight.getTime() - startMidnight.getTime()) / 86_400_000,
+  );
+  const days = Math.max(1, calendarSpan + 1);
+  return { days, nights: Math.max(0, days - 1) };
 }
 
 /**
@@ -551,11 +632,16 @@ function windowFromCreatePayload(body) {
     return { start, end: new Date(start.getTime() + durationMs) };
   }
   if (serviceType === SERVICE_TYPES.OUTSTATION) {
-    if (!outstation?.startDate) return null;
-    const start = new Date(outstation.startDate);
-    const end = outstation.endDate
-      ? new Date(outstation.endDate)
-      : new Date(start.getTime() + (Number(outstation.days) || 1) * 24 * 60 * 60 * 1000);
+    // Prefer pickupAt / expectedReturnAt — they are exact customer-
+    // picked datetimes. Fall back to the legacy startDate / endDate
+    // (or +days when endDate is missing) for older client payloads.
+    const startSrc = outstation?.pickupAt || outstation?.startDate;
+    if (!startSrc) return null;
+    const start = new Date(startSrc);
+    const endSrc = outstation?.expectedReturnAt || outstation?.endDate;
+    const end = endSrc
+      ? new Date(endSrc)
+      : new Date(start.getTime() + (Number(outstation?.days) || 1) * 24 * 60 * 60 * 1000);
     if (Number.isNaN(start.getTime())) return null;
     return { start, end };
   }
@@ -579,10 +665,12 @@ function windowFromExistingBooking(b) {
     return { start, end: new Date(start.getTime() + durationMs) };
   }
   if (b.serviceType === SERVICE_TYPES.OUTSTATION) {
-    if (!b.outstation?.startDate) return null;
-    const start = new Date(b.outstation.startDate);
-    const end = b.outstation?.endDate
-      ? new Date(b.outstation.endDate)
+    const startSrc = b.outstation?.pickupAt || b.outstation?.startDate;
+    if (!startSrc) return null;
+    const start = new Date(startSrc);
+    const endSrc = b.outstation?.expectedReturnAt || b.outstation?.endDate;
+    const end = endSrc
+      ? new Date(endSrc)
       : new Date(start.getTime() + (Number(b.outstation?.days) || 1) * 24 * 60 * 60 * 1000);
     if (Number.isNaN(start.getTime())) return null;
     return { start, end };
@@ -687,14 +775,33 @@ export async function createBookingService(userId, body) {
   // Re-compute fare server-side. Client-supplied totals are never trusted.
   // Hourly bookings can now opt out of food / accommodation when their
   // duration crosses the configured threshold (see pricing.service.js).
+  // Compute the canonical pickup datetime once — the create flow uses
+  // it both for the fare estimate (night-window check) and for the
+  // persisted outstation document below. Falls back to the legacy
+  // startDate for older clients that haven't moved to pickupAt yet.
+  const outstationPickupAt =
+    serviceType === SERVICE_TYPES.OUTSTATION
+      ? new Date(outstation?.pickupAt || outstation?.startDate)
+      : null;
+  const outstationReturnAt =
+    serviceType === SERVICE_TYPES.OUTSTATION
+      ? new Date(outstation?.expectedReturnAt || outstation?.endDate)
+      : null;
+  const outstationDuration =
+    serviceType === SERVICE_TYPES.OUTSTATION
+      ? computeOutstationDuration(outstationPickupAt, outstationReturnAt)
+      : null;
+
   const estimate = await estimateFareService({
     serviceType,
     userId,
     slabId: hourly?.slabId || undefined,
     bookedHours: hourly?.durationHours,
-    scheduledAt: hourly?.scheduledStartAt || outstation?.startDate,
-    days: outstation?.days,
-    actualKm: outstation?.estimatedKm || 0,
+    scheduledAt: hourly?.scheduledStartAt || outstationPickupAt,
+    days: outstationDuration?.days,
+    // Outstation: `needsStay` and `needsFood` are AND'd in the engine
+    // into a single "customer arranges everything" toggle. Both must
+    // be `true` for the per-night allowance to be waived.
     stayProvided:
       serviceType === SERVICE_TYPES.OUTSTATION
         ? (outstation?.needsStay ?? true)
@@ -825,10 +932,16 @@ export async function createBookingService(userId, body) {
         serviceType === SERVICE_TYPES.OUTSTATION
           ? {
               destinationAddress: outstation.destinationAddress.trim(),
-              startDate: new Date(outstation.startDate),
-              endDate: new Date(outstation.endDate),
-              days: outstation.days,
-              nights: outstation.nights || Math.max(0, outstation.days - 1),
+              // pickupAt / expectedReturnAt are the new authoritative
+              // datetimes. startDate / endDate mirror them so legacy
+              // readers (driver app, admin queue, conflict service
+              // fallback paths) keep working without a code change.
+              pickupAt: outstationPickupAt,
+              expectedReturnAt: outstationReturnAt,
+              startDate: outstationPickupAt,
+              endDate: outstationReturnAt,
+              days: outstationDuration.days,
+              nights: outstationDuration.nights,
               needsStay: outstation.needsStay ?? true,
               needsFood: outstation.needsFood ?? true,
               estimatedKm: outstation.estimatedKm || 0,
@@ -853,7 +966,15 @@ export async function createBookingService(userId, body) {
         createdAt: new Date(),
         paymentReceivedAt: new Date(),
       },
-      status: BOOKING_STATUS.SEARCHING,
+      // Outstation rides skip the wave dispatcher entirely — they sit in
+      // PENDING_ASSIGNMENT until an admin/sub_admin (or zone-scoped
+      // team_member) picks a driver from the outstation-assignment
+      // queue. Hourly bookings (instant + immediate-tier scheduled)
+      // continue to start in SEARCHING and let the dispatcher take over.
+      status:
+        serviceType === SERVICE_TYPES.OUTSTATION
+          ? BOOKING_STATUS.PENDING_ASSIGNMENT
+          : BOOKING_STATUS.SEARCHING,
     });
   } catch (err) {
     // Compensating credit if booking creation fails after we've already
@@ -895,7 +1016,11 @@ export async function createBookingService(userId, body) {
   // like instant), longer-lead rides sit in PENDING_ASSIGNMENT until
   // the BullMQ `assign` job fires. The emergency-pool `escalate` job
   // is enqueued for every scheduled booking either way.
-  let shouldDispatchNow = true;
+  //
+  // Outstation bookings are always manually assigned (no auto-dispatch).
+  // The booking lives in PENDING_ASSIGNMENT until an admin picks a
+  // driver from the outstation-assignment queue.
+  let shouldDispatchNow = serviceType !== SERVICE_TYPES.OUTSTATION;
   if (
     bookingType === BOOKING_TYPE.SCHEDULED &&
     serviceType === SERVICE_TYPES.HOURLY &&
@@ -936,13 +1061,17 @@ export async function cancelBookingByUserService(userId, bookingId, reason = '')
   // is then split into a driver share + company share per the
   // `driverSharePercent` knob on the same policy.
   const policy = await loadCancellationPolicy(booking.serviceType);
+  const breakdown = computeUserCancellation(booking, policy);
   const {
     feeCharged,
     refundAmount,
     driverShare,
     companyShare,
     tripStarted,
-  } = computeUserCancellation(booking, policy);
+    // Outstation-only — undefined for hourly.
+    tier,
+    hoursUntilPickup,
+  } = breakdown;
 
   const previouslyAssignedDriver = booking.driverId;
   const wasPaid = booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID;
@@ -958,6 +1087,9 @@ export async function cancelBookingByUserService(userId, bookingId, reason = '')
     refundAmount,
     driverShare,
     companyShare,
+    tier: tier || '',
+    hoursUntilPickup:
+      typeof hoursUntilPickup === 'number' ? hoursUntilPickup : null,
   };
   booking.timeline.cancelledAt = new Date();
   booking.dispatch.pendingOfferIds = [];

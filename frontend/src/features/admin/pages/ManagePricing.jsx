@@ -81,16 +81,17 @@ const ManagePricing = () => {
     const o = pricing.outstation || {};
     return (
       <>
-        <Row label="Daily rate" value={formatCurrency(o.dailyRate || 0)} />
+        <Row label="Daily rate" value={`${formatCurrency(o.dailyRate || 0)}/day`} />
         <Row
-          label="Km included / day"
-          value={o.kmIncludedPerDay > 0 ? `${o.kmIncludedPerDay} km` : 'Unlimited'}
+          label="Allowance"
+          value={`${formatCurrency(o.allowancePerNight || 0)}/night`}
         />
-        {o.kmIncludedPerDay > 0 && (
-          <Row label="Extra km" value={`${formatCurrency(o.extraKmRate || 0)}/km`} />
-        )}
-        <Row label="Night halt" value={`${formatCurrency(o.nightHaltCharge || 0)}/night`} />
-        <Row label="Stay charge" value={`${formatCurrency(o.stayChargePerNight || 0)}/night`} />
+        <Row
+          label="Trip length"
+          value={`${o.minDays || 1}\u2013${
+            o.maxDays > 0 ? o.maxDays : '\u221E'
+          } days`}
+        />
       </>
     );
   };

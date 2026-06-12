@@ -2,6 +2,8 @@ import Booking from '../models/booking.model.js';
 import { Driver } from '../models/driverModels/driver.model.js';
 import ServicePricing from '../models/servicePricing.model.js';
 import { ApiError } from '../utils/apiError.js';
+import { SERVICE_TYPES } from '../constants/serviceTypes.js';
+import { withdrawCurrentOfferService } from './bookingDispatch.service.js';
 import {
   schedulePromptTimer,
   cancelNoShowSchedule,
@@ -1001,6 +1003,278 @@ async function terminateBookingByDriver(
 }
 
 /**
+ * Outstation-only driver cancellation. Hourly bookings keep the
+ * grace/chance/redispatch flow above; outstation runs on a separate
+ * TIME-driven tier policy:
+ *
+ *   > driverFreeReassignHoursBeforePickup   → no penalty, drop driver,
+ *                                              push booking to the
+ *                                              emergency pool so an
+ *                                              admin assigns another.
+ *   between penalty & free-reassign hours   → mid-tier ₹ penalty, same
+ *                                              emergency-pool path.
+ *   ≤ driverPenaltyHoursBeforePickup        → full ₹ penalty + priority
+ *                                              points debit + recent-
+ *                                              events log; emergency-pool
+ *                                              reassignment.
+ *   tripStarted                              → terminate the booking
+ *                                              (no reassignment) and
+ *                                              charge full penalty.
+ *
+ * Daily `cancellationChances` are intentionally NOT decremented here —
+ * that counter exists for the hourly grace flow, which doesn't apply
+ * to scheduled outstation pickups.
+ */
+async function cancelOutstationByDriver(booking, driverId, reason = '') {
+  const policy = await loadCancellationPolicy(booking.serviceType);
+  const breakdown = computeDriverCancellation(booking, policy);
+  const {
+    driverPenalty,
+    fullPenalty,
+    tier,
+    hoursUntilPickup,
+    priorityPenaltyPoints,
+    shouldReassign,
+    trackRepeated,
+    tripStarted,
+  } = breakdown;
+
+  // Pull the customer-side breakdown so a mid-ride terminate path can
+  // reuse the refund logic. Outstation isn't expected to land here
+  // (the user must contact support for a started-trip refund) but the
+  // path stays consistent.
+  const userBreakdown = computeUserCancellation(booking, policy);
+
+  // ── Mid-ride terminate (driver bailed after STARTED) ──
+  if (tripStarted || !shouldReassign) {
+    booking.status = BOOKING_STATUS.CANCELLED;
+    booking.cancellation = {
+      reason: reason || 'cancelled_by_driver_after_start',
+      cancelledBy: 'driver',
+      feeCharged: driverPenalty,
+      refundAmount: userBreakdown.refundAmount,
+      tier: tier || '',
+      hoursUntilPickup:
+        typeof hoursUntilPickup === 'number' ? hoursUntilPickup : null,
+    };
+    booking.timeline.cancelledAt = new Date();
+    if (booking.dispatch) {
+      booking.dispatch.pendingOfferIds = [];
+      booking.dispatch.currentExpiresAt = null;
+    }
+    await releaseBookingBufferHold(booking);
+    await clearPendingExtensionsOnTerminate(booking, 'driver_cancelled');
+    await booking.save();
+
+    cancelPaymentTimeout(booking._id);
+    cancelNoShowSchedule(booking._id);
+    cancelScheduledBookingJobs(booking._id).catch(() => {});
+
+    await applyDriverPenalty(driverId, driverPenalty, booking);
+    await applyOutstationDriverCancellationStats(driverId, booking, {
+      tier,
+      penalty: driverPenalty,
+      priorityPoints: priorityPenaltyPoints,
+      hoursUntilPickup,
+      trackRepeated,
+    });
+
+    Driver.updateOne({ _id: driverId }, { $set: { isOnTrip: false } }).catch(
+      (err) =>
+        console.warn(
+          '[bookingTrip] failed to clear driver.isOnTrip on outstation cancel:',
+          err?.message,
+        ),
+    );
+
+    // No refund record is opened for the mid-ride path — refunds for
+    // outstation mid-ride are handled by support per the policy spec.
+
+    const payload = {
+      ...buildUpdatePayload(booking, 'user'),
+      paymentStatus: booking.paymentStatus,
+    };
+    emitToUser(booking.userId, S2C_EVENTS.BOOKING_UPDATED, payload);
+    emitToBooking(booking._id, S2C_EVENTS.BOOKING_UPDATED, payload);
+    emitToDriver(driverId, S2C_EVENTS.BOOKING_UPDATED, buildUpdatePayload(booking, 'driver'));
+    emitToAdmins(S2C_EVENTS.BOOKING_UPDATED, payload);
+    return booking.toObject();
+  }
+
+  // ── Re-dispatch path: park the booking in the emergency pool ──
+  //
+  // We don't refund — the customer's wallet hold stays in place and
+  // the next driver takes over the same booking. Withdraw the current
+  // wave (best-effort) so no other driver gets paged on this booking
+  // while it's parked.
+  try {
+    await withdrawCurrentOfferService(booking._id, 'driver_cancelled_outstation');
+  } catch (err) {
+    console.warn(
+      '[bookingTrip] failed to withdraw offers on outstation driver cancel:',
+      err?.message,
+    );
+  }
+
+  // Stamp the cancelling driver's offer with CANCELLED so the audit
+  // trail explains why the booking is back in the pool.
+  if (booking.dispatch?.offers?.length) {
+    const offer = booking.dispatch.offers.find(
+      (o) => String(o.driverId) === String(driverId),
+    );
+    if (offer) {
+      offer.response = DISPATCH_RESPONSE.CANCELLED;
+      offer.respondedAt = new Date();
+    }
+  }
+  if (booking.dispatch) {
+    booking.dispatch.pendingOfferIds = [];
+    booking.dispatch.currentExpiresAt = null;
+    booking.dispatch.currentRadiusMeters = DISPATCH.SEARCH_RADIUS_START_METERS;
+    booking.dispatch.attemptsCount = 0;
+  }
+
+  booking.status = BOOKING_STATUS.IN_EMERGENCY_POOL;
+  booking.driverId = null;
+  booking.timeline.driverAssignedAt = null;
+  booking.timeline.paymentDeadlineAt = null;
+  booking.cancellation = {
+    reason: reason || 'outstation_driver_cancelled_reassigning',
+    cancelledBy: 'driver',
+    feeCharged: driverPenalty,
+    refundAmount: 0,
+    tier: tier || '',
+    hoursUntilPickup:
+      typeof hoursUntilPickup === 'number' ? hoursUntilPickup : null,
+  };
+  // Stamp the emergency-pool entry timestamp the same way the
+  // dedicated escalate service does, so the admin list orders correctly.
+  booking.scheduled = {
+    ...(booking.scheduled?.toObject?.() || booking.scheduled || {}),
+    escalatedAt: new Date(),
+    emergencyPool: {
+      ...(booking.scheduled?.emergencyPool?.toObject?.() ||
+        booking.scheduled?.emergencyPool ||
+        {}),
+      enteredAt: new Date(),
+    },
+  };
+
+  await booking.save();
+  cancelPaymentTimeout(booking._id);
+  cancelNoShowSchedule(booking._id);
+
+  await applyDriverPenalty(driverId, driverPenalty, booking);
+  await applyOutstationDriverCancellationStats(driverId, booking, {
+    tier,
+    penalty: driverPenalty,
+    priorityPoints: priorityPenaltyPoints,
+    hoursUntilPickup,
+    trackRepeated,
+  });
+
+  Driver.updateOne({ _id: driverId }, { $set: { isOnTrip: false } }).catch(
+    (err) =>
+      console.warn(
+        '[bookingTrip] failed to clear driver.isOnTrip on outstation reassign:',
+        err?.message,
+      ),
+  );
+
+  const payload = {
+    bookingId: String(booking._id),
+    status: booking.status,
+    cancellation: booking.cancellation?.toObject?.() || booking.cancellation,
+    scheduledStartAt: booking.outstation?.pickupAt || booking.outstation?.startDate || null,
+  };
+  emitToUser(booking.userId, S2C_EVENTS.BOOKING_DRIVER_REASSIGNING, {
+    bookingId: String(booking._id),
+    reason: 'outstation_driver_cancelled',
+  });
+  emitToUser(booking.userId, S2C_EVENTS.BOOKING_UPDATED, payload);
+  emitToBooking(booking._id, S2C_EVENTS.BOOKING_UPDATED, payload);
+  emitToDriver(driverId, S2C_EVENTS.BOOKING_UPDATED, payload);
+  emitToAdmins(S2C_EVENTS.BOOKING_UPDATED, payload);
+  emitToAdmins(S2C_EVENTS.ADMIN_ALERT, {
+    kind: 'outstation_driver_cancelled',
+    severity: penaltyAlertSeverity(driverPenalty, fullPenalty),
+    message: `Outstation booking ${booking.bookingNumber || ''} needs a new driver`,
+    data: {
+      bookingId: String(booking._id),
+      tier,
+      hoursUntilPickup,
+      driverId: String(driverId),
+      penalty: driverPenalty,
+    },
+  });
+
+  return booking.toObject();
+}
+
+function penaltyAlertSeverity(driverPenalty, fullPenalty) {
+  if (driverPenalty <= 0) return 'info';
+  if (driverPenalty >= fullPenalty) return 'warn';
+  return 'info';
+}
+
+/**
+ * Persist the long-running outstation cancellation tracking on the
+ * driver:
+ *   - increment lifetime counters
+ *   - bump `priorityPenaltyPoints` (lowers dispatch priority on future
+ *     outstation assignments)
+ *   - push a bounded ring of recent events for the admin audit panel
+ *
+ * Best-effort — a failure here logs but does not roll back the
+ * cancellation itself.
+ */
+async function applyOutstationDriverCancellationStats(
+  driverId,
+  booking,
+  { tier, penalty, priorityPoints, hoursUntilPickup, trackRepeated },
+) {
+  if (!driverId) return;
+  try {
+    const event = {
+      at: new Date(),
+      bookingId: booking?._id || null,
+      serviceType: booking?.serviceType || '',
+      tier: tier || '',
+      penalty: Number(penalty) || 0,
+      priorityPoints: Number(priorityPoints) || 0,
+      hoursUntilPickup:
+        typeof hoursUntilPickup === 'number' ? hoursUntilPickup : null,
+    };
+    const inc = {
+      'cancellationStats.outstationTotal': 1,
+    };
+    if (penalty > 0) inc['cancellationStats.outstationPenalised'] = 1;
+    if (trackRepeated && priorityPoints > 0) {
+      inc['cancellationStats.priorityPenaltyPoints'] = priorityPoints;
+    }
+    await Driver.updateOne(
+      { _id: driverId },
+      {
+        $inc: inc,
+        $set: { 'cancellationStats.lastCancelledAt': event.at },
+        // Keep the recent ring bounded so it doesn't grow unbounded.
+        $push: {
+          'cancellationStats.recentEvents': {
+            $each: [event],
+            $slice: -20,
+          },
+        },
+      },
+    );
+  } catch (err) {
+    console.warn(
+      '[bookingTrip] failed to persist outstation cancellation stats:',
+      err?.message,
+    );
+  }
+}
+
+/**
  * * → cancelled  (driver-initiated)
  *
  * Mirror of `cancelBookingByUserService` for the driver — but with a
@@ -1025,6 +1299,13 @@ export async function cancelBookingByDriverService(driverId, bookingId, reason =
       400,
       'Trip is already in progress — please contact support to cancel',
     );
+  }
+
+  // Outstation runs on its own time-based policy + emergency-pool
+  // reassignment. Branch out so the hourly grace/chance accounting
+  // never touches it (and vice-versa).
+  if (booking.serviceType === SERVICE_TYPES.OUTSTATION) {
+    return cancelOutstationByDriver(booking, driverId, reason);
   }
 
   const policy = await loadCancellationPolicy(booking.serviceType);

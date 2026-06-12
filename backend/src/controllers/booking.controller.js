@@ -46,6 +46,13 @@ import {
   listAvailableDriversForAssignmentService,
   getBookingCarTypeIdService,
 } from '../services/bookingEmergencyPool.service.js';
+import {
+  listOutstationAssignmentsService,
+  getOutstationAssignmentDetailService,
+  listAvailableDriversForOutstationService,
+  adminAssignDriverToOutstationService,
+  probeDriverConflictService,
+} from '../services/bookingOutstationAssignment.service.js';
 import { listScheduledBookingJobs } from '../queues/scheduledBooking.queue.js';
 import Booking from '../models/booking.model.js';
 
@@ -392,6 +399,75 @@ export const assignDriverToEmergencyPoolBooking = asyncHandler(async (req, res) 
   return res
     .status(200)
     .json(new ApiResponse(200, result, 'Driver assigned to booking'));
+});
+
+/* ------------------------------------------------------------------ */
+/* Admin → Outstation Assignments                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Outstation bookings skip the wave dispatcher entirely. They land in
+ * PENDING_ASSIGNMENT and surface here.
+ *
+ *   - admin / sub_admin → every entry, every zone
+ *   - team_member       → only entries whose zoneIds overlap
+ *                         `assignedZones`. Same scoping as the
+ *                         emergency-pool list.
+ *
+ * Driver assignment is gated through
+ * `adminAssignDriverToOutstationService` which validates BOTH driver
+ * and vehicle conflicts (with the configured RIDE_BUFFER_MINUTES
+ * padding) before flipping the booking to DRIVER_ASSIGNED.
+ */
+export const getOutstationAssignments = asyncHandler(async (req, res) => {
+  const result = await listOutstationAssignmentsService({
+    staff: req.staff,
+    query: req.query,
+  });
+  return res
+    .status(200)
+    .json(new ApiResponse(200, result, 'Outstation assignments fetched'));
+});
+
+export const getOutstationAssignmentDetail = asyncHandler(async (req, res) => {
+  const detail = await getOutstationAssignmentDetailService(req.params.id, req.staff);
+  if (!detail) throw new ApiError(404, 'Outstation booking not found or out of zone');
+  return res
+    .status(200)
+    .json(new ApiResponse(200, detail, 'Outstation booking detail'));
+});
+
+export const getOutstationAssignmentDrivers = asyncHandler(async (req, res) => {
+  const result = await listAvailableDriversForOutstationService(req.params.id, {
+    search: req.query?.search,
+    limit: req.query?.limit,
+    staff: req.staff,
+  });
+  return res
+    .status(200)
+    .json(new ApiResponse(200, result, 'Available drivers fetched'));
+});
+
+export const assignDriverToOutstation = asyncHandler(async (req, res) => {
+  const { driverId, notes } = req.body || {};
+  if (!driverId) throw new ApiError(400, 'driverId is required');
+  const result = await adminAssignDriverToOutstationService(req.params.id, driverId, {
+    staffId: req.staff?._id,
+    staff: req.staff,
+    notes,
+  });
+  return res
+    .status(200)
+    .json(new ApiResponse(200, result, 'Driver assigned to outstation booking'));
+});
+
+export const probeOutstationDriverConflict = asyncHandler(async (req, res) => {
+  const driverId = req.query?.driverId;
+  if (!driverId) throw new ApiError(400, 'driverId is required');
+  const result = await probeDriverConflictService(req.params.id, driverId, req.staff);
+  return res
+    .status(200)
+    .json(new ApiResponse(200, result, 'Driver conflict probe'));
 });
 
 /* ------------------------------------------------------------------ */

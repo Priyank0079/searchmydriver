@@ -292,6 +292,56 @@ const driverSchema = new mongoose.Schema(
       used: { type: Number, default: 0, min: 0 },
     },
 
+    /**
+     * Long-running cancellation stats — used by the outstation
+     * cancellation policy to lower a driver's dispatch priority when
+     * they repeatedly bail on rides. Independent of the daily
+     * `cancellationChances` counter (which resets every day).
+     *
+     *   priorityPenaltyPoints  Higher = lower dispatch priority. The
+     *                          outstation assignment picker sorts the
+     *                          eligible pool by this number ascending
+     *                          (and falls back to rating + distance).
+     *                          Admins can reset from the driver detail
+     *                          page after manual review.
+     *   outstationTotal        Lifetime count of outstation
+     *                          cancellations — surfaced in the driver
+     *                          detail header.
+     *   outstationPenalised    Lifetime count of cancellations that
+     *                          actually attracted the full ₹ penalty.
+     *   lastCancelledAt        Most recent cancellation timestamp.
+     *   recentEvents           Bounded ring (kept ≤ 20) of recent
+     *                          cancellations so the admin can audit
+     *                          tier/penalty/amount/booking quickly.
+     */
+    cancellationStats: {
+      priorityPenaltyPoints: { type: Number, default: 0, min: 0 },
+      outstationTotal: { type: Number, default: 0, min: 0 },
+      outstationPenalised: { type: Number, default: 0, min: 0 },
+      lastCancelledAt: { type: Date, default: null },
+      recentEvents: {
+        type: [
+          new mongoose.Schema(
+            {
+              at: { type: Date, default: Date.now },
+              bookingId: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'Booking',
+                default: null,
+              },
+              serviceType: { type: String, default: '' },
+              tier: { type: String, default: '' },
+              penalty: { type: Number, default: 0, min: 0 },
+              priorityPoints: { type: Number, default: 0, min: 0 },
+              hoursUntilPickup: { type: Number, default: null },
+            },
+            { _id: false },
+          ),
+        ],
+        default: [],
+      },
+    },
+
     // ── Referral ──────────────────────────────────────────────────────────────
     referralCode: {
       type: String,
@@ -302,6 +352,28 @@ const driverSchema = new mongoose.Schema(
     referredBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Driver',
+      default: null,
+    },
+
+    // ── Trip preferences ─────────────────────────────────────────────────────
+    /**
+     * Per-driver opt-in for outstation (multi-day round-trip) assignments.
+     * Outstation is dispatched manually by admins (see
+     * `bookingOutstationAssignment.service.js`), and the picker only
+     * surfaces drivers with this flag set to `true`. Drivers can flip it
+     * from the account screen \u2014 default is `false` so a brand-new
+     * driver isn't surprised by an overnight job.
+     *
+     * `outstationAvailabilityUpdatedAt` is stamped on every toggle so
+     * admins can sort the picker by "recently confirmed availability".
+     */
+    availableForOutstation: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    outstationAvailabilityUpdatedAt: {
+      type: Date,
       default: null,
     },
 

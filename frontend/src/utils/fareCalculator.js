@@ -109,13 +109,22 @@ export function calculateHourlyFare({
   };
 }
 
+/**
+ * Mirrors the simplified backend outstation pricing model:
+ *   subtotal = dailyRate × days
+ *            + (customer arranges all ? 0 : allowancePerNight × nights)
+ * Toll & parking are NOT added — they're paid by the customer directly
+ * to the driver.
+ */
 export function calculateOutstationFare({
   pricing,
   days = 1,
-  actualKm = 0,
+  // `actualKm` and `tollParking` accepted for back-compat; both are
+  // no-ops in the current pricing model.
+  actualKm: _actualKm = 0, // eslint-disable-line no-unused-vars
   foodProvided = true,
   stayProvided = true,
-  tollParking = 0,
+  tollParking: _tollParking = 0, // eslint-disable-line no-unused-vars
   subscription = null,
 } = {}) {
   if (!pricing) return null;
@@ -124,56 +133,42 @@ export function calculateOutstationFare({
   const tripDays = Math.max(1, Math.ceil(days));
   const nights = Math.max(0, tripDays - 1);
 
-  const dailyRateTotal = (o.dailyRate || 0) * tripDays;
+  const dailyRate = Number(o.dailyRate) || 0;
+  const allowancePerNight = Number(o.allowancePerNight) || 0;
 
-  let extraKm = 0;
-  let extraKmCharge = 0;
-  if (o.kmIncludedPerDay > 0 && actualKm > 0) {
-    const includedTotal = o.kmIncludedPerDay * tripDays;
-    extraKm = Math.max(0, actualKm - includedTotal);
-    extraKmCharge = extraKm * (o.extraKmRate || 0);
-  }
+  const dailyRateTotal = dailyRate * tripDays;
+  // Convention mirrors the backend engine: both flags must be exactly
+  // `true` to waive the per-night allowance.
+  const customerArrangesAll = foodProvided === true && stayProvided === true;
+  const allowanceTotal = customerArrangesAll
+    ? 0
+    : allowancePerNight * nights;
 
-  const nightHaltTotal = (o.nightHaltCharge || 0) * nights;
-
-  const foodAllowanceTotal =
-    pricing.foodAllowance?.enabled && foodProvided === false
-      ? (pricing.foodAllowance.amount || 0) * tripDays
-      : 0;
-
-  const stayChargeTotal =
-    stayProvided === false ? (o.stayChargePerNight || 0) * nights : 0;
-
-  const toll = pricing.tollParkingEnabled ? Math.max(0, tollParking || 0) : 0;
-
-  const subtotal =
-    dailyRateTotal +
-    extraKmCharge +
-    nightHaltTotal +
-    foodAllowanceTotal +
-    stayChargeTotal +
-    toll;
-
+  const subtotal = dailyRateTotal + allowanceTotal;
   const layers = applyPlatformLayers(subtotal, pricing, subscription);
 
   return {
     serviceType: SERVICE_TYPES.OUTSTATION,
     days: tripDays,
     nights,
-    dailyRate: round2(o.dailyRate || 0),
+    dailyRate: round2(dailyRate),
     dailyRateTotal: round2(dailyRateTotal),
-    kmIncludedTotal: round2((o.kmIncludedPerDay || 0) * tripDays),
-    extraKm: round2(extraKm),
-    extraKmCharge: round2(extraKmCharge),
-    nightHaltCharge: round2(o.nightHaltCharge || 0),
-    nightHaltTotal: round2(nightHaltTotal),
-    foodAllowancePerDay: round2(pricing.foodAllowance?.amount || 0),
-    foodAllowanceTotal: round2(foodAllowanceTotal),
-    stayChargePerNight: round2(o.stayChargePerNight || 0),
-    stayChargeTotal: round2(stayChargeTotal),
-    tollParking: round2(toll),
-    foodProvided,
-    stayProvided,
+    allowancePerNight: round2(allowancePerNight),
+    allowanceTotal: round2(allowanceTotal),
+    customerArrangesAll,
+    foodProvided: foodProvided === true,
+    stayProvided: stayProvided === true,
+    // Legacy fields — always 0 in the new model.
+    kmIncludedTotal: 0,
+    extraKm: 0,
+    extraKmCharge: 0,
+    nightHaltCharge: 0,
+    nightHaltTotal: 0,
+    foodAllowancePerDay: 0,
+    foodAllowanceTotal: 0,
+    stayChargePerNight: 0,
+    stayChargeTotal: 0,
+    tollParking: 0,
     subtotal: round2(subtotal),
     ...layers,
   };

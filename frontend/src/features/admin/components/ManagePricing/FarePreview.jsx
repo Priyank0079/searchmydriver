@@ -114,24 +114,28 @@ const HourlyPreview = ({ form }) => {
 };
 
 // ─── Outstation preview ───────────────────────────────────────────────────────
+//
+// New billing model — only two line items:
+//   1. Daily rate × days
+//   2. Allowance × nights (waived when the customer arranges everything)
+//
+// Toll & parking are NOT added to the fare; they're paid by the
+// customer directly to the driver.
 const OutstationPreview = ({ form }) => {
   const [days, setDays] = useState(3);
-  const [actualKm, setActualKm] = useState(700);
-  const [foodProvided, setFoodProvided] = useState(true);
-  const [stayProvided, setStayProvided] = useState(true);
-  const [toll, setToll] = useState(0);
+  const [customerArrangesAll, setCustomerArrangesAll] = useState(false);
 
   const breakdown = useMemo(
     () =>
       calculateOutstationFare({
         pricing: form,
         days: Number(days),
-        actualKm: Number(actualKm),
-        foodProvided,
-        stayProvided,
-        tollParking: Number(toll),
+        // The customer's UI surfaces a single all-or-nothing toggle —
+        // we mirror that here by flipping both flags together.
+        foodProvided: customerArrangesAll,
+        stayProvided: customerArrangesAll,
       }),
-    [form, days, actualKm, foodProvided, stayProvided, toll],
+    [form, days, customerArrangesAll],
   );
 
   if (!breakdown || !(form.outstation?.dailyRate > 0)) {
@@ -150,26 +154,15 @@ const OutstationPreview = ({ form }) => {
         </p>
         <div className="grid grid-cols-2 gap-2">
           <SimInput label="Days" value={days} onChange={setDays} min={1} />
-          <SimInput label="Total km" value={actualKm} onChange={setActualKm} />
-          <SimInput label="Toll ₹" value={toll} onChange={setToll} />
-          <div className="flex flex-col gap-1.5">
-            <span className="text-xs text-slate-600">Provided by customer</span>
-            <div className="flex gap-1">
-              <FlagToggle
-                label="Food"
-                active={foodProvided}
-                onClick={() => setFoodProvided((v) => !v)}
-              />
-              <FlagToggle
-                label="Stay"
-                active={stayProvided}
-                onClick={() => setStayProvided((v) => !v)}
-              />
-            </div>
-          </div>
+          <FlagToggle
+            label={customerArrangesAll ? 'Customer arranges all' : 'We arrange'}
+            active={customerArrangesAll}
+            onClick={() => setCustomerArrangesAll((v) => !v)}
+          />
         </div>
         <p className="text-[10px] text-slate-400">
-          {breakdown.days} day(s) · {breakdown.nights} night(s)
+          {breakdown.days} day(s) · {breakdown.nights} night(s) · toll &amp;
+          parking paid directly to driver
         </p>
       </div>
 
@@ -178,36 +171,12 @@ const OutstationPreview = ({ form }) => {
           label={`Daily rate × ${breakdown.days}`}
           value={formatCurrency(breakdown.dailyRateTotal)}
         />
-        {breakdown.extraKm > 0 && (
+        {breakdown.allowanceTotal > 0 && (
           <Row
-            label={`Extra km (${breakdown.extraKm} km)`}
-            value={formatCurrency(breakdown.extraKmCharge)}
+            label={`Allowance × ${breakdown.nights}`}
+            value={formatCurrency(breakdown.allowanceTotal)}
             sub
           />
-        )}
-        {breakdown.nights > 0 && breakdown.nightHaltTotal > 0 && (
-          <Row
-            label={`Night halt × ${breakdown.nights}`}
-            value={formatCurrency(breakdown.nightHaltTotal)}
-            sub
-          />
-        )}
-        {breakdown.foodAllowanceTotal > 0 && (
-          <Row
-            label={`Food allowance × ${breakdown.days}`}
-            value={formatCurrency(breakdown.foodAllowanceTotal)}
-            sub
-          />
-        )}
-        {breakdown.stayChargeTotal > 0 && (
-          <Row
-            label={`Stay charge × ${breakdown.nights}`}
-            value={formatCurrency(breakdown.stayChargeTotal)}
-            sub
-          />
-        )}
-        {breakdown.tollParking > 0 && (
-          <Row label="Toll & parking" value={formatCurrency(breakdown.tollParking)} sub />
         )}
         <Divider />
         <PlatformRows breakdown={breakdown} />

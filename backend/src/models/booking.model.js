@@ -44,6 +44,13 @@ const hourlyDetailsSchema = new mongoose.Schema(
 const outstationDetailsSchema = new mongoose.Schema(
   {
     destinationAddress: { type: String, required: true, trim: true },
+    // Exact pickup / expected return DATETIMES the customer chose. These
+    // are the authoritative bounds of the trip and drive the conflict
+    // service's window. `startDate` / `endDate` are kept as back-compat
+    // aliases (set to the same Date values at create-time) so legacy
+    // readers and historical bookings keep working.
+    pickupAt: { type: Date, default: null },
+    expectedReturnAt: { type: Date, default: null },
     startDate: { type: Date, required: true },
     endDate: { type: Date, required: true },
     days: { type: Number, required: true, min: 1 },
@@ -446,6 +453,19 @@ const bookingSchema = new mongoose.Schema(
       // admin audit (and the Revenue page) can reconcile the books.
       driverShare: { type: Number, default: 0 },
       companyShare: { type: Number, default: 0 },
+      /**
+       * Free-form tier id stamped by the cancellation policy engine
+       * (e.g. `outstation_more_than_24h`, `outstation_arrived`,
+       * `outstation_driver_within_6h`). Drives FE copy + admin audits
+       * without having to re-derive from the reason/status alone.
+       */
+      tier: { type: String, default: '' },
+      /**
+       * Snapshot of `hours until pickup` at cancellation time —
+       * outstation policy keys off this. Persisted so a later refund
+       * dispute can reconstruct the exact tier we charged.
+       */
+      hoursUntilPickup: { type: Number, default: null },
     },
 
     /**

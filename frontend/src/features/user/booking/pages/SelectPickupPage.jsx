@@ -314,7 +314,7 @@ const SelectPickupPage = () => {
     if (!canContinue) return;
     setPickup(localPickup);
     if (isOutstation) setDropoff(localDrop);
-    navigate('/user/book/review');
+    navigate('/user/book/confirm');
   };
 
   /* ------------------------------------------------------------------ */

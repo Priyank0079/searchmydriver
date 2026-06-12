@@ -216,7 +216,7 @@ const UserHomePage = () => {
                 ? `View ${driversCount} nearby driver${driversCount === 1 ? '' : 's'}`
                 : 'View nearby drivers'}
             </button>
-            <div className="w-full bg-red-500 flex items-center justify-center">
+            <div className="w-full mt-3 p-3 flex items-center justify-center">
               <AdsCarousel />
             </div>
           </div>

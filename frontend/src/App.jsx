@@ -45,7 +45,9 @@ const SelectServicePage = lazy(() => import('./features/user/booking/pages/Selec
 const SelectVariantPage = lazy(() => import('./features/user/booking/pages/SelectVariantPage'));
 const SelectPickupPage = lazy(() => import('./features/user/booking/pages/SelectPickupPage'));
 const SelectDurationPage = lazy(() => import('./features/user/booking/pages/SelectDurationPage'));
-const ReviewBookingPage = lazy(() => import('./features/user/booking/pages/ReviewBookingPage'));
+// Review + Confirm + Pay are merged into ConfirmAndPayPage. The
+// /user/book/review route below stays as a redirect for any deep
+// links / older clients still pointing at it.
 const ConfirmAndPayPage = lazy(() => import('./features/user/booking/pages/ConfirmAndPayPage'));
 const PaymentPage = lazy(() => import('./features/user/booking/pages/PaymentPage'));
 const SearchingDriverPage = lazy(() => import('./features/user/booking/pages/SearchingDriverPage'));
@@ -127,6 +129,7 @@ const ManageUsers = lazy(() => import('./features/admin/pages/ManageUsers'));
 const UserProfilePage = lazy(() => import('./features/admin/pages/UserProfilePage'));
 const ManageBookings = lazy(() => import('./features/admin/pages/ManageBookings'));
 const ManageEmergencyPool = lazy(() => import('./features/admin/pages/ManageEmergencyPool'));
+const ManageOutstationAssignments = lazy(() => import('./features/admin/pages/ManageOutstationAssignments'));
 const ManageScheduledJobs = lazy(() => import('./features/admin/pages/ManageScheduledJobs'));
 const PlatformSettings = lazy(() => import('./features/admin/pages/PlatformSettings'));
 const ManageTeam = lazy(() => import('./features/admin/pages/ManageTeam'));
@@ -195,8 +198,14 @@ function App() {
           <Route path="/user/book/variants" element={<SelectVariantPage />} />
           <Route path="/user/book/pickup" element={<SelectPickupPage />} />
           <Route path="/user/book/duration" element={<SelectDurationPage />} />
-          <Route path="/user/book/review" element={<ReviewBookingPage />} />
-          {/* Wallet-pay confirmation step (shared across hourly + outstation). */}
+          {/* Review + Confirm pages have been merged. Old in-app links
+              still navigate to /review — bounce them forward. */}
+          <Route
+            path="/user/book/review"
+            element={<Navigate to="/user/book/confirm" replace />}
+          />
+          {/* Combined Review + Confirm + Pay screen (shared across
+              hourly + outstation). */}
           <Route path="/user/book/confirm" element={<ConfirmAndPayPage />} />
           {/* Legacy Razorpay-after-accept screen, kept for fallback flows. */}
           <Route path="/user/book/payment" element={<PaymentPage />} />
@@ -309,6 +318,10 @@ function App() {
             <Route
               path="/admin/bookings/emergency-pool"
               element={<ManageEmergencyPool />}
+            />
+            <Route
+              path="/admin/bookings/outstation-assignments"
+              element={<ManageOutstationAssignments />}
             />
             {/* Back-compat redirect for the old top-level emergency-pool URL. */}
             <Route

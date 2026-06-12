@@ -8,8 +8,12 @@ import { BOOKING_TYPE } from '../../constants/bookingStatus';
  * hourly / outstation flows. Persisted to sessionStorage so a refresh mid-flow
  * doesn't kick them back to step 1.
  *
- *   Hourly:    type → details (pickup + drop + car) → slab → review
- *   Outstation: variants → pickup → review (unchanged)
+ *   Hourly:     type → details (pickup + drop + car) → slab → confirm
+ *   Outstation: variants (pickup + drop + time + car) → confirm
+ *
+ * Note: the previous "review" step has been merged into the confirm
+ * page. /user/book/review redirects to /user/book/confirm at the
+ * router level for backwards compatibility.
  *
  * Reset is the responsibility of the success/cancel pages — never auto-reset
  * on mount.
@@ -45,13 +49,29 @@ const DEFAULT_STATE = {
     destinationAddress: '',
     destinationLat: null,
     destinationLng: null,
+    // Exact pickup / expected-return datetimes the customer chose.
+    // `startDate` / `endDate` mirror these for back-compat with the
+    // older payload shape — both pairs are sent to the backend.
+    pickupAt: null,
+    expectedReturnAt: null,
     startDate: null,
     endDate: null,
     days: null,
     nights: null,
-    needsStay: true,
-    needsFood: true,
-    estimatedKm: 0,
+    // Today the customer UI flips both flags together via a single
+    // "I'll arrange the driver's food and stay" toggle. The two
+    // booleans are kept on the draft (and forwarded to the backend)
+    // because the fare engine ANDs them — both must be exactly `true`
+    // for the customer to skip the per-night allowance.
+    //
+    // Convention:
+    //   `true`  = "this need is arranged by the customer" → no allowance
+    //   `false` = "platform must charge an allowance for this need"
+    //
+    // Default `false` so first-time bookings get the allowance billed
+    // (matches the customer-side default toggle position of OFF).
+    needsStay: false,
+    needsFood: false,
   },
   fareEstimate: null,
 };
@@ -174,15 +194,23 @@ const useBookingDraftStore = create(
           };
         }
         if (s.serviceType === SERVICE_TYPES.OUTSTATION) {
+          // Prefer `pickupAt` / `expectedReturnAt` but fall back to the
+          // legacy `startDate` / `endDate` if the draft was set by an
+          // older flow. The backend accepts either pair (see
+          // validateCreateInput in booking.service.js).
+          const pickupAt = s.outstation.pickupAt || s.outstation.startDate;
+          const expectedReturnAt =
+            s.outstation.expectedReturnAt || s.outstation.endDate;
           payload.outstation = {
             destinationAddress: s.outstation.destinationAddress,
-            startDate: s.outstation.startDate,
-            endDate: s.outstation.endDate,
+            pickupAt,
+            expectedReturnAt,
+            startDate: pickupAt,
+            endDate: expectedReturnAt,
             days: s.outstation.days,
             nights: s.outstation.nights,
             needsStay: s.outstation.needsStay,
             needsFood: s.outstation.needsFood,
-            estimatedKm: s.outstation.estimatedKm || 0,
           };
         }
         return payload;

@@ -102,6 +102,11 @@ import {
   getEmergencyPoolAvailableDrivers,
   assignDriverToEmergencyPoolBooking,
   getScheduledJobs,
+  getOutstationAssignments,
+  getOutstationAssignmentDetail,
+  getOutstationAssignmentDrivers,
+  assignDriverToOutstation,
+  probeOutstationDriverConflict,
 } from '../controllers/booking.controller.js';
 import {
   adminListAds,
@@ -166,6 +171,43 @@ router.post(
   protectStaff,
   restrictTo(...OPERATIONS),
   assignDriverToEmergencyPoolBooking,
+);
+
+/* ---- Outstation Assignments (manual driver pick for round trips) ---- */
+// Outstation bookings never auto-dispatch — they sit in
+// PENDING_ASSIGNMENT until staff manually assign a driver here.
+// `ALL_STAFF` for read endpoints because team_members must see their
+// zone's queue; mutation endpoints are OPERATIONS-only so only
+// admin/sub_admin can actually commit an assignment.
+router.get(
+  '/outstation-assignments',
+  protectStaff,
+  restrictTo(...ALL_STAFF),
+  getOutstationAssignments,
+);
+router.get(
+  '/outstation-assignments/:id',
+  protectStaff,
+  restrictTo(...ALL_STAFF),
+  getOutstationAssignmentDetail,
+);
+router.get(
+  '/outstation-assignments/:id/available-drivers',
+  protectStaff,
+  restrictTo(...ALL_STAFF),
+  getOutstationAssignmentDrivers,
+);
+router.get(
+  '/outstation-assignments/:id/driver-conflict',
+  protectStaff,
+  restrictTo(...ALL_STAFF),
+  probeOutstationDriverConflict,
+);
+router.post(
+  '/outstation-assignments/:id/assign-driver',
+  protectStaff,
+  restrictTo(...OPERATIONS),
+  assignDriverToOutstation,
 );
 
 router.get('/drivers', protectStaff, restrictTo(...ALL_STAFF), getDrivers);

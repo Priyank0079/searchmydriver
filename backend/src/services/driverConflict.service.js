@@ -57,12 +57,19 @@ export function estimateBookingWindow(booking, { nowMs = Date.now() } = {}) {
     return { startMs, endMs: startMs + durationMs };
   }
 
-  // Outstation: explicit start/end on the sub-doc.
-  if (booking?.outstation?.startDate) {
-    const startMs = toMs(booking.outstation.startDate, nowMs);
+  // Outstation: prefer the exact pickupAt / expectedReturnAt the
+  // customer picked. Falls back to startDate / endDate (or +days)
+  // for legacy bookings that pre-date the datetime pickers.
+  const outstation = booking?.outstation;
+  if (outstation?.pickupAt || outstation?.startDate) {
+    const startMs = toMs(
+      outstation.pickupAt || outstation.startDate,
+      nowMs,
+    );
+    const endSrc = outstation.expectedReturnAt || outstation.endDate;
     const endMs =
-      toMs(booking.outstation.endDate) ||
-      startMs + Math.max(1, Number(booking.outstation.days) || 1) * 24 * 3_600_000;
+      toMs(endSrc) ||
+      startMs + Math.max(1, Number(outstation.days) || 1) * 24 * 3_600_000;
     return { startMs, endMs };
   }
 
@@ -183,4 +190,85 @@ export async function findConflictingDriverIdsForBooking(booking, { bufferMinute
     excludeBookingId: booking._id || null,
     bufferMinutes,
   });
+}
+
+/**
+ * For each driver in `driverIds`, returns the list of bookings whose
+ * buffered time window overlaps `window`. Used by the admin "manual
+ * assignment" UI so each candidate driver can be rendered with a
+ * conflict badge + the actual overlapping bookings as a tooltip.
+ *
+ *   { [driverId]: [{ _id, bookingNumber, bookingType, status, startMs, endMs }, ...] }
+ *
+ * Empty entries are omitted so the caller can simply check
+ * `Boolean(map[driverId])` to know whether the driver has any
+ * conflict at all.
+ *
+ * @param {object} params
+ * @param {string[]} params.driverIds
+ * @param {{ startMs:number, endMs:number }} params.window  Already buffered.
+ * @param {string|null} [params.excludeBookingId]
+ * @param {number} [params.bufferMinutes]
+ */
+export async function getDriverConflictMap({
+  driverIds = [],
+  window,
+  excludeBookingId = null,
+  bufferMinutes = SCHEDULED_BOOKING.RIDE_BUFFER_MINUTES,
+} = {}) {
+  const out = {};
+  if (!driverIds.length) return out;
+  if (!window || !Number.isFinite(window.startMs) || !Number.isFinite(window.endMs)) {
+    return out;
+  }
+
+  const driverIdStrings = driverIds.map(String);
+  const query = {
+    isDeleted: false,
+    driverId: { $in: driverIdStrings },
+    status: {
+      $in: ACTIVE_BOOKING_STATUSES.filter(
+        (status) =>
+          status !== BOOKING_STATUS.PENDING_ASSIGNMENT &&
+          status !== BOOKING_STATUS.SEARCHING &&
+          status !== BOOKING_STATUS.IN_EMERGENCY_POOL,
+      ),
+    },
+  };
+  if (excludeBookingId) {
+    query._id = { $ne: excludeBookingId };
+  }
+
+  const candidates = await Booking.find(query)
+    .select(
+      'bookingNumber bookingType driverId hourly outstation timeline status serviceType',
+    )
+    .lean();
+  if (!candidates.length) return out;
+
+  const bufferMs = Math.max(0, Number(bufferMinutes) || 0) * 60_000;
+  const newStart = window.startMs;
+  const newEnd = window.endMs;
+
+  for (const candidate of candidates) {
+    const baseWindow = estimateBookingWindow(candidate);
+    if (!baseWindow) continue;
+    const paddedStart = baseWindow.startMs - bufferMs;
+    const paddedEnd = baseWindow.endMs + bufferMs;
+    if (paddedStart <= newEnd && paddedEnd >= newStart) {
+      const key = String(candidate.driverId);
+      if (!out[key]) out[key] = [];
+      out[key].push({
+        _id: String(candidate._id),
+        bookingNumber: candidate.bookingNumber,
+        bookingType: candidate.bookingType,
+        serviceType: candidate.serviceType,
+        status: candidate.status,
+        startMs: baseWindow.startMs,
+        endMs: baseWindow.endMs,
+      });
+    }
+  }
+
+  return out;
 }

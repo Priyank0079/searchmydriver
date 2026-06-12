@@ -1,4 +1,131 @@
 import { BOOKING_STATUS } from '../../../../constants/bookingStatus';
+import { SERVICE_TYPES } from '../../../../constants/serviceTypes';
+
+/**
+ * Customer-side outstation cancellation tiers — must stay in lockstep
+ * with `OUTSTATION_USER_CANCEL_TIER` in
+ * `backend/src/services/bookingOutstationCancellation.service.js`.
+ *
+ * Only three tiers — STARTED collapses into DRIVER_ARRIVED (the car
+ * is at/past pickup so the same arrived-stage fee applies).
+ */
+export const OUTSTATION_USER_CANCEL_TIER = Object.freeze({
+  BEFORE_FREE_WINDOW: 'outstation_before_free_window',
+  WITHIN_FREE_WINDOW_PRE_ARRIVAL: 'outstation_within_free_window_pre_arrival',
+  DRIVER_ARRIVED: 'outstation_driver_arrived',
+});
+
+/** Mirrors `DEFAULT_OUTSTATION_POLICY` on the backend. */
+const DEFAULT_OUTSTATION_POLICY = Object.freeze({
+  freeCancellationHoursBeforePickup: 24,
+  beforeWindowFeeType: 'percentage',
+  beforeWindowFeeAmount: 0,
+  preArrivalFeeType: 'percentage',
+  preArrivalFeeAmount: 15,
+  arrivedFeeType: 'percentage',
+  arrivedFeeAmount: 50,
+  arrivedFeeMinDays: 1,
+  driverFreeReassignHoursBeforePickup: 24,
+  driverPenaltyHoursBeforePickup: 6,
+  driverMidPenaltyType: 'flat',
+  driverMidPenaltyAmount: 100,
+  driverPenaltyType: 'flat',
+  driverPenaltyAmount: 200,
+  driverPriorityPenaltyPoints: 10,
+});
+
+function readOutstationPolicy(booking) {
+  const fromPreview = booking?.cancellationPreview?.policy?.outstation;
+  if (fromPreview && typeof fromPreview === 'object') {
+    return { ...DEFAULT_OUTSTATION_POLICY, ...fromPreview };
+  }
+  return { ...DEFAULT_OUTSTATION_POLICY };
+}
+
+function hoursUntilOutstationPickup(booking, now = Date.now()) {
+  const pickupAt =
+    booking?.outstation?.pickupAt || booking?.outstation?.startDate;
+  if (!pickupAt) return Infinity;
+  const ms = new Date(pickupAt).getTime() - now;
+  if (!Number.isFinite(ms)) return Infinity;
+  return ms / (60 * 60 * 1000);
+}
+
+const clampPct = (n) => Math.max(0, Math.min(100, Number(n) || 0));
+const nonNeg = (n) => Math.max(0, Number(n) || 0);
+
+/** Resolve a {type, amount} fee pair into a rupee figure. */
+function resolveFee(type, amount, basis) {
+  if (type === 'percentage') {
+    return (nonNeg(basis) * clampPct(amount)) / 100;
+  }
+  return nonNeg(amount);
+}
+
+/**
+ * Client-side mirror of `computeOutstationUserCancellation`. Used when
+ * the booking flow on the FE needs to render the live deduction without
+ * a round-trip — primarily the cancel-confirm dialog (the user can
+ * cancel the moment they land on the booking, before the server has
+ * had a chance to refresh `cancellationPreview`).
+ */
+export function previewOutstationUserCancellation(booking) {
+  const policy = readOutstationPolicy(booking);
+  const status = booking?.status;
+  const tripStarted = status === BOOKING_STATUS.STARTED;
+  const driverArrived = status === BOOKING_STATUS.ARRIVED || tripStarted;
+  const hoursUntilPickup = hoursUntilOutstationPickup(booking);
+  const paid =
+    Math.round((Number(booking?.payment?.amountPaidRupees) || 0) * 100) / 100;
+  const fareTotal = Number(booking?.fareSnapshot?.total) || 0;
+  const dailyRate = Number(booking?.fareSnapshot?.breakdown?.dailyRate) || 0;
+
+  let tier;
+  let rawFee = 0;
+
+  if (driverArrived) {
+    tier = OUTSTATION_USER_CANCEL_TIER.DRIVER_ARRIVED;
+    const baseFee = resolveFee(
+      policy.arrivedFeeType,
+      policy.arrivedFeeAmount,
+      paid,
+    );
+    const minDaysPart = nonNeg(policy.arrivedFeeMinDays) * dailyRate;
+    rawFee = Math.max(baseFee, minDaysPart);
+  } else if (hoursUntilPickup > policy.freeCancellationHoursBeforePickup) {
+    tier = OUTSTATION_USER_CANCEL_TIER.BEFORE_FREE_WINDOW;
+    rawFee = resolveFee(
+      policy.beforeWindowFeeType,
+      policy.beforeWindowFeeAmount,
+      paid,
+    );
+  } else {
+    tier = OUTSTATION_USER_CANCEL_TIER.WITHIN_FREE_WINDOW_PRE_ARRIVAL;
+    rawFee = resolveFee(
+      policy.preArrivalFeeType,
+      policy.preArrivalFeeAmount,
+      paid,
+    );
+  }
+
+  const feeCharged =
+    Math.round(Math.min(rawFee, paid) * 100) / 100;
+  const refundAmount =
+    Math.round(Math.max(0, paid - feeCharged) * 100) / 100;
+
+  return {
+    feeCharged,
+    refundAmount,
+    tripStarted,
+    driverArrived,
+    tier,
+    hoursUntilPickup: Number.isFinite(hoursUntilPickup)
+      ? Math.round(hoursUntilPickup * 10) / 10
+      : null,
+    policy,
+    basis: { paid, fareTotal, dailyRate },
+  };
+}
 
 /**
  * Client-side mirror of `bookingCancellation.service.js`.
@@ -51,6 +178,11 @@ export function previewUserCancellation(booking) {
       tripStarted: false,
       driverArrived: false,
     };
+  }
+  // Outstation uses a TIME-driven policy. Branch out before any
+  // status-driven math runs so the hourly preview stays untouched.
+  if (booking.serviceType === SERVICE_TYPES.OUTSTATION) {
+    return previewOutstationUserCancellation(booking);
   }
   const status = booking.status;
   const tripStarted = status === BOOKING_STATUS.STARTED;

@@ -1,5 +1,21 @@
 import Input from '../../../../components/Input';
 
+/**
+ * Outstation pricing has been simplified to two knobs:
+ *
+ *   - Daily rate (₹/day)        — flat base fare for every calendar day
+ *                                 of the round trip.
+ *   - Allowance per night (₹)   — single combined driver allowance
+ *                                 (food + accommodation + driver bata
+ *                                 rolled into one). Charged for every
+ *                                 night (= days − 1) UNLESS the customer
+ *                                 commits to arranging both the food
+ *                                 AND stay themselves.
+ *
+ * Toll & parking are NOT billed by the platform — the customer settles
+ * those directly with the driver. The booking flow surfaces a notice
+ * for transparency; no rupee is added to the fare for them.
+ */
 const OutstationFieldsEditor = ({ outstation, onChange }) => {
   const update = (patch) => onChange({ ...outstation, ...patch });
   const o = outstation || {};
@@ -7,9 +23,18 @@ const OutstationFieldsEditor = ({ outstation, onChange }) => {
   return (
     <div className="space-y-3">
       <div>
-        <h4 className="text-sm font-bold text-slate-900">Outstation rates</h4>
+        <h4 className="text-sm font-bold text-slate-900">
+          Outstation rates
+          <span className="text-[10px] uppercase tracking-wide text-primary font-semibold ml-1">
+            Round trip
+          </span>
+        </h4>
         <p className="text-xs text-slate-500">
-          Daily flat rate plus optional per-km charges and overnight allowances.
+          Fare = daily rate × days + allowance × nights (allowance is
+          waived when the customer arranges the driver&rsquo;s food and
+          stay themselves). Service charge and GST are added on top.
+          Toll &amp; parking are paid directly by the customer to the
+          driver and are not added to the fare.
         </p>
       </div>
 
@@ -20,45 +45,17 @@ const OutstationFieldsEditor = ({ outstation, onChange }) => {
           min={0}
           value={o.dailyRate ?? 0}
           onChange={(e) => update({ dailyRate: Number(e.target.value) })}
-          helper="Flat charge per day of the trip."
+          helper="Flat ₹ billed for every calendar day of the round trip."
         />
         <Input
-          label="Km included per day"
+          label="Allowance per night (₹)"
           type="number"
           min={0}
-          value={o.kmIncludedPerDay ?? 0}
-          onChange={(e) => update({ kmIncludedPerDay: Number(e.target.value) })}
-          helper="0 = unlimited (no per-km charge)."
+          value={o.allowancePerNight ?? 0}
+          onChange={(e) => update({ allowancePerNight: Number(e.target.value) })}
+          helper="Driver&rsquo;s combined food + stay + bata. Charged per night, waived when the customer arranges everything."
         />
-        <Input
-          label="Extra km rate (₹/km)"
-          type="number"
-          min={0}
-          value={o.extraKmRate ?? 0}
-          onChange={(e) => update({ extraKmRate: Number(e.target.value) })}
-          helper={
-            o.kmIncludedPerDay > 0
-              ? 'Charged when actual km exceeds the daily limit.'
-              : 'Ignored when km is unlimited.'
-          }
-        />
-        <Input
-          label="Night halt charge (₹/night)"
-          type="number"
-          min={0}
-          value={o.nightHaltCharge ?? 0}
-          onChange={(e) => update({ nightHaltCharge: Number(e.target.value) })}
-          helper="Driver bata per night. Nights = days − 1."
-        />
-        <Input
-          label="Stay charge per night (₹)"
-          type="number"
-          min={0}
-          value={o.stayChargePerNight ?? 0}
-          onChange={(e) => update({ stayChargePerNight: Number(e.target.value) })}
-          helper="Added when customer doesn't provide accommodation."
-        />
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-3 md:col-span-2">
           <Input
             label="Min days"
             type="number"

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Car, CalendarCheck, DollarSign, Settings,
   LogOut, X, ChevronRight, ChevronDown, ShieldCheck, Monitor, Package,
   CheckSquare, MapPin, Receipt, Sparkles, Navigation, Wallet, Banknote,
-  LifeBuoy, ClipboardList, Timer, Megaphone,
+  LifeBuoy, ClipboardList, Timer, Megaphone, Compass,
 } from 'lucide-react';
 import { APP_NAME } from '../../../utils/constants';
 import useAdminAuthStore from '../../../store/useAdminAuthStore';
@@ -52,6 +52,14 @@ const navItems = [
         icon: LifeBuoy,
         // All staff can view; the page itself scopes team_members to
         // their assigned zones and hides the "assign driver" CTA.
+        roles: ['admin', 'sub_admin', 'team_member'],
+      },
+      {
+        path: '/admin/bookings/outstation-assignments',
+        label: 'Outstation Queue',
+        icon: Compass,
+        // Outstation rides skip auto-dispatch entirely; staff assign
+        // here. Team members see read-only rows in their zones.
         roles: ['admin', 'sub_admin', 'team_member'],
       },
     ],

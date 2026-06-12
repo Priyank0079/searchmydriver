@@ -70,3 +70,19 @@ export const uploadLiveVerification = asyncHandler(async (req, res) => {
   );
   return res.status(200).json(new ApiResponse(200, result, 'Live verification video saved'));
 });
+
+/**
+ * Toggle the driver's outstation opt-in. Outstation bookings are
+ * dispatched manually from the admin queue; only drivers with this
+ * flag set will appear in the picker. Body: `{ available: boolean }`.
+ */
+export const updateOutstationAvailability = asyncHandler(async (req, res) => {
+  const result = await driverService.updateOutstationAvailabilityService(
+    req.driver._id,
+    { available: !!req.body?.available },
+  );
+  const message = result.availableForOutstation
+    ? "You're now visible for outstation assignments"
+    : "You've opted out of outstation assignments";
+  return res.status(200).json(new ApiResponse(200, result, message));
+});

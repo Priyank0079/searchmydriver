@@ -18,6 +18,8 @@ import {
   Pencil,
   X,
   CalendarClock,
+  HandCoins,
+  AlertCircle,
 } from 'lucide-react';
 import Card from '../../../../components/Card';
 import Button from '../../../../components/Button';
@@ -27,32 +29,47 @@ import useUserActiveBookingStore from '../../../../store/user/useUserActiveBooki
 import useUserWalletStore from '../../../../store/user/useUserWalletStore';
 import { SERVICE_TYPES, SERVICE_TYPE_LABELS } from '../../../../constants/serviceTypes';
 import { BOOKING_STATUS } from '../../../../constants/bookingStatus';
-import { formatPickupDateTime, formatDateShort } from '../../../../utils/datetime';
+import { formatPickupDateTime } from '../../../../utils/datetime';
 import { getCarBrandName, getCarModelName } from '../../../../utils/vehicleCatalog';
 import FareCard from '../components/FareCard';
 import useFareEstimate from '../hooks/useFareEstimate';
 import TopupSheet from '../../wallet/components/TopupSheet';
 
 /**
- * Final booking confirmation screen — replaces the legacy "Review then go
- * pay via Razorpay after a driver accepts" flow.
+ * Combined Review + Confirm & pay screen.
  *
- * Now:
- *   1. Recompute the fare live (server-side estimate).
+ * Earlier the booking flow had two near-identical screens:
+ *   /user/book/review   – trip summary + fare estimate + outstation
+ *                         food/stay toggle.
+ *   /user/book/confirm  – trip summary + fare estimate + wallet + pay CTA.
+ *
+ * They've been consolidated into this single page so the user only
+ * sees one "review your trip" surface. For outstation that means the
+ * food-and-stay toggle lives here (and re-runs the estimate live), and
+ * the toll/parking acknowledgement is gated behind the pay CTA via a
+ * confirmation dialog instead of an always-on inline banner.
+ *
+ *   1. Recompute the fare live via `useFareEstimate` whenever the
+ *      relevant draft fields change (incl. the food/stay toggle).
  *   2. Show the wallet balance + the deficit (if any).
- *   3. "Pay from wallet" → POST /auth/bookings creates the booking and
- *      atomically debits the wallet.
- *   4. If the wallet is short, we open the TopupSheet pre-filled with the
- *      exact shortfall (rounded up), and on success we auto-retry the
- *      booking-create call.
+ *   3. Pay CTA:
+ *        – Outstation: first surface the toll/parking ack popup.
+ *          Customer must accept before we run step 4.
+ *        – Hourly:     proceeds straight to step 4.
+ *   4. POST /auth/bookings creates the booking and atomically debits
+ *      the wallet.
+ *   5. If the wallet is short, we open the TopupSheet pre-filled with
+ *      the exact shortfall (rounded up), and on success we auto-retry
+ *      the booking-create call.
  *
- * Reachable from both the new hourly slab page and the legacy outstation
- * review page via `navigate('/user/book/confirm')`.
+ * Header + footer are sticky so the running total + back button are
+ * always visible while the user scrolls through the trip recap.
  */
 const ConfirmAndPayPage = () => {
   const navigate = useNavigate();
   const draft = useBookingDraftStore();
   const setFareEstimate = useBookingDraftStore((s) => s.setFareEstimate);
+  const setOutstation = useBookingDraftStore((s) => s.setOutstation);
   const createBooking = useUserActiveBookingStore((s) => s.createBooking);
 
   const wallet = useUserWalletStore((s) => s.wallet);
@@ -68,6 +85,7 @@ const ConfirmAndPayPage = () => {
   const [carEditOpen, setCarEditOpen] = useState(false);
   const [pickupEditOpen, setPickupEditOpen] = useState(false);
   const [conflictError, setConflictError] = useState(null); // { title, message, type: 'car'|'time' }
+  const [tollAckOpen, setTollAckOpen] = useState(false);
 
   // Guard: bounce back to the start of the flow if state is incomplete.
   useEffect(() => {
@@ -119,7 +137,8 @@ const ConfirmAndPayPage = () => {
       if (draft.hourly.stayProvided != null) base.stayProvided = !!draft.hourly.stayProvided;
     } else {
       base.days = draft.outstation.days;
-      base.scheduledAt = draft.outstation.startDate;
+      base.scheduledAt =
+        draft.outstation.pickupAt || draft.outstation.startDate;
       base.foodProvided = draft.outstation.needsFood;
       base.stayProvided = draft.outstation.needsStay;
     }
@@ -153,16 +172,40 @@ const ConfirmAndPayPage = () => {
   // confirmed they'll feed the driver.
   const foodRequired = !!estimate?.fareBreakdown?.foodRequired;
   const isHourly = draft.serviceType === SERVICE_TYPES.HOURLY;
+  const isOutstation = draft.serviceType === SERVICE_TYPES.OUTSTATION;
   const foodAcknowledged = !!draft.hourly?.foodAcknowledged;
   const foodGateUnmet = isHourly && foodRequired && !foodAcknowledged;
   const setHourly = useBookingDraftStore((s) => s.setHourly);
 
-  const handlePay = useCallback(async () => {
+  // Outstation food + stay arrangement toggle — both flags flip
+  // together because the fare engine ANDs them into a single
+  // "customer arranges everything" signal. Convention is documented
+  // on the booking-draft store.
+  const customerArrangesAll =
+    isOutstation
+    && draft.outstation?.needsFood === true
+    && draft.outstation?.needsStay === true;
+  const handleArrangesToggle = useCallback(
+    (next) => {
+      setOutstation({
+        needsFood: next,
+        needsStay: next,
+      });
+    },
+    [setOutstation],
+  );
+
+  // Per-night allowance preview for the FoodStayCard subtitle —
+  // "₹X × N nights = ₹Y" so the customer sees the saving at a glance.
+  const allowancePerNight =
+    Number(estimate?.fareBreakdown?.allowancePerNight) || 0;
+  const tripNights = Number(estimate?.fareBreakdown?.nights) || 0;
+
+  // Actual booking creation. Split out from `handlePay` so the
+  // toll/parking acknowledgement dialog can call it after the customer
+  // accepts.
+  const submitBooking = useCallback(async () => {
     if (submitting || !total) return;
-    if (foodGateUnmet) {
-      toast.error('Please confirm you\u2019ll arrange the driver\u2019s meal');
-      return;
-    }
 
     const freshWallet = useUserWalletStore.getState().wallet || {};
     const freshBalance = Number(freshWallet.balance || 0);
@@ -233,21 +276,48 @@ const ConfirmAndPayPage = () => {
     } finally {
       setSubmitting(false);
     }
-  }, [submitting, total, canPay, balance, createBooking, fetchWallet, navigate, foodGateUnmet]);
+  }, [submitting, total, createBooking, fetchWallet, navigate]);
+
+  // Pay CTA entry point. Hourly is straight-through; outstation must
+  // first acknowledge the toll & parking disclosure (since those are
+  // paid directly to the driver and aren't part of this fare).
+  const handlePay = useCallback(() => {
+    if (submitting || !total) return;
+    if (foodGateUnmet) {
+      toast.error('Please confirm you\u2019ll arrange the driver\u2019s meal');
+      return;
+    }
+    if (isOutstation) {
+      setTollAckOpen(true);
+      return;
+    }
+    submitBooking();
+  }, [submitting, total, foodGateUnmet, isOutstation, submitBooking]);
+
+  // Outstation toll/parking ack flow → user accepted, run the create.
+  const handleTollAcknowledged = useCallback(() => {
+    setTollAckOpen(false);
+    submitBooking();
+  }, [submitBooking]);
 
   // Auto-retry the booking creation after a successful top-up so the user
   // doesn't have to click "Pay" again.
   const handleTopupSuccess = useCallback(async () => {
     setTopupOpen(false);
-    // Give Zustand a tick to apply the wallet patch before checking again.
+    // Give Zustand a tick to apply the wallet patch before checking
+    // again. We bypass `handlePay` (which would re-open the toll
+    // dialog) and call submitBooking directly — the user already
+    // acknowledged the disclosure that triggered the top-up.
     setTimeout(() => {
-      handlePay();
+      submitBooking();
     }, 50);
-  }, [handlePay]);
+  }, [submitBooking]);
 
   return (
     <div className="flex-1 flex flex-col bg-bg min-h-dvh">
-      <div className="bg-white px-4 pt-4 pb-4 shadow-sm">
+      {/* Sticky header keeps Back + page title in view while the user
+          scrolls through trip + fare + wallet sections. */}
+      <div className="sticky top-0 z-30 bg-white px-4 pt-4 pb-4 shadow-sm">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -258,9 +328,10 @@ const ConfirmAndPayPage = () => {
             <ArrowLeft className="w-5 h-5 text-text" />
           </button>
           <div className="min-w-0 flex-1">
-            <h1 className="text-lg font-bold text-text">Confirm & pay</h1>
+            <h1 className="text-lg font-bold text-text">Review &amp; pay</h1>
             <p className="text-xs text-text-muted">
-              Pay from your wallet to start searching for a driver.
+              Confirm the details and pay from your wallet to start
+              searching for a driver.
             </p>
           </div>
         </div>
@@ -273,8 +344,30 @@ const ConfirmAndPayPage = () => {
           onEditCar={() => setCarEditOpen(true)}
           onEditPickup={() => setPickupEditOpen(true)}
         />
+        {/*
+          Outstation: single all-or-nothing toggle for the customer
+          arranging the driver's food + stay themselves. Flipping it
+          patches both `needsFood` and `needsStay` on the draft, which
+          is the exact key `useFareEstimate` keys off — so the next
+          `/auth/bookings/estimate` call (debounced ~250 ms) reflects
+          the new choice and the fare card + pay CTA both update.
+        */}
+        {isOutstation && (
+          <FoodStayCard
+            customerArrangesAll={customerArrangesAll}
+            allowancePerNight={allowancePerNight}
+            nights={tripNights}
+            onChange={handleArrangesToggle}
+          />
+        )}
         <FareCard estimate={estimate} estimating={estimating} error={estimateError} />
         <FareNotices estimate={estimate} />
+        {isOutstation && (
+          <OutstationCancellationPolicySummary
+            policy={estimate?.cancellationPolicy?.outstation}
+            dailyRate={Number(estimate?.fareBreakdown?.dailyRate) || 0}
+          />
+        )}
         {isHourly && foodRequired && (
           <FoodAcknowledgement
             thresholdHours={Number(
@@ -304,7 +397,9 @@ const ConfirmAndPayPage = () => {
         </p>
       </div>
 
-      <div className="bg-white border-t border-border-light px-4 py-3">
+      {/* Sticky footer — pay CTA (with the running total) is always
+          reachable without scrolling. */}
+      <div className="sticky bottom-0 z-30 bg-white border-t border-border-light px-4 py-3 shadow-[0_-4px_12px_-8px_rgba(0,0,0,0.15)]">
         <Button
           fullWidth
           icon={WalletIcon}
@@ -313,7 +408,7 @@ const ConfirmAndPayPage = () => {
           onClick={handlePay}
         >
           {!total
-            ? 'Calculating fare…'
+            ? 'Calculating fare\u2026'
             : foodGateUnmet
               ? 'Confirm driver\u2019s meal to continue'
               : canPay
@@ -369,6 +464,16 @@ const ConfirmAndPayPage = () => {
           setConflictError(null);
           setPickupEditOpen(true);
         }}
+      />
+
+      {/* Outstation: toll & parking are paid by the customer directly
+          to the driver during the trip — surfaced as an explicit
+          acknowledgement before we kick off the booking creation. */}
+      <TollParkingAckDialog
+        open={tollAckOpen}
+        submitting={submitting}
+        onAccept={handleTollAcknowledged}
+        onCancel={() => setTollAckOpen(false)}
       />
     </div>
   );
@@ -550,8 +655,8 @@ function FareNotices({ estimate }) {
               {`Driver food allowance included (\u20B9${bd.foodAllowance})`}
             </p>
             <p className="text-[12px] text-amber-800 leading-snug mt-0.5">
-              Toggle &ldquo;I&apos;ll arrange the driver&apos;s meals&rdquo; on
-              the trip review screen to remove this from the fare.
+              Toggle &ldquo;I&apos;ll arrange the driver&apos;s meals&rdquo;
+              above to remove this from the fare.
             </p>
           </div>
         </div>
@@ -634,7 +739,11 @@ function FoodAcknowledgement({ thresholdHours, checked, onChange }) {
 
 function TripSummary({ draft, car, onEditCar, onEditPickup }) {
   const isHourly = draft.serviceType === SERVICE_TYPES.HOURLY;
-  const schedule = isHourly ? draft.hourly?.scheduledStartAt : draft.outstation?.startDate;
+  const schedule = isHourly
+    ? draft.hourly?.scheduledStartAt
+    : draft.outstation?.pickupAt || draft.outstation?.startDate;
+  const expectedReturn =
+    draft.outstation?.expectedReturnAt || draft.outstation?.endDate;
   const dropAddress = draft.dropoff?.address || draft.outstation?.destinationAddress;
 
   return (
@@ -662,6 +771,9 @@ function TripSummary({ draft, car, onEditCar, onEditPickup }) {
               <div className="mt-3">
                 <p className="text-xs text-text-muted">Destination</p>
                 <p className="text-sm font-medium text-text break-words">{dropAddress}</p>
+                <p className="text-[11px] text-text-muted mt-0.5">
+                  Round trip — we drop you back at the pickup.
+                </p>
               </div>
             )}
           </div>
@@ -709,30 +821,36 @@ function TripSummary({ draft, car, onEditCar, onEditPickup }) {
           <div className="flex-1 grid grid-cols-2 gap-3">
             <FactRow
               icon={Calendar}
-              label={isHourly ? 'Pickup time' : 'Trip dates'}
-              value={
-                isHourly
-                  ? formatPickupDateTime(schedule)
-                  : `${formatDateShort(draft.outstation?.startDate)} \u2192 ${formatDateShort(draft.outstation?.endDate)}`
-              }
+              label={isHourly ? 'Pickup time' : 'Pickup'}
+              value={formatPickupDateTime(schedule)}
             />
+            {!isHourly && (
+              <FactRow
+                icon={Calendar}
+                label="Expected return"
+                value={formatPickupDateTime(expectedReturn)}
+              />
+            )}
             <FactRow
               icon={Clock}
-              label={isHourly ? 'Duration' : 'Days'}
+              label={isHourly ? 'Duration' : 'Days \u00b7 nights'}
               value={
                 isHourly
                   ? `${draft.hourly?.durationHours || 0} h`
-                  : `${draft.outstation?.days || 1} day · ${draft.outstation?.nights || 0} night`
+                  : `${draft.outstation?.days || 1} day${(draft.outstation?.days || 1) === 1 ? '' : 's'} \u00b7 ${draft.outstation?.nights || 0} night${(draft.outstation?.nights || 0) === 1 ? '' : 's'}`
               }
             />
             <FactRow icon={Car} label="Service" value={SERVICE_TYPE_LABELS[draft.serviceType]} />
             {!isHourly && (
               <FactRow
-                icon={MapPin}
-                label="Driver stay/food"
-                value={`${draft.outstation?.needsStay ? 'We arrange stay' : 'Customer arranges'}, ${
-                  draft.outstation?.needsFood ? 'we arrange food' : 'customer arranges'
-                }`}
+                icon={HandCoins}
+                label="Driver food & stay"
+                value={
+                  draft.outstation?.needsFood === true
+                    && draft.outstation?.needsStay === true
+                    ? 'Arranged by customer (no allowance)'
+                    : 'Allowance billed per night'
+                }
               />
             )}
           </div>
@@ -973,6 +1091,217 @@ function ConflictErrorDialog({ error, onClose, onChangeCar, onChangePickup }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* FoodStayCard — outstation food + stay arrangement toggle             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Single all-or-nothing toggle for the customer arranging the
+ * driver's food and stay themselves. When ON, the per-night
+ * allowance is waived. The subtitle line is data-driven off the
+ * latest estimate so the customer sees the exact saving they'd get
+ * at a glance.
+ */
+function FoodStayCard({ customerArrangesAll, allowancePerNight, nights, onChange }) {
+  const allowanceTotal = allowancePerNight * nights;
+  return (
+    <Card>
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-xl bg-bg flex items-center justify-center shrink-0">
+          <HandCoins className="w-4 h-4 text-text-muted" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-text">
+            I will arrange the driver&rsquo;s food and stay
+          </p>
+          <p className="text-xs text-text-muted mt-0.5">
+            {customerArrangesAll
+              ? 'No allowance charged — you take care of meals and accommodation directly.'
+              : nights > 0 && allowancePerNight > 0
+                ? `We'll add ₹${allowancePerNight} × ${nights} night${nights === 1 ? '' : 's'} = ₹${allowanceTotal} as the driver's allowance (food + stay).`
+                : 'No allowance applies on a same-day trip.'}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => onChange(!customerArrangesAll)}
+          className={`shrink-0 w-10 h-6 rounded-full transition-colors ${customerArrangesAll ? 'bg-primary' : 'bg-gray-300'} relative`}
+          aria-pressed={customerArrangesAll}
+          aria-label="I will arrange the driver's food and stay"
+        >
+          <span
+            className={`absolute top-0.5 ${customerArrangesAll ? 'left-[18px]' : 'left-0.5'} w-5 h-5 bg-white rounded-full shadow transition-all`}
+          />
+        </button>
+      </div>
+      <p className="text-[11px] text-text-muted mt-3 pt-3 border-t border-border-light">
+        Turn this on only if you can host the driver during the trip.
+        Otherwise we&rsquo;ll add a per-night allowance covering their
+        food and accommodation.
+      </p>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* TollParkingAckDialog — outstation toll & parking acknowledgement     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Outstation-only confirmation surfaced when the customer taps the
+ * Pay CTA. Toll, parking and other route-specific incidentals are
+ * paid by the customer directly to the driver as per actuals — they
+ * are not part of this booking fare. Customer must explicitly
+ * acknowledge before we create the booking.
+ */
+function TollParkingAckDialog({ open, submitting, onAccept, onCancel }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+      <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl animate-fade-in-up">
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-11 h-11 rounded-2xl bg-amber-100 flex items-center justify-center shrink-0">
+            <AlertCircle className="w-5 h-5 text-amber-700" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-base font-bold text-text">
+              Toll &amp; parking are paid by you
+            </p>
+            <p className="text-sm text-text-secondary mt-1 leading-snug">
+              Any tolls, parking, state-entry charges or other
+              route-specific costs are <strong>not</strong> included in
+              this fare. You&rsquo;ll pay them directly to the driver
+              along the route as per actuals.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="p-1.5 rounded-xl hover:bg-gray-100 text-text-muted shrink-0"
+            aria-label="Cancel"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="space-y-2 mt-2">
+          <button
+            type="button"
+            onClick={onAccept}
+            disabled={submitting}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-primary text-white font-semibold py-3 text-sm hover:bg-primary-dark transition disabled:opacity-60"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            I understand &mdash; continue to pay
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="w-full inline-flex items-center justify-center rounded-2xl border border-border bg-white text-text font-semibold py-3 text-sm hover:bg-gray-50 transition"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* OutstationCancellationPolicySummary                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Compact, customer-facing summary of the outstation cancellation
+ * policy. Renders on the review/confirm page so the customer knows
+ * what they're committing to BEFORE they pay. Driven entirely off the
+ * `cancellationPolicy.outstation` snapshot the estimate hands back —
+ * no extra round-trip needed.
+ */
+function OutstationCancellationPolicySummary({ policy, dailyRate }) {
+  const cfg = policy || {};
+  const freeHours = Number(cfg.freeCancellationHoursBeforePickup ?? 24);
+  const arrivedFeeMinDays = Math.max(0, Number(cfg.arrivedFeeMinDays ?? 1));
+  const arrivedFloor = arrivedFeeMinDays * (Number(dailyRate) || 0);
+
+  const describeFee = (type, amount, zeroLabel) => {
+    const value = Number(amount) || 0;
+    if (value <= 0) return zeroLabel;
+    return type === 'percentage'
+      ? `${value}% of the fare`
+      : `\u20B9${value}`;
+  };
+  const beforeFee = describeFee(
+    cfg.beforeWindowFeeType,
+    cfg.beforeWindowFeeAmount,
+    'no fee',
+  );
+  const preFee = describeFee(
+    cfg.preArrivalFeeType,
+    cfg.preArrivalFeeAmount,
+    'no fee',
+  );
+  const arrivedFee = describeFee(
+    cfg.arrivedFeeType,
+    cfg.arrivedFeeAmount,
+    'no fee',
+  );
+
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        <div className="w-10 h-10 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+          <ShieldCheck className="w-5 h-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-text">Cancellation policy</p>
+          <p className="text-[11px] text-text-muted mt-0.5">
+            Calculated from your pickup time. Refunds go straight back to
+            your wallet.
+          </p>
+        </div>
+      </div>
+
+      <ul className="mt-3 space-y-2 text-[12px] text-text-secondary">
+        <li className="flex gap-2">
+          <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+          <span>
+            <strong className="text-text">More than {freeHours}h before pickup</strong>
+            {' '}— {beforeFee === 'no fee'
+              ? 'full refund, no cancellation fee.'
+              : `${beforeFee} is deducted, the rest refunded.`}
+          </span>
+        </li>
+        <li className="flex gap-2">
+          <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+          <span>
+            <strong className="text-text">Within {freeHours}h, driver not yet arrived</strong>
+            {' '}— {preFee === 'no fee'
+              ? 'no cancellation fee.'
+              : `${preFee} is deducted, the rest refunded.`}
+          </span>
+        </li>
+        <li className="flex gap-2">
+          <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+          <span>
+            <strong className="text-text">After the driver reaches pickup</strong>
+            {' '}— {arrivedFee}
+            {arrivedFloor > 0 ? (
+              <>
+                {' '}or <strong className="text-text">₹{Math.round(arrivedFloor)}</strong>{' '}
+                ({arrivedFeeMinDays === 1
+                  ? "one day\u2019s fare"
+                  : `${arrivedFeeMinDays} days\u2019 fare`}), whichever is higher.
+              </>
+            ) : (
+              <>.</>
+            )}
+          </span>
+        </li>
+      </ul>
     </div>
   );
 }
