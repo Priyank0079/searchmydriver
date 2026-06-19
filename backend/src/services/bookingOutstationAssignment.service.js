@@ -279,11 +279,11 @@ export async function getOutstationAssignmentDetailService(bookingId, staff) {
 
   const vehicleConflicts = buffered
     ? await getVehicleConflicts({
-        carId: booking.carId,
-        window: buffered,
-        excludeBookingId: booking._id,
-        bufferMinutes,
-      })
+      carId: booking.carId,
+      window: buffered,
+      excludeBookingId: booking._id,
+      bufferMinutes,
+    })
     : [];
 
   return {
@@ -292,11 +292,11 @@ export async function getOutstationAssignmentDetailService(bookingId, staff) {
     bufferMinutes,
     window: baseWindow
       ? {
-          startMs: baseWindow.startMs,
-          endMs: baseWindow.endMs,
-          bufferedStartMs: buffered.startMs,
-          bufferedEndMs: buffered.endMs,
-        }
+        startMs: baseWindow.startMs,
+        endMs: baseWindow.endMs,
+        bufferedStartMs: buffered.startMs,
+        bufferedEndMs: buffered.endMs,
+      }
       : null,
     vehicleConflicts,
   };
@@ -318,7 +318,7 @@ export async function getOutstationAssignmentDetailService(bookingId, staff) {
  */
 export async function listAvailableDriversForOutstationService(
   bookingId,
-  { search, limit = 100, staff } = {},
+  { search, page = 1, limit = 50, staff } = {},
 ) {
   const detail = await getOutstationAssignmentDetailService(bookingId, staff);
   if (!detail) {
@@ -333,23 +333,37 @@ export async function listAvailableDriversForOutstationService(
     );
   }
 
+  const pageNum = Math.max(1, parseInt(page, 10));
+  const limitNum = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 300);
+  const skip = (pageNum - 1) * limitNum;
+
   const carTypeId = car?.carTypeId?._id || car?.carTypeId || null;
+
+  // Resolve the booking's zone IDs so we can filter to drivers who opted
+  // into those zones. `zoneIds` on the booking is already populated with
+  // objects by `getOutstationAssignmentDetailService`.
+  const bookingZoneIds = (booking.zoneIds || []).map((z) => {
+    try { return new mongoose.Types.ObjectId(String(z?._id || z)); } catch { return null; }
+  }).filter(Boolean);
 
   const match = {
     approvalStatus: 'approved',
     isDeleted: { $ne: true },
-    // Drivers explicitly opt-in to outstation from their account
-    // screen (see `updateOutstationAvailabilityService`). The picker
-    // hides anyone who hasn't \u2014 admins shouldn't be able to hand
-    // a multi-day overnight trip to a driver who didn't sign up for it.
+    // Drivers must have explicitly opted in to outstation.
     availableForOutstation: true,
   };
+
+  // Zone filter — only show drivers who opted into at least one of the
+  // booking's pickup zones. This is the key new behaviour: admins only
+  // see zone-relevant drivers in the picker.
+  if (bookingZoneIds.length) {
+    match.preferredOutstationZones = { $in: bookingZoneIds };
+  }
+
   if (carTypeId) {
     try {
       match.carTypeExperience = new mongoose.Types.ObjectId(String(carTypeId));
-    } catch {
-      /* ignore bad id */
-    }
+    } catch { /* ignore bad id */ }
   }
   if (search) {
     const q = String(search).trim();
@@ -361,23 +375,22 @@ export async function listAvailableDriversForOutstationService(
     }
   }
 
-  const drivers = await Driver.find(match)
-    .select(
-      'name phone email rating experienceYears isOnline isOnTrip location lastLocationAt carTypeExperience availableForOutstation outstationAvailabilityUpdatedAt cancellationStats',
-    )
-    // Priority-points ASC first so drivers who recently bailed on
-    // outstation bookings (penaltyHoursBeforePickup tier) sink to the
-    // bottom of the picker. Online/rating/experience break ties. The
-    // admin can still pick anyone by hand; this just controls the
-    // default ordering surfaced in the assignment sheet.
-    .sort({
-      'cancellationStats.priorityPenaltyPoints': 1,
-      isOnline: -1,
-      rating: -1,
-      experienceYears: -1,
-    })
-    .limit(Math.min(Math.max(parseInt(limit, 10) || 100, 1), 300))
-    .lean();
+  const [drivers, total] = await Promise.all([
+    Driver.find(match)
+      .select(
+        'name phone email rating experienceYears isOnline isOnTrip location lastLocationAt carTypeExperience availableForOutstation preferredOutstationZones outstationAvailabilityUpdatedAt cancellationStats',
+      )
+      .sort({
+        'cancellationStats.priorityPenaltyPoints': 1,
+        isOnline: -1,
+        rating: -1,
+        experienceYears: -1,
+      })
+      .skip(skip)
+      .limit(limitNum)
+      .lean(),
+    Driver.countDocuments(match),
+  ]);
 
   // Bulk conflict lookup for every candidate.
   let conflictMap = {};
@@ -401,9 +414,12 @@ export async function listAvailableDriversForOutstationService(
 
   return {
     drivers: enriched,
+    total,
+    page: pageNum,
     bufferMinutes,
     window,
     carTypeId: carTypeId ? String(carTypeId) : null,
+    bookingZoneIds: bookingZoneIds.map(String),
   };
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Banknote,
   Wallet,
@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import Badge from '../../../components/Badge';
 import useAdminRevenueStore from '../../../store/admin/useAdminRevenueStore';
+import RevenueDetailsModal from '../components/ManageRevenue/RevenueDetailsModal';
 
 /**
  * Admin → Account → Revenue.
@@ -79,6 +80,8 @@ const ManageRevenue = () => {
   const fetchRevenue = useAdminRevenueStore((s) => s.fetchRevenue);
   const setFilter = useAdminRevenueStore((s) => s.setFilter);
   const setPage = useAdminRevenueStore((s) => s.setPage);
+
+  const [selectedRow, setSelectedRow] = useState(null);
 
   useEffect(() => {
     fetchRevenue().catch(() => {});
@@ -208,14 +211,13 @@ const ManageRevenue = () => {
                 <Th>Customer</Th>
                 <Th>Driver</Th>
                 <Th>Amount</Th>
-                <Th>Breakdown</Th>
                 <Th>Occurred</Th>
               </tr>
             </thead>
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={8} className="py-12">
+                  <td colSpan={7} className="py-12">
                     <div className="flex items-center justify-center text-text-muted">
                       <Loader2 className="w-5 h-5 animate-spin mr-2" />
                       Loading revenue…
@@ -225,13 +227,19 @@ const ManageRevenue = () => {
               )}
               {!loading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-text-muted">
+                  <td colSpan={7} className="py-12 text-center text-text-muted">
                     No revenue entries for this filter.
                   </td>
                 </tr>
               )}
               {!loading &&
-                rows.map((row) => <RevenueRow key={row._id} row={row} />)}
+                rows.map((row) => (
+                  <RevenueRow
+                    key={row._id}
+                    row={row}
+                    onClick={() => setSelectedRow(row)}
+                  />
+                ))}
             </tbody>
           </table>
         </div>
@@ -270,6 +278,12 @@ const ManageRevenue = () => {
       {error && (
         <p className="text-xs text-danger">Could not load revenue: {error}</p>
       )}
+
+      <RevenueDetailsModal
+        isOpen={!!selectedRow}
+        onClose={() => setSelectedRow(null)}
+        row={selectedRow}
+      />
     </div>
   );
 };
@@ -282,7 +296,7 @@ function Th({ children }) {
   );
 }
 
-function RevenueRow({ row }) {
+function RevenueRow({ row, onClick }) {
   const meta = SOURCE_META[row.source] || {
     label: row.source,
     variant: 'muted',
@@ -293,7 +307,18 @@ function RevenueRow({ row }) {
   const customer = row.userId?.name || row.userId?.phone_no || '\u2014';
   const driver = row.driverId?.name || row.driverId?.phone_no || '\u2014';
   return (
-    <tr className="border-t border-border-light hover:bg-gray-50/60 align-top">
+    <tr
+      className="border-t border-border-light hover:bg-gray-50/60 align-top cursor-pointer"
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick?.();
+        }
+      }}
+    >
       <td className="px-4 py-3">
         <p className="font-mono text-xs font-medium text-text">
           {row.bookingNumber || '\u2014'}
@@ -320,54 +345,11 @@ function RevenueRow({ row }) {
           {formatCurrency(row.amountRupees)}
         </p>
       </td>
-      <td className="px-4 py-3 text-[11px] text-text-muted">
-        <RevenueBreakdown source={row.source} meta={row.meta || {}} />
-      </td>
       <td className="px-4 py-3 text-xs text-text-muted">
         {formatDateTime(row.occurredAt || row.createdAt)}
       </td>
     </tr>
   );
-}
-
-/**
- * Source-specific one-liner shown in the "Breakdown" cell. Keeps the
- * dense numeric story (fee, split, commission %) hover-free so the
- * admin doesn't have to open each booking to make sense of the line.
- */
-function RevenueBreakdown({ source, meta }) {
-  if (source === 'commission') {
-    return (
-      <span>
-        {meta.commissionPercent || 0}% of {formatCurrency(meta.totalPayable)}{' '}
-        &middot; driver got {formatCurrency(meta.driverEarning)}
-      </span>
-    );
-  }
-  if (source === 'cancellation_fee') {
-    return (
-      <span>
-        Fee {formatCurrency(meta.feeCharged)} &middot; driver{' '}
-        {formatCurrency(meta.driverShare)} (
-        {meta.driverSharePercent || 0}%)
-      </span>
-    );
-  }
-  if (source === 'driver_penalty') {
-    return (
-      <span>
-        Driver cancelled
-        {meta.reason ? ` (${humanReason(meta.reason)})` : ''}
-        {meta.status ? ` at ${meta.status}` : ''}
-      </span>
-    );
-  }
-  return <span>&mdash;</span>;
-}
-
-function humanReason(reason) {
-  if (!reason) return '';
-  return String(reason).replace(/_/g, ' ');
 }
 
 export default ManageRevenue;

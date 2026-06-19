@@ -361,11 +361,19 @@ const driverSchema = new mongoose.Schema(
      * Outstation is dispatched manually by admins (see
      * `bookingOutstationAssignment.service.js`), and the picker only
      * surfaces drivers with this flag set to `true`. Drivers can flip it
-     * from the account screen \u2014 default is `false` so a brand-new
+     * from the home screen — default is `false` so a brand-new
      * driver isn't surprised by an overnight job.
      *
      * `outstationAvailabilityUpdatedAt` is stamped on every toggle so
      * admins can sort the picker by "recently confirmed availability".
+     *
+     * `preferredOutstationZones` is the set of zones the driver is
+     * willing to take outstation pickups from. The driver UI requires
+     * at least one zone before the toggle can flip on, so this array
+     * is guaranteed non-empty whenever `availableForOutstation` is
+     * true (modulo legacy rows opted in before this constraint
+     * existed — those keep working but are nudged to pick a zone
+     * the next time they edit their preference).
      */
     availableForOutstation: {
       type: Boolean,
@@ -375,6 +383,11 @@ const driverSchema = new mongoose.Schema(
     outstationAvailabilityUpdatedAt: {
       type: Date,
       default: null,
+    },
+    preferredOutstationZones: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Zone' }],
+      default: [],
+      index: true,
     },
 
     // ── Driver kit (mandatory before going online) ───────────────────────────

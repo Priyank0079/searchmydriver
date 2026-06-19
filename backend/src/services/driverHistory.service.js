@@ -5,6 +5,7 @@ import { PAYMENT_PURPOSE, PAYMENT_STATUS } from '../constants/kitStatus.js';
 const PURPOSE_LABELS = {
   [PAYMENT_PURPOSE.DRIVER_KIT]: 'Driver kit',
   [PAYMENT_PURPOSE.TRIP_FARE]: 'Trip fare',
+  [PAYMENT_PURPOSE.TRIP_ALLOWANCE]: 'Food & stay allowance',
   [PAYMENT_PURPOSE.WITHDRAWAL]: 'Withdrawal',
 };
 
@@ -83,15 +84,28 @@ export const getDriverPaymentHistoryService = async (driverId) => {
 
     let type = 'other';
     if (p.purpose === PAYMENT_PURPOSE.DRIVER_KIT) type = 'kit';
-    else if (p.purpose === PAYMENT_PURPOSE.TRIP_FARE) type = 'trip';
+    else if (
+      p.purpose === PAYMENT_PURPOSE.TRIP_FARE
+      || p.purpose === PAYMENT_PURPOSE.TRIP_ALLOWANCE
+    ) type = 'trip';
     else if (p.purpose === PAYMENT_PURPOSE.WITHDRAWAL) type = 'withdrawal';
 
     items.push({
       id: p._id,
       type,
       purpose: p.purpose,
-      title: kitOrder?.kitSnapshot?.name || PURPOSE_LABELS[p.purpose] || 'Payment',
-      orderNumber: kitOrder?.orderNumber || '',
+      // Trip-credit rows surface the booking number on the FE so the
+      // driver can link a row back to the trip it came from. The
+      // `meta.bookingNumber` is stamped at write time in
+      // bookingTrip.service.js's `settleDriverEarning`.
+      title:
+        kitOrder?.kitSnapshot?.name
+        || PURPOSE_LABELS[p.purpose]
+        || 'Payment',
+      orderNumber:
+        kitOrder?.orderNumber
+        || p.meta?.bookingNumber
+        || '',
       amount: p.amount,
       currency: p.currency || 'INR',
       status: mapPaymentDocStatus(p.status),
@@ -99,6 +113,10 @@ export const getDriverPaymentHistoryService = async (driverId) => {
       razorpayPaymentId: p.razorpayPaymentId || '',
       referenceId: p.referenceId,
       createdAt: p.createdAt,
+      // Forward the breakdown so the driver app can render an
+      // expandable "where did this credit come from?" detail row
+      // without an extra round-trip.
+      meta: p.meta || {},
     });
   }
 
@@ -129,10 +147,21 @@ export const getDriverPaymentHistoryService = async (driverId) => {
 
   items.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
+  // `trip` is a count of *trips*, not ledger rows — a single booking
+  // can produce two Payment rows (Trip fare + Food & stay allowance)
+  // but the driver only ran one trip. We dedupe by `meta.bookingNumber`
+  // (preferred when present, since it's the human handle) and fall
+  // back to referenceId so older fare-only rows still get counted.
+  const tripKeys = new Set();
+  for (const i of items) {
+    if (i.type !== 'trip') continue;
+    const key = i.orderNumber || String(i.referenceId || i.id);
+    tripKeys.add(key);
+  }
   const summary = {
     total: items.length,
     kit: items.filter((i) => i.type === 'kit').length,
-    trip: items.filter((i) => i.type === 'trip').length,
+    trip: tripKeys.size,
     withdrawal: items.filter((i) => i.type === 'withdrawal').length,
   };
 

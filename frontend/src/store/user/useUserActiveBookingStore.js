@@ -112,6 +112,16 @@ const useUserActiveBookingStore = create((set, get) => ({
     if (Array.isArray(patch.extensions)) {
       merged.extensions = patch.extensions;
     }
+    // Rating patches flow back via BOOKING_UPDATED after either side
+    // submits their post-trip stars. We merge so a customer-only patch
+    // doesn't clobber the driver-side rating (and vice versa) when it
+    // arrives later.
+    if (patch.rating) {
+      merged.rating = {
+        ...(current.rating || {}),
+        ...patch.rating,
+      };
+    }
     if (typeof patch.amountDue === 'number') merged.amountDue = patch.amountDue;
     if (typeof patch.effectiveTotal === 'number') merged.effectiveTotal = patch.effectiveTotal;
     // Scheduled-ride metadata can change mid-flight (e.g. the worker
@@ -246,13 +256,21 @@ const useUserActiveBookingStore = create((set, get) => ({
    * Phase 1 of the extension handshake. Server generates the OTP, hands
    * it to the driver via socket, and returns the fareDelta locked in
    * for the rest of the flow. Returns `{ booking, extension, breakdown }`.
+   *
+   * `amount` is interpreted by the backend based on the booking's
+   * serviceType — hourly bookings pass `{ additionalHours }`,
+   * outstation bookings pass `{ additionalDays }`. The store decides
+   * the field name by reading the live booking's `serviceType`.
    */
-  async initiateExtension(additionalHours) {
-    const id = get().booking?._id;
+  async initiateExtension(amount) {
+    const booking = get().booking;
+    const id = booking?._id;
     if (!id) throw new Error('No active booking');
-    const res = await api.post(`/auth/bookings/${id}/extensions/initiate`, {
-      additionalHours,
-    });
+    const isOutstation = booking?.serviceType === 'outstation';
+    const body = isOutstation
+      ? { additionalDays: Number(amount) }
+      : { additionalHours: Number(amount) };
+    const res = await api.post(`/auth/bookings/${id}/extensions/initiate`, body);
     const data = res?.data?.data || {};
     if (data.booking) set({ booking: data.booking });
     return data;
@@ -315,6 +333,24 @@ const useUserActiveBookingStore = create((set, get) => ({
     const id = get().booking?._id;
     if (!id) throw new Error('No active booking');
     await api.post(`/auth/bookings/${id}/noshow/respond`, { response });
+  },
+
+  /**
+   * Customer submits a 1–5 star rating + optional review for the
+   * driver after the trip completes. The server stores the rating on
+   * the booking and rolls it into the driver's running average. A
+   * second submit will hit 409 from the service.
+   */
+  async rateDriver({ stars, review = '' } = {}) {
+    const id = get().booking?._id;
+    if (!id) throw new Error('No active booking');
+    const res = await api.post(`/auth/bookings/${id}/rate-driver`, {
+      stars,
+      review,
+    });
+    const data = res?.data?.data || {};
+    if (data.booking) set({ booking: data.booking });
+    return data;
   },
 }));
 

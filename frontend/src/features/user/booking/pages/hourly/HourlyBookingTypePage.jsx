@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Zap, CalendarClock, ChevronRight, Check } from 'lucide-react';
 import Button from '../../../../../components/Button';
+import DateTimePickerField from '../../../../../components/inputs/DateTimePickerField';
 import PageShell from '../../components/PageShell';
 import useBookingDraftStore from '../../../../../store/user/useBookingDraftStore';
 import { useCachedQuery } from '../../../../../hooks/useCachedQuery';
@@ -53,7 +54,9 @@ const HourlyBookingTypePage = () => {
   }, [pricingRows]);
 
   const [selected, setSelected] = useState(draftBookingType || null);
-  const [scheduledAt, setScheduledAt] = useState(defaultScheduledValue());
+  // Blank-by-default — the scheduled card stays empty until the user
+  // taps the picker. No more "tomorrow 9 AM" surprise prefill.
+  const [scheduledAt, setScheduledAt] = useState(null);
 
   // Make sure the service is locked to hourly the moment the user opens this
   // screen — keeps the rest of the flow consistent if they arrived via a
@@ -63,11 +66,14 @@ const HourlyBookingTypePage = () => {
   }, [setServiceType]);
 
   const minLeadHours = dispatchConfig.MIN_SCHEDULED_LEAD_HOURS;
+  // Lazy-snapshot the wall clock so `Date.now()` stays out of render
+  // (react-hooks/purity) — the floor is stable for the mount, the
+  // backend re-validates against the live clock on Continue.
+  const [nowAnchorMs] = useState(() => Date.now());
   const minScheduledDate = useMemo(
-    () => new Date(Date.now() + minLeadHours * 60 * 60_000),
-    [minLeadHours],
+    () => new Date(nowAnchorMs + minLeadHours * 60 * 60_000),
+    [nowAnchorMs, minLeadHours],
   );
-  const minScheduledInput = toDateTimeInputValue(minScheduledDate);
   const handleContinue = () => {
     if (!selected) return;
     setBookingType(selected);
@@ -117,21 +123,16 @@ const HourlyBookingTypePage = () => {
         >
           {selected === BOOKING_TYPE.SCHEDULED && (
             <div className="mt-3 pt-3 border-t border-border-light">
-              <label className="block text-xs font-semibold text-text-secondary mb-1.5">
-                Pickup date & time
-              </label>
-              <input
-                type="datetime-local"
+              <DateTimePickerField
+                label="Pickup date & time"
+                icon={CalendarClock}
                 value={scheduledAt}
-                min={minScheduledInput}
-                onChange={(e) => setScheduledAt(e.target.value)}
-                className="w-full h-12 px-3 bg-white border border-border rounded-xl text-sm focus:outline-none focus:border-primary"
+                onChange={setScheduledAt}
+                minDate={minScheduledDate}
+                placeholder="Tap to choose pickup"
+                helper={`Earliest available is ${formatPickupDateTime(minScheduledDate)} — we need at least ${minLeadHours} hour${minLeadHours === 1 ? '' : 's'} lead time for scheduled rides.`}
+                sheetTitle="Pickup date & time"
               />
-              <p className="mt-1.5 text-[11px] text-text-muted">
-                Earliest available is {formatPickupDateTime(minScheduledDate)} —
-                we need at least {minLeadHours} hours
-                lead time for scheduled rides.
-              </p>
             </div>
           )}
         </Option>
@@ -175,20 +176,6 @@ function Option({ icon: Icon, accent, active, title, description, onClick, child
       {children}
     </button>
   );
-}
-
-function defaultScheduledValue() {
-  // Default to "tomorrow 9 AM" for the scheduled option so the input has a
-  // believable starting value the moment the user expands the card.
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  d.setHours(9, 0, 0, 0);
-  return toDateTimeInputValue(d);
-}
-
-function toDateTimeInputValue(d) {
-  const tzOffset = d.getTimezoneOffset() * 60_000;
-  return new Date(d.getTime() - tzOffset).toISOString().slice(0, 16);
 }
 
 export default HourlyBookingTypePage;

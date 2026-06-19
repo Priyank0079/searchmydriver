@@ -173,7 +173,19 @@ const razorpaySchema = new mongoose.Schema(
 const extensionSchema = new mongoose.Schema(
   {
     requestedAt: { type: Date, default: Date.now },
-    additionalHours: { type: Number, required: true, min: 0.5 },
+    /**
+     * Hourly-flow extension amount. Stored even for outstation rows
+     * (set to days × 24) so legacy aggregations that read this field
+     * keep producing sensible numbers.
+     */
+    additionalHours: { type: Number, required: true, min: 0 },
+    /**
+     * Outstation-flow extension amount, in whole calendar days. Zero
+     * for hourly extensions. The extension service branches on the
+     * booking's `serviceType` to decide which of these two fields to
+     * read when computing the fare delta and surfacing the duration.
+     */
+    additionalDays: { type: Number, default: 0, min: 0 },
     fareDelta: { type: Number, required: true, min: 0 },
     /**
      * Snapshot of the fare math at initiate time. Captures everything
@@ -535,6 +547,36 @@ const bookingSchema = new mongoose.Schema(
       },
       respondedAt: { type: Date, default: null },
       firedFor: { type: Number, default: 0 }, // minute threshold that triggered the prompt
+    },
+
+    /**
+     * Post-trip ratings, one from each side. Both sub-docs default to
+     * `null` until the customer / driver submits via the rating pages
+     * that open after `COMPLETED`. The customer rating also rolls into
+     * `Driver.rating` / `ratingCount` / `totalRatingScore` as a running
+     * average — the booking row keeps the per-trip record for audits
+     * and to let admins surface "what did THIS rider think of THIS
+     * driver".
+     *
+     * `customer.stars`  user-submitted 1..5 stars for the driver.
+     * `customer.review` optional free-text review (≤500 chars).
+     * `driver.stars`    driver-submitted 1..5 stars for the customer.
+     * `driver.review`   reserved for future use; the driver UI does
+     *                   not capture free text today but the field is
+     *                   here so a later iteration doesn't need a
+     *                   migration.
+     */
+    rating: {
+      customer: {
+        stars: { type: Number, default: null, min: 0, max: 5 },
+        review: { type: String, default: '', trim: true, maxlength: 500 },
+        ratedAt: { type: Date, default: null },
+      },
+      driver: {
+        stars: { type: Number, default: null, min: 0, max: 5 },
+        review: { type: String, default: '', trim: true, maxlength: 500 },
+        ratedAt: { type: Date, default: null },
+      },
     },
 
     isDeleted: { type: Boolean, default: false, index: true },

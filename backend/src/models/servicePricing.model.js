@@ -144,42 +144,68 @@ const customHoursSchema = new mongoose.Schema(
 //
 // Pricing model (current):
 //   total = dailyRate × days
-//         + (customer arranges food AND stay ? 0 : allowancePerNight × nights)
+//         + (customer arranges food ? 0 : foodAllowancePerDay   × days)
+//         + (customer arranges stay ? 0 : stayAllowancePerNight × nights)
 //         + serviceCharge + GST
+//
+// Today the customer UI exposes ONE toggle that flips both `needsFood`
+// and `needsStay` together, so the two allowances waive in lockstep —
+// but the model keeps them separate so admins can tune the daytime
+// food allowance independently from the per-night accommodation
+// allowance (the two costs scale differently — food per day, stay per
+// overnight halt).
 //
 // Toll & parking are NOT billed by the platform on outstation — the
 // customer settles those directly with the driver. We surface a notice
 // on the booking flow but never add a rupee for them in the fare.
 //
-// `kmIncludedPerDay`, `extraKmRate`, `nightHaltCharge`, `stayChargePerNight`
-// are retained as deprecated fields so older saved pricing documents
-// keep loading without a migration. They default to 0 and the fare
-// engine ignores them.
+// `allowancePerNight` is a LEGACY combined per-night field. New
+// pricing docs should use the split `foodAllowancePerDay` +
+// `stayAllowancePerNight` fields below. The fare engine falls back to
+// `allowancePerNight × nights` only when BOTH new fields are zero, so
+// older saved documents keep producing the same fare without a
+// migration. `kmIncludedPerDay`, `extraKmRate`, `nightHaltCharge`,
+// `stayChargePerNight` are dead fields kept for the same back-compat
+// reason.
 const outstationSchema = new mongoose.Schema(
   {
     /** Flat ₹ charged per day of the trip — the only base fare. */
     dailyRate: { type: Number, default: 0, min: 0 },
     /**
-     * Combined per-night driver allowance (food + accommodation +
-     * driver bata rolled into one). Charged for each overnight halt
-     * (nights = days − 1) ONLY when the customer has not opted in to
-     * arranging both the food and stay themselves. When the customer
-     * arranges everything, this is fully waived.
+     * Driver food allowance, charged once per day of the trip. Waived
+     * when the customer opts into arranging the driver's food
+     * themselves (the customer UI today bundles this with the stay
+     * toggle, so both waive together).
      */
-    allowancePerNight: { type: Number, default: 0, min: 0 },
+    foodAllowancePerDay: { type: Number, default: 0, min: 0 },
+    /**
+     * Driver accommodation allowance, charged for each overnight halt
+     * (nights = days − 1). Waived when the customer opts into hosting
+     * the driver themselves.
+     */
+    stayAllowancePerNight: { type: Number, default: 0, min: 0 },
+
     /** Minimum days that can be booked as outstation. */
     minDays: { type: Number, default: 1, min: 1 },
     /** Maximum days that can be booked as outstation (0 = unlimited). */
     maxDays: { type: Number, default: 0, min: 0 },
 
     // ── Deprecated (retained for back-compat with saved docs) ──
+    /**
+     * @deprecated Combined per-night allowance from the previous
+     * pricing revision. Read by the fare engine ONLY when both
+     * `foodAllowancePerDay` and `stayAllowancePerNight` are 0 — so
+     * older saved pricing docs keep producing the same total without
+     * a migration. New docs should use the split fields above.
+     */
+    allowancePerNight: { type: Number, default: 0, min: 0 },
     /** @deprecated unused — outstation no longer bills extra km. */
     kmIncludedPerDay: { type: Number, default: 0, min: 0 },
     /** @deprecated unused — outstation no longer bills extra km. */
     extraKmRate: { type: Number, default: 0, min: 0 },
-    /** @deprecated absorbed into `allowancePerNight`. */
+    /** @deprecated absorbed into the split allowance fields above. */
     nightHaltCharge: { type: Number, default: 0, min: 0 },
-    /** @deprecated absorbed into `allowancePerNight`. */
+    /** @deprecated absorbed into the split allowance fields above. */
     stayChargePerNight: { type: Number, default: 0, min: 0 },
   },
   { _id: false },

@@ -39,6 +39,7 @@ import {
   payBookingExtension,
   cancelBookingExtension,
   respondToNoShowPrompt,
+  rateDriverByCustomer,
 } from '../controllers/booking.controller.js';
 import {
   getMyWallet,
@@ -89,6 +90,9 @@ router.post('/bookings/:id/extensions/verify-otp', verifyBookingExtensionOtp);
 router.post('/bookings/:id/extensions/pay', payBookingExtension);
 router.post('/bookings/:id/extensions/cancel', cancelBookingExtension);
 router.post('/bookings/:id/noshow/respond', respondToNoShowPrompt);
+// Post-trip rating — customer rates the driver who completed the trip.
+// Once-only; a duplicate submit hits 409 from the service.
+router.post('/bookings/:id/rate-driver', rateDriverByCustomer);
 
 // Wallet — read + Razorpay top-up. Mutations go through the
 // wallet service so the WalletTransaction ledger stays in sync.

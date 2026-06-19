@@ -47,6 +47,12 @@ export const S2C_EVENTS = Object.freeze({
   BOOKING_EXTENSION_PAID: 'booking:extension:paid',
   BOOKING_NOSHOW_PROMPT: 'booking:noshow:prompt',
 
+  // Post-trip ratings. Each side submits once after COMPLETED and the
+  // other side hears about it here. Payload: { bookingId,
+  // bookingNumber, stars, review, serviceType }
+  BOOKING_RATED_BY_CUSTOMER: 'booking:rated:by_customer',
+  BOOKING_RATED_BY_DRIVER: 'booking:rated:by_driver',
+
   NOTIFICATION: 'notification:new',
   ADMIN_ALERT: 'admin:alert',
 });

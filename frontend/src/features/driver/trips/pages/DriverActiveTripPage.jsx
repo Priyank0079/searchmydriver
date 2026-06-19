@@ -144,10 +144,10 @@ const DriverActiveTripPage = () => {
     if (routeId) {
       fetchById(routeId).catch(() => {
         // Maybe the id is wrong or the trip is already over — try /active.
-        fetchActive().catch(() => {});
+        fetchActive().catch(() => { });
       });
     } else {
-      fetchActive().catch(() => {});
+      fetchActive().catch(() => { });
     }
   }, [routeId, fetchById, fetchActive]);
 
@@ -168,7 +168,9 @@ const DriverActiveTripPage = () => {
       extensionId: payload.extensionId,
       otp: String(payload.otp),
       additionalHours: payload.additionalHours,
-      fareDelta: payload.fareDelta,
+      additionalDays: Number(payload.additionalDays) || 0,
+      serviceType: payload.serviceType || null,
+      driverEarning: Number(payload.driverEarning) || 0,
       expiresAt: payload.expiresAt
         ? new Date(payload.expiresAt).getTime()
         : Date.now() + 5 * 60 * 1000,
@@ -212,7 +214,7 @@ const DriverActiveTripPage = () => {
     });
     // Re-fetch booking so the driver UI gets the longer trip clock.
     if (payload?.bookingId) {
-      fetchById(payload.bookingId).catch(() => {});
+      fetchById(payload.bookingId).catch(() => { });
     }
     setTimeout(() => setExtensionOtpBanner(null), 2500);
   });
@@ -247,9 +249,12 @@ const DriverActiveTripPage = () => {
     if (!status) return;
     if (status === BOOKING_STATUS.COMPLETED) {
       toast.success('Trip completed');
-      clear();
+      // Route to the post-trip rating screen rather than the dashboard
+      // so the driver is nudged to rate the customer. We intentionally
+      // DO NOT `clear()` the active trip here — the rating page reads
+      // the booking from the store and clears it after submit / skip.
       clearOfferStoreActive();
-      navigate('/driver/home', { replace: true });
+      navigate('/driver/trip/rate', { replace: true });
     } else if (
       status === BOOKING_STATUS.CANCELLED ||
       status === BOOKING_STATUS.NO_DRIVERS_FOUND ||
@@ -506,9 +511,9 @@ const DriverActiveTripPage = () => {
   const customerEmail = customer?.email || null;
   const customerSince = customer?.createdAt
     ? new Date(customer.createdAt).toLocaleDateString('en-IN', {
-        month: 'short',
-        year: 'numeric',
-      })
+      month: 'short',
+      year: 'numeric',
+    })
     : null;
   const customerCallHref = customerPhone
     ? `tel:+91${String(customerPhone).replace(/\D/g, '')}`
@@ -529,22 +534,26 @@ const DriverActiveTripPage = () => {
       ? `${booking.outstation?.days || 1}-day Outstation`
       : `${booking.hourly?.durationHours || ''}h ${SERVICE_TYPE_LABELS.hourly || 'Hourly'}`;
 
-  // Booking-type chip (instant vs scheduled). Driver app already
-  // colour-codes the offer popup; we mirror that vocabulary on the
-  // active trip page so the driver keeps the same mental model after
-  // accepting (especially helpful for scheduled trips where the
-  // pickup may be hours away).
-  const isScheduled = booking.bookingType === BOOKING_TYPE.SCHEDULED;
+  // Booking-type chip. Three types exist: instant, scheduled (hourly), outstation.
+  // Outstation bookings are now stamped with bookingType = 'outstation' at
+  // creation time, so a simple check here covers all cases cleanly.
+  const isScheduled =
+    booking.bookingType === BOOKING_TYPE.SCHEDULED ||
+    booking.bookingType === BOOKING_TYPE.OUTSTATION;
+  const isOutstationBooking = booking.bookingType === BOOKING_TYPE.OUTSTATION;
   const scheduledStartAt =
-    booking.hourly?.scheduledStartAt || booking.outstation?.startDate || null;
+    booking.hourly?.scheduledStartAt ||
+    booking.outstation?.pickupAt ||
+    booking.outstation?.startDate ||
+    null;
   const scheduledStartLabel = scheduledStartAt
     ? new Date(scheduledStartAt).toLocaleString([], {
-        weekday: 'short',
-        day: '2-digit',
-        month: 'short',
-        hour: 'numeric',
-        minute: '2-digit',
-      })
+      weekday: 'short',
+      day: '2-digit',
+      month: 'short',
+      hour: 'numeric',
+      minute: '2-digit',
+    })
     : null;
 
   // Vehicle (populated by getBookingByIdService / getActiveBookingForDriverService
@@ -688,8 +697,8 @@ const DriverActiveTripPage = () => {
                 } catch (err) {
                   toast.error(
                     err?.response?.data?.message ||
-                      err?.message ||
-                      'Could not dismiss extension',
+                    err?.message ||
+                    'Could not dismiss extension',
                   );
                   return; // keep the banner so the driver can retry
                 }
@@ -772,17 +781,26 @@ const DriverActiveTripPage = () => {
               <p className="text-[11px] text-text-muted uppercase tracking-wide font-semibold">
                 Extensions
               </p>
+              <p className="text-[10px] text-text-muted mt-0.5">
+                Your earnings from the customer&rsquo;s ride extensions.
+              </p>
               <div className="mt-2 space-y-1">
-                {accepted.map((ext) => (
-                  <p key={String(ext._id || ext.requestedAt)} className="text-xs text-text-secondary">
-                    +{ext.additionalHours}h · &#8377;{ext.fareDelta}
-                    <span className="text-text-muted">
-                      {' '}
-                      ·{' '}
-                      {new Date(ext.paidAt || ext.respondedAt || ext.requestedAt).toLocaleTimeString()}
-                    </span>
-                  </p>
-                ))}
+                {accepted.map((ext) => {
+                  const days = Number(ext.additionalDays) || 0;
+                  const amountLabel = days > 0
+                    ? `+${days}d`
+                    : `+${ext.additionalHours}h`;
+                  return (
+                    <p key={String(ext._id || ext.requestedAt)} className="text-xs text-text-secondary">
+                      {amountLabel} · &#8377;{ext.driverEarning ?? 0}
+                      <span className="text-text-muted">
+                        {' '}
+                        ·{' '}
+                        {new Date(ext.paidAt || ext.respondedAt || ext.requestedAt).toLocaleTimeString()}
+                      </span>
+                    </p>
+                  );
+                })}
               </div>
             </Card>
           );
@@ -796,16 +814,14 @@ const DriverActiveTripPage = () => {
 
         {isEnRoute && (
           <div
-            className={`rounded-2xl border p-3 flex items-start gap-3 ${
-              arrivalReady
+            className={`rounded-2xl border p-3 flex items-start gap-3 ${arrivalReady
                 ? 'border-emerald-200 bg-emerald-50'
                 : 'border-amber-200 bg-amber-50'
-            }`}
+              }`}
           >
             <div
-              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                arrivalReady ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-              }`}
+              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${arrivalReady ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                }`}
             >
               <MapPin className="w-4 h-4" />
             </div>
@@ -1074,6 +1090,11 @@ function ExtensionOtpBanner({ banner, onDismiss }) {
     .padStart(1, '0');
   const ss = (expiresInSec % 60).toString().padStart(2, '0');
 
+  const days = Number(banner.additionalDays) || 0;
+  const amountLabel = days > 0
+    ? `+${days}d`
+    : `+${banner.additionalHours}h`;
+
   if (banner.stage === 'paid') {
     return (
       <Card className="bg-emerald-50 border border-emerald-200">
@@ -1083,11 +1104,11 @@ function ExtensionOtpBanner({ banner, onDismiss }) {
           </div>
           <div className="min-w-0">
             <p className="text-sm font-bold text-emerald-900">
-              Extension paid &middot; +{banner.additionalHours}h
+              Extension paid &middot; {amountLabel}
             </p>
             <p className="text-[12px] text-emerald-800">
-              Customer paid ₹{banner.fareDelta}. Trip clock just got{' '}
-              {banner.additionalHours}h longer.
+              You&rsquo;ll earn ₹{banner.driverEarning ?? 0} extra. Trip just got{' '}
+              {amountLabel.replace('+', '')} longer.
             </p>
           </div>
         </div>
@@ -1107,8 +1128,8 @@ function ExtensionOtpBanner({ banner, onDismiss }) {
               Waiting for customer payment…
             </p>
             <p className="text-[12px] text-amber-800">
-              Code accepted. They&rsquo;re paying ₹{banner.fareDelta} for{' '}
-              +{banner.additionalHours}h.
+              Code accepted. You&rsquo;ll earn ₹{banner.driverEarning ?? 0}{' '}
+              extra for {amountLabel}.
             </p>
           </div>
         </div>
@@ -1124,7 +1145,8 @@ function ExtensionOtpBanner({ banner, onDismiss }) {
             Customer wants to extend
           </p>
           <p className="text-sm font-bold mt-0.5">
-            +{banner.additionalHours}h &middot; ₹{banner.fareDelta}
+            {amountLabel} &middot; you&rsquo;ll earn ₹
+            {banner.driverEarning ?? 0}
           </p>
         </div>
         <span className="text-[11px] font-medium text-white/80 bg-white/15 rounded-full px-2 py-0.5">
@@ -1227,9 +1249,8 @@ function WaitingTimerCard({
             Charge so far
           </p>
           <p
-            className={`text-base font-bold mt-1 ${
-              chargedRupees > 0 ? headlineTone : 'text-text-muted'
-            }`}
+            className={`text-base font-bold mt-1 ${chargedRupees > 0 ? headlineTone : 'text-text-muted'
+              }`}
           >
             {'\u20B9'}
             {chargedRupees}
@@ -1250,9 +1271,8 @@ function WaitingTimerCard({
             Reserved for waiting
           </span>
           <span
-            className={`text-[11px] font-semibold ${
-              bufferLeft === 0 ? 'text-red-600' : 'text-text'
-            }`}
+            className={`text-[11px] font-semibold ${bufferLeft === 0 ? 'text-red-600' : 'text-text'
+              }`}
           >
             {'\u20B9'}
             {bufferLeft} left of {'\u20B9'}
@@ -1458,7 +1478,7 @@ function CustomerPaymentOverlay({ open, paymentDeadlineAt, driverAssignedAt }) {
       ? new Date(paymentDeadlineAt).getTime()
       : driverAssignedAt
         ? new Date(driverAssignedAt).getTime() +
-          PAYMENT_POLICY.PAYMENT_DEADLINE_SECONDS * 1000
+        PAYMENT_POLICY.PAYMENT_DEADLINE_SECONDS * 1000
         : null;
     if (!deadlineMs) return PAYMENT_POLICY.PAYMENT_DEADLINE_SECONDS;
     return Math.max(0, Math.ceil((deadlineMs - now) / 1000));

@@ -5,24 +5,26 @@ import {
   Clock,
   Check,
   Loader2,
-  Calendar,
   Car as CarIcon,
   Plus,
   MapPin,
   Navigation,
   RefreshCw,
   CalendarRange,
-  Crosshair,
-  Pointer,
+  ChevronRight,
   Lock,
   MapPinOff,
   ShieldCheck,
+  AlertCircle,
+  CalendarClock,
 } from 'lucide-react';
 import { MarkerF } from '@react-google-maps/api';
 import Card from '../../../../components/Card';
 import Button from '../../../../components/Button';
+import DateTimePickerField from '../../../../components/inputs/DateTimePickerField';
 import MapView from '../../../../components/maps/MapView';
 import AddCarModal from '../components/AddCarModal';
+import LocationPickerSheet from '../components/LocationPickerSheet';
 import { MAX_USER_CARS } from '../../../../constants/limits';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
@@ -31,13 +33,11 @@ import { SERVICE_TYPES, SERVICE_TYPE_LABELS } from '../../../../constants/servic
 import useBookingDraftStore from '../../../../store/user/useBookingDraftStore';
 import {
   computeOutstationDuration,
-  defaultPickupInputValue,
-  defaultReturnInputValue,
-  toDateTimeInputValue,
 } from '../../../../utils/outstationSchedule';
+import { mergeScheduledDispatchConfig } from '../../../../constants/bookingStatus';
 import toast from 'react-hot-toast';
 import { useGoogleMaps } from '../../../../hooks/useGoogleMaps';
-import { useMapPlaceSearch } from '../../../../hooks/useMapPlaceSearch';
+import { useGeolocation } from '../../../../hooks/useGeolocation';
 import { useDirectionsRoute } from '../../../../hooks/useDirectionsRoute';
 import { useZoneCheck } from '../../../../hooks/useZoneCheck';
 import RoutePolyline from '../../../../components/maps/RoutePolyline';
@@ -134,17 +134,47 @@ function HourlyVariants({ pricing, draft, onPatch, onContinue }) {
   const navigate = useNavigate();
   const slabs = pricing?.slabs || [];
 
-  const [selectedSlabId, setSelectedSlabId] = useState(draft.slabId || slabs[0]?._id || null);
-  const [scheduledStartAt, setScheduledStartAt] = useState(
-    draft.scheduledStartAt
-      ? toDateTimeInputValue(draft.scheduledStartAt)
-      : defaultIsoForInput(),
+  // Honour the admin's per-service lead-time floor — same number the
+  // backend will use to validate the booking on create. Without this,
+  // a fast user could pick "now + 5 minutes" and trip a 422 right
+  // after Continue.
+  const dispatchConfig = useMemo(
+    () => mergeScheduledDispatchConfig(pricing?.scheduledDispatch),
+    [pricing?.scheduledDispatch],
   );
+  const minLeadHours = Math.max(
+    0,
+    Number(dispatchConfig.MIN_SCHEDULED_LEAD_HOURS) || 0,
+  );
+  // `Date.now` is impure, so we read it ONCE per mount via lazy
+  // `useState` (idempotent for purity lint). When pricing arrives and
+  // `minLeadHours` changes, we re-snap inside an event-style updater
+  // so the floor is always live without re-reading the clock on every
+  // render.
+  const [nowAnchorMs] = useState(() => Date.now());
+  const minPickupDate = useMemo(
+    () => new Date(nowAnchorMs + minLeadHours * 60 * 60 * 1000),
+    [nowAnchorMs, minLeadHours],
+  );
+
+  const [selectedSlabId, setSelectedSlabId] = useState(draft.slabId || slabs[0]?._id || null);
+  // Blank-by-default — the customer must explicitly tap the picker and
+  // confirm a date+time. We still seed from the draft so back-nav
+  // keeps the previous choice. If the saved value is now before the
+  // current lead-time floor (e.g. they backed out, waited a while,
+  // came back), drop it so the user re-confirms instead of silently
+  // submitting a stale-and-now-invalid time.
+  const [scheduledStartAt, setScheduledStartAt] = useState(() => {
+    const seed = draft.scheduledStartAt ? new Date(draft.scheduledStartAt) : null;
+    if (!seed || Number.isNaN(seed.getTime())) return null;
+    if (seed.getTime() < minPickupDate.getTime()) return null;
+    return seed.toISOString();
+  });
 
   const selectedSlab = slabs.find((s) => s._id === selectedSlabId);
 
   const handleContinue = () => {
-    if (!selectedSlab) return;
+    if (!selectedSlab || !scheduledStartAt) return;
     onPatch({
       slabId: selectedSlab._id,
       durationHours: selectedSlab.maxHours || selectedSlab.minHours,
@@ -169,15 +199,19 @@ function HourlyVariants({ pricing, draft, onPatch, onContinue }) {
       )}
     >
       <Card>
-        <label className="flex items-center gap-2 text-xs font-semibold text-text-muted mb-2">
-          <Calendar className="w-3.5 h-3.5" /> Pickup time
-        </label>
-        <input
-          type="datetime-local"
+        <DateTimePickerField
+          label="Pickup time"
+          icon={CalendarClock}
           value={scheduledStartAt}
-          min={defaultIsoForInput()}
-          onChange={(e) => setScheduledStartAt(e.target.value)}
-          className="w-full h-11 bg-gray-50 border border-border rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+          onChange={setScheduledStartAt}
+          minDate={minPickupDate}
+          placeholder="Tap to choose pickup date and time"
+          helper={
+            minLeadHours > 0
+              ? `We need at least ${formatLeadHours(minLeadHours)} between booking and pickup so a driver can be assigned.`
+              : 'Pick any future date and time.'
+          }
+          sheetTitle="Pickup time"
         />
       </Card>
 
@@ -247,7 +281,21 @@ function HourlyVariants({ pricing, draft, onPatch, onContinue }) {
 function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
   const navigate = useNavigate();
   const dailyRate = Number(pricing?.outstation?.dailyRate) || 0;
-  const allowancePerNight = Number(pricing?.outstation?.allowancePerNight) || 0;
+  // Split allowance preview for the footer hint. We surface food-per-day
+  // since it scales with the trip length the user is currently picking;
+  // the per-night stay shows up on the Review page once nights are
+  // known. Legacy pricing docs (combined per-night) fall back to the
+  // old single line so the footer keeps reading naturally.
+  const foodAllowancePerDay =
+    Number(pricing?.outstation?.foodAllowancePerDay) || 0;
+  const stayAllowancePerNight =
+    Number(pricing?.outstation?.stayAllowancePerNight) || 0;
+  const legacyAllowancePerNight =
+    Number(pricing?.outstation?.allowancePerNight) || 0;
+  const useLegacyAllowance =
+    foodAllowancePerDay <= 0 &&
+    stayAllowancePerNight <= 0 &&
+    legacyAllowancePerNight > 0;
 
   // Pickup / destination live on the global booking-draft store so
   // they survive a back-navigation from /user/book/confirm.
@@ -269,53 +317,123 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
       : null),
   );
 
-  const initialPickupTime =
-    toDateTimeInputValue(draft.pickupAt || draft.startDate) ||
-    defaultPickupInputValue();
-  const initialReturnTime =
-    toDateTimeInputValue(draft.expectedReturnAt || draft.endDate) ||
-    defaultReturnInputValue(initialPickupTime);
-
-  const [pickupAt, setPickupAt] = useState(initialPickupTime);
-  const [expectedReturnAt, setExpectedReturnAt] = useState(initialReturnTime);
-
-  // Days = number of distinct calendar dates the trip spans (server
-  // mirrors this exact formula). Nights = days − 1.
-  const { days, nights } = useMemo(
-    () => computeOutstationDuration(pickupAt, expectedReturnAt),
-    [pickupAt, expectedReturnAt],
+  // Admin-configured outstation lead time. Backend enforces the same
+  // floor on create (booking.service.js → outstation lead check) so
+  // gating the picker here is purely a UX nicety to surface the
+  // constraint before the user hits Continue.
+  const dispatchConfig = useMemo(
+    () => mergeScheduledDispatchConfig(pricing?.scheduledDispatch),
+    [pricing?.scheduledDispatch],
+  );
+  const minLeadHours = Math.max(
+    0,
+    Number(dispatchConfig.MIN_SCHEDULED_LEAD_HOURS) || 0,
+  );
+  // Read the wall clock ONCE per mount so React's purity lint stays
+  // happy on the derived `minPickupDate` memo. The minor downside —
+  // the floor doesn't visibly advance while the page is open — is
+  // intentional: a moving target between render passes would
+  // re-disable slots the user might be hovering. The backend
+  // re-validates against the live clock on Continue anyway.
+  const [nowAnchorMs] = useState(() => Date.now());
+  const minPickupDate = useMemo(
+    () => new Date(nowAnchorMs + minLeadHours * 60 * 60 * 1000),
+    [nowAnchorMs, minLeadHours],
   );
 
-  // Auto-bump return when pickup pushes past it; keeps the diff
+  // Blank-by-default: neither pickup nor return is preselected. We do
+  // still rehydrate from the draft (so back-navigation keeps the
+  // previously-chosen times), but if the saved pickup is now before
+  // the lead-time floor we drop it so the user explicitly re-confirms
+  // instead of silently 422-ing on create.
+  const seedFromDraft = (raw) => {
+    if (!raw) return null;
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString();
+  };
+  const initialPickupIso = useMemo(() => {
+    const seed = seedFromDraft(draft.pickupAt || draft.startDate);
+    if (!seed) return null;
+    return new Date(seed).getTime() >= minPickupDate.getTime() ? seed : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const initialReturnIso = useMemo(
+    () => seedFromDraft(draft.expectedReturnAt || draft.endDate),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const [pickupRaw, setPickupRaw] = useState(initialPickupIso);
+  const [expectedReturnAt, setExpectedReturnAt] = useState(initialReturnIso);
+
+  // Derive the effective pickup from the raw draft state + the live
+  // lead-time floor — if pricing finishes loading after the page
+  // mounts and pushes the floor past a stale draft value, we display
+  // "nothing picked" so the user re-confirms instead of submitting an
+  // out-of-window time. Pure derivation, no setState-in-effect.
+  const pickupAt = useMemo(() => {
+    if (!pickupRaw) return null;
+    const ms = new Date(pickupRaw).getTime();
+    if (!Number.isFinite(ms)) return null;
+    if (ms < minPickupDate.getTime()) return null;
+    return pickupRaw;
+  }, [pickupRaw, minPickupDate]);
+
+  // Days = number of distinct calendar dates the trip spans (server
+  // mirrors this exact formula). Nights = days − 1. Falls back to a
+  // 0-day "no trip" placeholder when either endpoint is blank.
+  const { days, nights } = useMemo(() => {
+    if (!pickupAt || !expectedReturnAt) return { days: 0, nights: 0 };
+    return computeOutstationDuration(pickupAt, expectedReturnAt);
+  }, [pickupAt, expectedReturnAt]);
+
+  // Auto-clear return when pickup pushes past it; keeps the diff
   // non-negative without a separate validation toast.
-  const onPickupTimeChange = (value) => {
-    setPickupAt(value);
+  const onPickupTimeChange = (iso) => {
+    setPickupRaw(iso);
     if (
-      value &&
+      iso &&
       expectedReturnAt &&
-      new Date(value).getTime() >= new Date(expectedReturnAt).getTime()
+      new Date(iso).getTime() >= new Date(expectedReturnAt).getTime()
     ) {
-      setExpectedReturnAt(defaultReturnInputValue(value));
+      setExpectedReturnAt(null);
     }
   };
 
+  // Expected return must come AFTER the chosen pickup — feed the
+  // picker the pickup moment as its min so the day-strip self-disables
+  // the past.
+  const minReturnDate = useMemo(() => {
+    if (!pickupAt) return null;
+    const ms = new Date(pickupAt).getTime();
+    if (!Number.isFinite(ms)) return null;
+    // Same-day round trips are valid (days = 1) so we only require the
+    // return be strictly later than pickup, not "next day".
+    return new Date(ms + 30 * 60 * 1000);
+  }, [pickupAt]);
+
   /* ------------------------------------------------------------------ */
-  /* Place autocomplete + embedded map                                    */
+  /* Location picker sheet + embedded map                                 */
   /* ------------------------------------------------------------------ */
 
   const { maps, ready: mapsReady } = useGoogleMaps();
-  const pickupInputRef = useRef(null);
-  const destinationInputRef = useRef(null);
+  const {
+    coords,
+    loading: locating,
+    error: geoError,
+    refresh: refreshGeo,
+  } = useGeolocation();
 
-  // Which field a map click should populate — toggled when the user
-  // taps a marker chip above the map (or focuses an input). The map
-  // click listener reads this via a ref so it doesn't have to re-bind
-  // every time the active field changes.
-  const [activeField, setActiveField] = useState('pickup');
+  // Which field the location picker sheet is editing — `null` when
+  // closed, `'pickup'` or `'drop'` when open. The pill buttons toggle
+  // this; the embedded map only supports marker drag now (tap-to-set
+  // is gone — the pills are the single, unambiguous entry point).
+  const [pickerOpen, setPickerOpen] = useState(null);
 
   // Geocoder is created once the maps SDK is ready. Used to turn
-  // marker positions (from a tap or drag) back into a human address
-  // for the input fields.
+  // marker positions (from a drag) back into a human address for the
+  // pickup/destination labels.
   const geocoderRef = useRef(null);
   useEffect(() => {
     if (!maps || geocoderRef.current) return;
@@ -385,72 +503,44 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
     });
   }, []);
 
-  useMapPlaceSearch(pickupInputRef, {
-    maps,
-    enabled: mapsReady,
-    onSelect: ({ lat, lng, address, name }) => {
+  // Sheet → onSelect. The sheet only knows {address, city, lat, lng}
+  // (no country code), so we lean on the bounding-box check. The
+  // places API call inside the sheet already filters by country, so
+  // this is just a belt.
+  const handleSheetSelect = useCallback(
+    (which, raw) => {
       const point = {
-        address: address || name || '',
-        city: '',
+        address: raw?.address || '',
+        city: raw?.city || '',
         country: null,
-        lat,
-        lng,
-      };
-      // We don't have a country code from the autocomplete payload
-      // here, so we lean on the bounding-box check. The places API
-      // call already filters by country, so this is just a belt.
-      if (!ensureIndia(point)) {
-        rejectOutsideIndia();
-        return;
-      }
-      setLocalPickup(point);
-      setActiveField('pickup');
-    },
-  });
-
-  useMapPlaceSearch(destinationInputRef, {
-    maps,
-    enabled: mapsReady,
-    onSelect: ({ lat, lng, address, name }) => {
-      const point = {
-        address: address || name || '',
-        city: '',
-        country: null,
-        lat,
-        lng,
+        lat: raw?.lat,
+        lng: raw?.lng,
       };
       if (!ensureIndia(point)) {
         rejectOutsideIndia();
         return;
       }
-      setLocalDestination(point);
-      setActiveField('drop');
-    },
-  });
-
-  // Click on the map → drop a pin for whichever field is active and
-  // reverse-geocode it so the input below shows the resolved address.
-  const handleMapClick = useCallback(
-    async (event) => {
-      const lat = event?.latLng?.lat?.();
-      const lng = event?.latLng?.lng?.();
-      if (typeof lat !== 'number' || typeof lng !== 'number') return;
-      // Fast path: reject obviously out-of-bounds taps without
-      // burning a Geocoder request.
-      if (!isInsideIndiaBounds(lat, lng)) {
-        rejectOutsideIndia();
-        return;
-      }
-      const point = await reverseGeocode({ lat, lng });
-      if (!ensureIndia(point)) {
-        rejectOutsideIndia();
-        return;
-      }
-      if (activeField === 'drop') setLocalDestination(point);
+      if (which === 'drop') setLocalDestination(point);
       else setLocalPickup(point);
     },
-    [activeField, reverseGeocode, ensureIndia, rejectOutsideIndia],
+    [ensureIndia, rejectOutsideIndia],
   );
+
+  // Wired to the pickup sheet's "Use my current location" CTA.
+  // Returns a `{address,city,lat,lng}` (or `null`) the sheet hands
+  // back to its onSelect.
+  const handleUseCurrentLocation = useCallback(async () => {
+    if (!coords) {
+      refreshGeo();
+      return null;
+    }
+    const point = await reverseGeocode({ lat: coords.lat, lng: coords.lng });
+    if (!ensureIndia(point)) {
+      rejectOutsideIndia();
+      return null;
+    }
+    return point;
+  }, [coords, refreshGeo, reverseGeocode, ensureIndia, rejectOutsideIndia]);
 
   const handleMarkerDragEnd = useCallback(
     async (which, event) => {
@@ -709,25 +799,12 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
   };
 
   /**
-   * Wired to the OutOfServiceDialog's "Change pickup location" CTA.
-   * We don't have a separate picker sheet on this page — the search
-   * input is already on screen — so we just focus + scroll the
-   * pickup field and arm the "tap map for pickup" mode so the next
-   * map tap also lands on it.
+   * Wired to the OutOfServiceDialog's "Change pickup location" CTA
+   * and the inline ZoneStatusStrip "Change" button. Opens the pickup
+   * picker sheet so the user can search/pick fresh.
    */
   const handleChangePickup = () => {
-    setActiveField('pickup');
-    if (pickupInputRef.current) {
-      try {
-        pickupInputRef.current.focus({ preventScroll: false });
-      } catch {
-        pickupInputRef.current.focus();
-      }
-      pickupInputRef.current.scrollIntoView?.({
-        behavior: 'smooth',
-        block: 'center',
-      });
-    }
+    setPickerOpen('pickup');
   };
 
   return (
@@ -739,14 +816,19 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
         <Footer
           priceHint={
             dailyRate > 0
-              ? `₹${dailyRate}/day${
-                  allowancePerNight > 0
-                    ? ` · ₹${allowancePerNight}/night allowance`
-                    : ''
-                }`
+              ? `₹${dailyRate}/day${formatAllowanceHint({
+                  useLegacyAllowance,
+                  foodAllowancePerDay,
+                  stayAllowancePerNight,
+                  legacyAllowancePerNight,
+                })}`
               : 'Set on next screen'
           }
-          priceLabel={`${days} day${days === 1 ? '' : 's'}`}
+          priceLabel={
+            days >= 1
+              ? `${days} day${days === 1 ? '' : 's'}`
+              : '— day'
+          }
           primaryLabel="Continue"
           disabled={!canContinue}
           onClick={handleContinue}
@@ -761,49 +843,35 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
         <p className="text-[12px] leading-snug text-sky-900">
           <strong className="font-semibold">Round trip:</strong> your
           driver stays with you the whole trip and drops you back at the
-          pickup on day {days}.
+          pickup{days >= 1 ? ` on day ${days}` : ''}.
         </p>
       </div>
 
-      {/* Pickup + destination — return is implicit (= pickup). The
-          embedded map lets the customer drop pins by tapping; pin
-          drag updates the address via reverse-geocoding. */}
+      {/* Pickup + destination — return is implicit (= pickup). Each
+          field is a tappable pill that opens a `LocationPickerSheet`
+          (the same Rapido-style sheet the hourly trip-details page
+          uses for pickup). Marker drag on the embedded map below
+          fine-tunes the resolved address. */}
       <Card>
         <h3 className="text-base font-bold text-slate-900 mb-3">
           Pickup &amp; destination
         </h3>
         <div className="space-y-2">
-          <LocationField
+          <LocationPill
             tone="green"
             icon={MapPin}
             label="Pickup"
-            placeholder="Search pickup location"
-            inputRef={pickupInputRef}
+            placeholder="Tap to choose pickup"
             value={localPickup?.address || ''}
-            active={activeField === 'pickup'}
-            onFocus={() => setActiveField('pickup')}
-            onChange={(v) =>
-              setLocalPickup((p) => ({
-                ...(p || { lat: null, lng: null, city: '' }),
-                address: v,
-              }))
-            }
+            onClick={() => setPickerOpen('pickup')}
           />
-          <LocationField
+          <LocationPill
             tone="red"
             icon={Navigation}
             label="Destination"
             placeholder="Where are you going?"
-            inputRef={destinationInputRef}
             value={localDestination?.address || ''}
-            active={activeField === 'drop'}
-            onFocus={() => setActiveField('drop')}
-            onChange={(v) =>
-              setLocalDestination((p) => ({
-                ...(p || { lat: null, lng: null, city: '' }),
-                address: v,
-              }))
-            }
+            onClick={() => setPickerOpen('drop')}
           />
         </div>
 
@@ -818,23 +886,6 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
           onChangePickup={handleChangePickup}
         />
 
-        {/* Field-toggle chips so the user can pick which marker the
-            next map tap controls without depending on input focus. */}
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <FieldChip
-            active={activeField === 'pickup'}
-            tone="green"
-            label="Tap map for pickup"
-            onClick={() => setActiveField('pickup')}
-          />
-          <FieldChip
-            active={activeField === 'drop'}
-            tone="red"
-            label="Tap map for destination"
-            onClick={() => setActiveField('drop')}
-          />
-        </div>
-
         <div className="mt-3 relative">
           <MapView
             ref={mapRef}
@@ -842,7 +893,6 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
             center={mapCenter}
             zoom={mapZoom}
             options={mapOptions}
-            onClick={handleMapClick}
           >
             {/* Road-following polyline between pickup and destination.
                 `RoutePolyline` is the same component the live-trip map
@@ -873,26 +923,11 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
             )}
           </MapView>
 
-          {/* Top-left: which field a tap will populate. */}
-          <div className="absolute top-2 left-2 right-2 pointer-events-none flex items-start justify-between gap-2">
-            <div className="inline-flex items-center gap-1.5 rounded-lg bg-white/95 shadow px-2.5 py-1 text-[11px] font-semibold text-slate-700">
-              <Pointer className="w-3 h-3" />
-              Tap to set
-              <span
-                className={
-                  activeField === 'drop'
-                    ? 'text-red-600'
-                    : 'text-emerald-600'
-                }
-              >
-                {activeField === 'drop' ? 'Destination' : 'Pickup'}
-              </span>
-            </div>
-
-            {/* Top-right: route distance + ETA chip — surfaces the
-                Directions answer so the customer can sanity-check the
-                trip length before committing. */}
-            {routeOrigin && routeDestination && (
+          {/* Top-right: route distance + ETA chip — surfaces the
+              Directions answer so the customer can sanity-check the
+              trip length before committing. */}
+          {routeOrigin && routeDestination && (
+            <div className="absolute top-2 right-2 pointer-events-none">
               <div className="inline-flex items-center gap-1.5 rounded-lg bg-white/95 shadow px-2.5 py-1 text-[11px] font-semibold text-slate-700">
                 <Navigation className="w-3 h-3 text-sky-600" />
                 {route?.status === 'ok' && routeKm != null ? (
@@ -908,8 +943,8 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
                   <span className="text-text-muted">Route unavailable</span>
                 )}
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         <div className="mt-3 space-y-2">
@@ -923,51 +958,67 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
             <MapPin className="w-3.5 h-3.5 text-text-muted shrink-0" />
             <span className="text-[11px] text-text-muted">
               We currently operate inside India only — locations
-              outside India can&rsquo;t be selected.
+              outside India can&rsquo;t be selected. Drag a pin on the
+              map to fine-tune the address.
             </span>
           </div>
         </div>
       </Card>
 
-      {/* Pickup + return time. */}
+      {/* Pickup + return time. Both pickers stay blank-by-default so
+          the user explicitly commits to a time (no surprise prefill). */}
       <Card>
         <h3 className="text-base font-bold text-slate-900 mb-3">When?</h3>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-semibold text-text-muted mb-2">
-              Pickup time
-            </label>
-            <input
-              type="datetime-local"
-              value={pickupAt}
-              min={defaultPickupInputValue()}
-              onChange={(e) => onPickupTimeChange(e.target.value)}
-              className="w-full h-11 bg-gray-50 border border-border rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-text-muted mb-2">
-              Expected return
-            </label>
-            <input
-              type="datetime-local"
-              value={expectedReturnAt}
-              min={pickupAt}
-              onChange={(e) => setExpectedReturnAt(e.target.value)}
-              className="w-full h-11 bg-gray-50 border border-border rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
-          </div>
+        <div className="space-y-3">
+          <DateTimePickerField
+            label="Pickup date & time"
+            icon={CalendarClock}
+            value={pickupAt}
+            onChange={onPickupTimeChange}
+            minDate={minPickupDate}
+            placeholder="Tap to choose pickup"
+            helper={
+              minLeadHours > 0
+                ? `We need at least ${formatLeadHours(minLeadHours)} between booking and pickup so a driver can be assigned.`
+                : undefined
+            }
+            sheetTitle="Pickup date & time"
+          />
+          <DateTimePickerField
+            label="Expected return"
+            icon={CalendarClock}
+            value={expectedReturnAt}
+            onChange={setExpectedReturnAt}
+            minDate={minReturnDate}
+            disabled={!pickupAt}
+            placeholder={
+              pickupAt ? 'Tap to choose return' : 'Pick a pickup first'
+            }
+            helper={
+              pickupAt
+                ? 'Round trip — the driver brings you back here on this date.'
+                : undefined
+            }
+            sheetTitle="Expected return"
+          />
         </div>
-        <div className="mt-3 flex items-center justify-between bg-bg rounded-xl px-3 py-2">
-          <span className="text-xs text-text-muted inline-flex items-center gap-1.5">
-            <CalendarRange className="w-3.5 h-3.5" />
-            Trip length
-          </span>
-          <span className="text-sm font-bold text-text">
-            {days} day{days > 1 ? 's' : ''} · {nights} night
-            {nights === 1 ? '' : 's'}
-          </span>
-        </div>
+        {pickupAt && expectedReturnAt ? (
+          <div className="mt-3 flex items-center justify-between bg-bg rounded-xl px-3 py-2">
+            <span className="text-xs text-text-muted inline-flex items-center gap-1.5">
+              <CalendarRange className="w-3.5 h-3.5" />
+              Trip length
+            </span>
+            <span className="text-sm font-bold text-text">
+              {days} day{days > 1 ? 's' : ''} · {nights} night
+              {nights === 1 ? '' : 's'}
+            </span>
+          </div>
+        ) : (
+          <p className="mt-3 text-[11px] text-text-muted inline-flex items-center gap-1.5">
+            <AlertCircle className="w-3.5 h-3.5" />
+            Pick both a pickup and return so we can size the trip.
+          </p>
+        )}
       </Card>
 
       {/* Car selection. The "Add car" CTA opens an in-place modal
@@ -1022,6 +1073,29 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
         onChangeLocation={handleChangePickup}
         locationLabel={localPickup?.address || ''}
         cityHint={localPickup?.city || ''}
+      />
+
+      {/* Rapido-style location pickers for pickup and destination.
+          One sheet, two roles — keyed by `pickerOpen`. Pickup gets the
+          "use current location" CTA; destination doesn't (you're going
+          *away* from home, not to it). */}
+      <LocationPickerSheet
+        open={pickerOpen === 'pickup'}
+        onClose={() => setPickerOpen(null)}
+        title="Pickup location"
+        onSelect={(point) => handleSheetSelect('pickup', point)}
+        onRequestCurrentLocation={handleUseCurrentLocation}
+        currentLocationLoading={locating}
+        currentLocationError={geoError}
+        currentPickup={localPickup}
+      />
+      <LocationPickerSheet
+        open={pickerOpen === 'drop'}
+        onClose={() => setPickerOpen(null)}
+        title="Destination"
+        onSelect={(point) => handleSheetSelect('drop', point)}
+        currentPickup={localDestination}
+        hideCurrentLocation
       />
     </PageShell>
   );
@@ -1087,72 +1161,40 @@ function ZoneStatusStrip({ status, zoneName, city, onChangePickup }) {
 /* Outstation sub-components                                           */
 /* ------------------------------------------------------------------ */
 
-function LocationField({
-  tone,
-  icon: Icon,
-  label,
-  placeholder,
-  inputRef,
-  value,
-  active,
-  onChange,
-  onFocus,
-}) {
+/**
+ * Tappable pickup/destination pill — mirrors the Rapido-style pill the
+ * hourly trip-details page uses for pickup. Tapping opens a
+ * `LocationPickerSheet` (search + saved places + optional current
+ * location); the placeholder is shown when no value is set yet.
+ */
+function LocationPill({ tone, icon: Icon, label, placeholder, value, onClick }) {
   const toneClasses = tone === 'red'
     ? 'bg-red-50 text-red-600'
     : 'bg-emerald-50 text-emerald-600';
-  // The "active" state is a soft ring — it tells the user that the
-  // next map tap will land on this field's marker without stealing
-  // focus from whatever the user might be typing.
-  const ringClass = active
-    ? tone === 'red'
-      ? 'ring-2 ring-red-300/70'
-      : 'ring-2 ring-emerald-300/70'
-    : '';
-  return (
-    <div
-      className={`flex items-center gap-3 rounded-2xl border border-border bg-gray-50 px-3 py-2 ${ringClass}`}
-    >
-      <span
-        className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${toneClasses}`}
-      >
-        <Icon className="w-4 h-4" />
-      </span>
-      <div className="flex-1 min-w-0">
-        <p className="text-[10px] uppercase tracking-wide text-text-muted">
-          {label}
-        </p>
-        <input
-          ref={inputRef}
-          type="search"
-          value={value}
-          placeholder={placeholder}
-          onFocus={onFocus}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full bg-transparent border-0 p-0 text-sm font-medium text-text placeholder:text-text-muted focus:outline-none truncate"
-          autoComplete="off"
-        />
-      </div>
-    </div>
-  );
-}
-
-function FieldChip({ active, tone, label, onClick }) {
-  const activeClasses =
-    tone === 'red'
-      ? 'bg-red-50 text-red-700 border-red-200'
-      : 'bg-emerald-50 text-emerald-700 border-emerald-200';
-  const idleClasses = 'bg-white text-text-muted border-border';
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`flex items-center justify-center gap-1.5 rounded-xl border px-3 py-1.5 text-[11px] font-semibold transition ${
-        active ? activeClasses : idleClasses
-      }`}
+      className="w-full flex items-center gap-3 rounded-2xl border border-border bg-gray-50 hover:bg-gray-100 px-3 py-2.5 text-left transition active:scale-[0.99]"
     >
-      <Crosshair className="w-3 h-3" />
-      {label}
+      <span
+        className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${toneClasses}`}
+      >
+        <Icon className="w-4 h-4" />
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block text-[10px] uppercase tracking-wide font-semibold text-text-muted">
+          {label}
+        </span>
+        <span
+          className={`block text-sm font-semibold truncate ${
+            value ? 'text-text' : 'text-text-muted'
+          }`}
+        >
+          {value || placeholder}
+        </span>
+      </span>
+      <ChevronRight className="w-5 h-5 text-text-muted shrink-0" />
     </button>
   );
 }
@@ -1377,13 +1419,50 @@ function isInsideIndiaBounds(lat, lng) {
   );
 }
 
-function pad(n) {
-  return String(n).padStart(2, '0');
+/**
+ * Compact human label for the admin-configured lead time. Whole hours
+ * stay plain ("2 hours"); fractional ones surface in minutes
+ * ("90 minutes") so the customer doesn't see "1.5 hours" which reads
+ * awkwardly next to the picker. Mirrors the duration-page helper.
+ */
+function formatLeadHours(hours) {
+  const safe = Math.max(0, Number(hours) || 0);
+  if (safe === 0) return 'a moment';
+  if (Number.isInteger(safe)) {
+    return `${safe} hour${safe === 1 ? '' : 's'}`;
+  }
+  const totalMinutes = Math.round(safe * 60);
+  if (totalMinutes < 60) return `${totalMinutes} minutes`;
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return m === 0 ? `${h} hours` : `${h}h ${m}m`;
 }
 
-function defaultIsoForInput() {
-  const d = new Date(Date.now() + 30 * 60 * 1000);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+/**
+ * Build the trailing portion of the outstation footer price hint —
+ * appends "· ₹X/day food · ₹Y/night stay" when the admin has
+ * configured the split allowances, or "· ₹Z/night allowance" when a
+ * legacy combined per-night value is still on the pricing doc.
+ */
+function formatAllowanceHint({
+  useLegacyAllowance,
+  foodAllowancePerDay,
+  stayAllowancePerNight,
+  legacyAllowancePerNight,
+}) {
+  if (useLegacyAllowance) {
+    return legacyAllowancePerNight > 0
+      ? ` · \u20B9${legacyAllowancePerNight}/night allowance`
+      : '';
+  }
+  const parts = [];
+  if (foodAllowancePerDay > 0) {
+    parts.push(`\u20B9${foodAllowancePerDay}/day food`);
+  }
+  if (stayAllowancePerNight > 0) {
+    parts.push(`\u20B9${stayAllowancePerNight}/night stay`);
+  }
+  return parts.length ? ` · ${parts.join(' · ')}` : '';
 }
 
 export default SelectVariantPage;

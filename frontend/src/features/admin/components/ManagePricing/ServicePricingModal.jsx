@@ -39,18 +39,25 @@ const buildDefaultForm = (serviceType) => ({
     label: 'Custom duration',
   },
 
-  // Outstation — only two billable knobs now: dailyRate (base) and
-  // allowancePerNight (combined driver food + stay + bata, billed per
-  // night unless the customer arranges everything). The legacy fields
-  // are seeded to 0 so older saved docs that round-trip through this
-  // form don't suddenly resurrect deprecated charges.
+  // Outstation — three billable knobs:
+  //   dailyRate                 (base fare, ₹ per day)
+  //   foodAllowancePerDay       (driver food, ₹ per day, waived if
+  //                              customer feeds the driver)
+  //   stayAllowancePerNight     (driver stay, ₹ per night = day-1,
+  //                              waived if customer hosts the driver)
+  // `allowancePerNight` is a deprecated combined per-night field —
+  // kept on the form so older docs round-trip without losing it, but
+  // seeded to 0 for new docs. The fare engine falls back to it only
+  // when both new fields are 0.
   outstation: {
     dailyRate: serviceType === SERVICE_TYPES.OUTSTATION ? 1500 : 0,
-    allowancePerNight: serviceType === SERVICE_TYPES.OUTSTATION ? 800 : 0,
+    foodAllowancePerDay: serviceType === SERVICE_TYPES.OUTSTATION ? 300 : 0,
+    stayAllowancePerNight: serviceType === SERVICE_TYPES.OUTSTATION ? 500 : 0,
     minDays: 1,
     maxDays: 0,
     // Deprecated — kept on the form so a save doesn't drop them from
-    // the persisted document on round-trip. Always zero.
+    // the persisted document on round-trip. Always zero on new docs.
+    allowancePerNight: 0,
     kmIncludedPerDay: 0,
     extraKmRate: 0,
     nightHaltCharge: 0,
@@ -1184,6 +1191,34 @@ const ServicePricingModal = ({ isOpen, onClose, serviceType, existing, onSaved }
                     }
                   />
                 </div>
+              </div>
+            </Section>
+          )}
+          {!isHourly && (
+            <Section
+              title="Outstation booking lead time"
+              subtitle="The customer's date picker is capped to at least this many hours from now (the backend enforces the same floor on create). Use it to give ops enough time to manually assign a driver before the trip starts."
+            >
+              <div className="p-3 bg-slate-50 rounded-xl space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <Input
+                    label="Minimum lead time (hours)"
+                    type="number"
+                    min={0}
+                    step="0.5"
+                    value={form.scheduledDispatch.MIN_SCHEDULED_LEAD_HOURS}
+                    onChange={(e) =>
+                      updateNested('scheduledDispatch', {
+                        MIN_SCHEDULED_LEAD_HOURS: Number(e.target.value),
+                      })
+                    }
+                    helper={`Customer-facing copy will read \u201cWe need at least ${form.scheduledDispatch.MIN_SCHEDULED_LEAD_HOURS || 0} hour${(form.scheduledDispatch.MIN_SCHEDULED_LEAD_HOURS || 0) === 1 ? '' : 's'} between booking and pickup\u201d.`}
+                  />
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Past-time pickups are rejected too — the same 422
+                  error covers anything inside this window.
+                </p>
               </div>
             </Section>
           )}

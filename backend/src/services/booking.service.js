@@ -239,14 +239,55 @@ export function sanitizeBookingForDriver(booking) {
   if ('razorpay' in obj) delete obj.razorpay;
 
   // Replace the customer-facing fare snapshot with a driver-safe view
-  // that only shows the driver's earning (= total − platform commission).
+  // that only shows the driver's earning. Includes the waiting charge
+  // (`waiting.chargeRupees`) because under current policy 100% of it
+  // is credited to the driver at trip-end — leaving it out would make
+  // the per-trip line on the driver's earnings/recent-payouts feed
+  // disagree with what actually landed in their wallet.
   if (obj.fareSnapshot) {
-    const driverEarning = driverEarningFromFareSnapshot(obj.fareSnapshot);
+    const baseEarning = driverEarningFromFareSnapshot(obj.fareSnapshot);
+    const waitingCharge = Number(obj.waiting?.chargeRupees) || 0;
+    const driverEarning = round2(baseEarning + waitingCharge);
     obj.fareSnapshot = {
       pricingId: obj.fareSnapshot.pricingId || null,
       driverEarning,
+      driverFareEarning: round2(baseEarning),
+      driverWaitingEarning: round2(waitingCharge),
       currency: 'INR',
     };
+  }
+
+  // Strip customer-pricing fields off each extension subdoc and surface
+  // only the driver's share. Previously the driver app received the
+  // full `fareDelta` (= what the customer paid) plus the entire
+  // `breakdown` (subtotal/serviceCharge/gst/platformCommission) — a
+  // data leak that also made the driver think they earned more than
+  // they actually did. We now expose just `driverEarning` (= subtotal
+  // − platformCommission), the hours added and the lifecycle stamps.
+  if (Array.isArray(obj.extensions) && obj.extensions.length) {
+    obj.extensions = obj.extensions.map((ext) => {
+      const bd = ext?.breakdown || {};
+      const driverEarning = round2(Number(bd.driverEarning) || 0);
+      return {
+        _id: ext._id || null,
+        status: ext.status || null,
+        additionalHours: Number(ext.additionalHours) || 0,
+        additionalDays: Number(ext.additionalDays) || 0,
+        driverEarning,
+        requestedAt: ext.requestedAt || null,
+        respondedAt: ext.respondedAt || null,
+        paidAt: ext.paidAt || null,
+        // OTP block is presence-only — the code itself stays out of the
+        // sanitized view (sockets carry it separately when needed).
+        otp: ext.otp
+          ? {
+              generatedAt: ext.otp.generatedAt || null,
+              verifiedAt: ext.otp.verifiedAt || null,
+              expiresAt: ext.otp.expiresAt || null,
+            }
+          : null,
+      };
+    });
   }
   return obj;
 }
@@ -436,11 +477,12 @@ export async function getBookingByIdService(bookingId, { userId, driverId } = {}
   const query = Booking.findOne(filter)
     .populate('driverId', DRIVER_USER_FIELDS_WITH_LOC)
     .populate('userId', CUSTOMER_DRIVER_FIELDS);
-  // Driver-side detail view needs the vehicle (image + brand + model
-  // + plate) so the driver can identify the car at pickup. We only
-  // pull it down for driver lookups — users don't need to see their
-  // own car re-rendered on the booking detail.
-  if (driverId) query.populate(CAR_DRIVER_POPULATE);
+  // Both the driver-side and the customer-side detail views need the
+  // vehicle (image + brand + model + plate + transmission + fuel) so
+  // each side can identify the car. The shared `CAR_DRIVER_POPULATE`
+  // recipe resolves the nested `brandId/modelId/...` refs to lookup
+  // names so the FE renders without a second round-trip.
+  query.populate(CAR_DRIVER_POPULATE);
   const booking = await query.lean();
   if (!booking) throw new ApiError(404, 'Booking not found');
   if (driverId) {
@@ -766,6 +808,34 @@ export async function createBookingService(userId, body) {
         `Scheduled rides must start at least ${minLeadHours} hours from now. Pick a later pickup time or use Instant.`,
       );
     }
+  }
+
+  // Outstation pickups are always scheduled in advance — the manual
+  // assignment queue needs at least the admin-configured lead window
+  // for ops to pick a driver before the trip is supposed to start. Past
+  // pickups land here too (negative diff < positive lead) and are
+  // rejected with the same 422 so the FE can surface one consistent
+  // error path. The knob lives on `ServicePricing.scheduledDispatch`
+  // and is admin-tunable per service (same field hourly already uses).
+  if (serviceType === SERVICE_TYPES.OUTSTATION) {
+    const cfg = await loadScheduledDispatchConfig(serviceType);
+    const minLeadHours =
+      cfg.MIN_SCHEDULED_LEAD_HOURS ?? SCHEDULED_BOOKING.MIN_SCHEDULED_LEAD_HOURS;
+    const minLeadMs = minLeadHours * 60 * 60 * 1000;
+    const pickupRaw = outstation?.pickupAt || outstation?.startDate;
+    const startMs = new Date(pickupRaw).getTime();
+    if (!Number.isFinite(startMs)) {
+      throw new ApiError(400, 'Outstation: pickupAt is invalid');
+    }
+    if (startMs - Date.now() < minLeadMs) {
+      throw new ApiError(
+        422,
+        `Outstation bookings must start at least ${minLeadHours} hours from now. Pick a later pickup time.`,
+      );
+    }
+    // Outstation always gets its own booking type — override whatever the
+    // client sent so every outstation row is consistently typed 'outstation'.
+    body.bookingType = BOOKING_TYPE.OUTSTATION;
   }
 
   // The "one active booking per user" rule is gone — users can run

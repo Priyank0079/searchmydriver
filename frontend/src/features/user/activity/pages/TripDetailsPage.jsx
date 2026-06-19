@@ -4,16 +4,23 @@ import {
   AlertCircle,
   ArrowLeft,
   Calendar,
+  CalendarClock,
   Car as CarIcon,
   CheckCircle2,
   Clock,
+  HandCoins,
+  KeyRound,
   Loader2,
   MapPin,
+  Mountain,
+  Moon,
   Navigation,
   Phone,
   ReceiptText,
   ShieldCheck,
+  Sparkles,
   Star,
+  Sun,
   Wallet as WalletIcon,
   XCircle,
 } from 'lucide-react';
@@ -31,6 +38,8 @@ import { SERVICE_CATALOG } from '../../home/constants/serviceCatalog';
 import { useSocket, useSocketEvent } from '../../../../hooks/useSocket';
 import { C2S_EVENTS, S2C_EVENTS } from '../../../../constants/socketEvents';
 import useUserActiveBookingStore from '../../../../store/user/useUserActiveBookingStore';
+import { getCarBrandName, getCarModelName } from '../../../../utils/vehicleCatalog';
+import { formatPickupDateTime } from '../../../../utils/datetime';
 
 /**
  * Per-booking detail screen, reachable from any card on /user/activity.
@@ -169,6 +178,7 @@ const liveRouteForStatus = (status, bookingId) => {
       return '/user/book/searching';
     case BOOKING_STATUS.AWAITING_PAYMENT:
     case BOOKING_STATUS.DRIVER_ASSIGNED:
+    case BOOKING_STATUS.EN_ROUTE:
     case BOOKING_STATUS.ARRIVED:
     // Trip-in-progress also routes to the assigned page so the user
     // stays on the same "one canvas with the live map" surface for
@@ -178,8 +188,6 @@ const liveRouteForStatus = (status, bookingId) => {
       return bookingId
         ? `/user/book/assigned/${bookingId}`
         : '/user/book/assigned';
-    case BOOKING_STATUS.EN_ROUTE:
-      return '/user/tracking/on-way';
     default:
       return null;
   }
@@ -191,8 +199,11 @@ const TripDetailsPage = () => {
   const { emit, isConnected } = useSocket();
   const setActiveBooking = useUserActiveBookingStore((s) => s.setBooking);
 
-  const [booking, setBooking] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [booking, setBooking] = useState(() => {
+    const active = useUserActiveBookingStore.getState().booking;
+    return active && String(active._id) === id ? active : null;
+  });
+  const [loading, setLoading] = useState(!booking);
   const [error, setError] = useState(null);
 
   const fetchBooking = useCallback(async () => {
@@ -214,7 +225,6 @@ const TripDetailsPage = () => {
   }, [id]);
 
   useEffect(() => {
-    setLoading(true);
     fetchBooking();
   }, [fetchBooking]);
 
@@ -275,15 +285,37 @@ const TripDetailsPage = () => {
     SERVICE_TYPE_LABELS[booking?.serviceType] || booking?.serviceType || 'Trip';
   const catalogTitle = SERVICE_CATALOG[booking?.serviceType]?.title || serviceLabel;
 
+  const isOutstation = booking?.serviceType === SERVICE_TYPES.OUTSTATION;
   const scheduledAt =
-    booking?.hourly?.scheduledStartAt ||
-    booking?.outstation?.startDate ||
+    (isOutstation
+      ? booking?.outstation?.pickupAt || booking?.outstation?.startDate
+      : booking?.hourly?.scheduledStartAt) ||
     booking?.timeline?.scheduledFor ||
     null;
+  const expectedReturnAt = isOutstation
+    ? booking?.outstation?.expectedReturnAt || booking?.outstation?.endDate || null
+    : null;
   const createdAt = booking?.createdAt || booking?.timeline?.createdAt;
   const completedAt = booking?.timeline?.completedAt;
   const cancelledAt = booking?.timeline?.cancelledAt;
   const startedAt = booking?.timeline?.startedAt;
+  const driverAssignedAt = booking?.timeline?.driverAssignedAt;
+  const enRouteAt = booking?.timeline?.enRouteAt;
+  const arrivedAt = booking?.timeline?.arrivedAt;
+
+  // Pickup OTP is only meaningful while the driver is on the way to /
+  // waiting at the customer. After STARTED it's been verified, before
+  // DRIVER_ASSIGNED it doesn't exist yet.
+  const otpCode = booking?.rideStartOtp?.code || null;
+  const showOtp = otpCode && [
+    BOOKING_STATUS.DRIVER_ASSIGNED,
+    BOOKING_STATUS.EN_ROUTE,
+    BOOKING_STATUS.ARRIVED,
+  ].includes(status);
+
+  const car = booking?.carId && typeof booking.carId === 'object'
+    ? booking.carId
+    : null;
 
   const handleContinueTracking = () => {
     if (!booking || !liveRoute) return;
@@ -371,7 +403,30 @@ const TripDetailsPage = () => {
           serviceLabel={serviceLabel}
           startedAt={startedAt}
           completedAt={completedAt}
+          scheduledAt={scheduledAt}
+          expectedReturnAt={expectedReturnAt}
         />
+
+        {/* Pickup OTP — only visible during the driver-en-route window
+            so the customer can read it out at pickup. After STARTED it
+            stops being useful, before DRIVER_ASSIGNED it doesn't exist
+            yet. */}
+        {showOtp && (
+          <OtpCard
+            otp={otpCode}
+            status={status}
+          />
+        )}
+
+        {/* Scheduled-ride milestones — when a booking is queued for
+            future search (PENDING_ASSIGNMENT) or sitting in the manual
+            assignment pool (IN_EMERGENCY_POOL), surface the timestamps
+            the customer's been told to expect so they can self-serve
+            "is this still on?". */}
+        {(status === BOOKING_STATUS.PENDING_ASSIGNMENT
+          || status === BOOKING_STATUS.IN_EMERGENCY_POOL) && (
+          <ScheduledTimelineCard booking={booking} />
+        )}
 
         {driver && (
           <DriverCard
@@ -384,7 +439,28 @@ const TripDetailsPage = () => {
           />
         )}
 
+        {/* Vehicle the user booked — populated on both the user and
+            driver side of the booking-detail endpoint. */}
+        {car && <VehicleCard car={car} />}
+
+        {/* Outstation food + stay arrangement — mirrors the toggles on
+            /user/book/confirm so the customer can verify what they
+            agreed to handle. The backend stores `needsFood`/`needsStay`
+            as the SAME boolean it passes to the pricing engine as
+            `foodProvided`/`stayProvided` — so `true` means the customer
+            is arranging it (no allowance charged) and `false` means the
+            company pays the allowance. */}
+        {isOutstation && (
+          <FoodStayCard
+            needsFood={booking.outstation?.needsFood}
+            needsStay={booking.outstation?.needsStay}
+            days={booking.outstation?.days || 1}
+            nights={booking.outstation?.nights || 0}
+          />
+        )}
+
         <FareCard
+          booking={booking}
           baseTotal={baseTotal}
           breakdown={fareBreakdown}
           waiting={booking.waiting}
@@ -429,6 +505,24 @@ const TripDetailsPage = () => {
           {scheduledAt && (
             <LedgerRow label="Scheduled for" value={formatDateTime(scheduledAt)} />
           )}
+          {expectedReturnAt && (
+            <LedgerRow
+              label="Expected return"
+              value={formatDateTime(expectedReturnAt)}
+            />
+          )}
+          {driverAssignedAt && (
+            <LedgerRow
+              label="Driver assigned"
+              value={formatDateTime(driverAssignedAt)}
+            />
+          )}
+          {enRouteAt && (
+            <LedgerRow label="Driver en route" value={formatDateTime(enRouteAt)} />
+          )}
+          {arrivedAt && (
+            <LedgerRow label="Driver arrived" value={formatDateTime(arrivedAt)} />
+          )}
           {startedAt && (
             <LedgerRow label="Started" value={formatDateTime(startedAt)} />
           )}
@@ -441,8 +535,8 @@ const TripDetailsPage = () => {
         </Card>
       </div>
 
-      {/* Sticky footer actions */}
-      <div className="sticky bottom-0 bg-white border-t border-border-light px-4 py-3 z-10">
+      {/* Fixed footer actions */}
+      <div className="fixed bottom-16 left-1/2 -translate-x-1/2 w-full max-w-lg bg-white border-t border-border-light px-4 py-3 z-30">
         {isLive && liveRoute ? (
           <Button fullWidth onClick={handleContinueTracking} icon={Navigation}>
             Continue tracking
@@ -486,18 +580,37 @@ function PageHeader({ onBack, title }) {
   );
 }
 
-function TripRouteCard({ booking, serviceLabel, startedAt, completedAt }) {
+function TripRouteCard({
+  booking,
+  serviceLabel,
+  startedAt,
+  completedAt,
+  scheduledAt,
+  expectedReturnAt,
+}) {
   const isHourly = booking.serviceType === SERVICE_TYPES.HOURLY;
+  const isOutstation = booking.serviceType === SERVICE_TYPES.OUTSTATION;
   const durationLabel = formatDuration(booking);
   const pickup = booking.pickup?.address;
-  const dropoff = booking.dropoff?.address;
+  // Outstation persists its destination on `outstation.destinationAddress`
+  // (the original schema) — fall back to the generic `dropoff` so we
+  // never miss it on either side of the data model evolution.
+  const dropoff = booking.dropoff?.address
+    || (isOutstation ? booking.outstation?.destinationAddress : null);
   const distance = booking.fareSnapshot?.breakdown?.distanceKm;
+  const days = booking.outstation?.days || 0;
+  const nights = booking.outstation?.nights || 0;
 
   return (
     <Card>
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-text">Trip route</h3>
-        <span className="text-[11px] font-semibold uppercase tracking-wide bg-primary/10 text-primary-dark px-2 py-0.5 rounded-full">
+        <span className="text-[11px] font-semibold uppercase tracking-wide bg-primary/10 text-primary-dark px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+          {isOutstation ? (
+            <Mountain className="w-3 h-3" />
+          ) : (
+            <Clock className="w-3 h-3" />
+          )}
           {serviceLabel}
         </span>
       </div>
@@ -523,7 +636,7 @@ function TripRouteCard({ booking, serviceLabel, startedAt, completedAt }) {
               <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
             </span>
             <p className="text-[11px] uppercase tracking-wide text-text-muted font-semibold">
-              Destination
+              {isOutstation ? 'Destination (round trip)' : 'Destination'}
             </p>
             <p className="text-sm text-text leading-snug">{dropoff}</p>
           </div>
@@ -543,8 +656,33 @@ function TripRouteCard({ booking, serviceLabel, startedAt, completedAt }) {
       </div>
 
       <div className="mt-3 pt-3 border-t border-border-light grid grid-cols-2 gap-3 text-xs">
+        {scheduledAt && (
+          <DetailTile
+            icon={CalendarClock}
+            label={isOutstation ? 'Pickup' : 'Scheduled'}
+            value={formatPickupDateTime(scheduledAt)}
+          />
+        )}
+        {isOutstation && expectedReturnAt && (
+          <DetailTile
+            icon={Calendar}
+            label="Expected return"
+            value={formatPickupDateTime(expectedReturnAt)}
+          />
+        )}
         {durationLabel && (
-          <DetailTile icon={Clock} label="Duration" value={durationLabel} />
+          <DetailTile
+            icon={Clock}
+            label={isOutstation ? 'Days' : 'Duration'}
+            value={durationLabel}
+          />
+        )}
+        {isOutstation && nights > 0 && (
+          <DetailTile
+            icon={Moon}
+            label="Nights"
+            value={`${nights} night${nights === 1 ? '' : 's'}`}
+          />
         )}
         {distance ? (
           <DetailTile icon={Navigation} label="Distance" value={`${distance} km`} />
@@ -557,6 +695,13 @@ function TripRouteCard({ booking, serviceLabel, startedAt, completedAt }) {
             icon={CheckCircle2}
             label="Completed"
             value={formatDateTime(completedAt)}
+          />
+        )}
+        {isOutstation && days > 0 && nights === 0 && (
+          <DetailTile
+            icon={Sun}
+            label="Same-day trip"
+            value="No overnight stay"
           />
         )}
       </div>
@@ -623,6 +768,7 @@ function DriverCard({ name, photo, phone, callHref, rating, experienceYears }) {
 }
 
 function FareCard({
+  booking,
   baseTotal,
   breakdown,
   waiting,
@@ -633,10 +779,66 @@ function FareCard({
   paymentMethod,
   paymentStatus,
 }) {
+  const isOutstation = booking?.serviceType === SERVICE_TYPES.OUTSTATION;
+  const isHourly = booking?.serviceType === SERVICE_TYPES.HOURLY;
   const lines = [];
-  if (baseTotal > 0) {
+
+  // Show the engine's component lines when we have them — otherwise
+  // fall back to a single "Base fare" row so older bookings (which
+  // didn't snapshot a granular breakdown) still render cleanly.
+  if (isOutstation) {
+    const days = Number(breakdown?.days) || booking?.outstation?.days || 0;
+    const nights = Number(breakdown?.nights) || booking?.outstation?.nights || 0;
+    const daily = Number(breakdown?.dailyRateTotal) || 0;
+    const food = Number(breakdown?.foodAllowanceTotal) || 0;
+    const stay = Number(breakdown?.stayAllowanceTotal) || 0;
+    const legacy = Number(breakdown?.legacyAllowanceTotal) || 0;
+    if (daily > 0) {
+      lines.push({
+        label: days > 0 ? `Daily rate \u00d7 ${days}` : 'Daily rate',
+        value: daily,
+      });
+    }
+    if (food > 0) {
+      lines.push({
+        label: days > 0 ? `Driver food \u00d7 ${days}` : 'Driver food',
+        value: food,
+      });
+    }
+    if (stay > 0) {
+      lines.push({
+        label: nights > 0 ? `Driver stay \u00d7 ${nights}` : 'Driver stay',
+        value: stay,
+      });
+    }
+    if (legacy > 0) {
+      lines.push({
+        label: nights > 0 ? `Driver allowance \u00d7 ${nights}` : 'Driver allowance',
+        value: legacy,
+      });
+    }
+    // If none of the granular fields landed in the snapshot (legacy
+    // booking), drop back to the catch-all base-fare row.
+    if (lines.length === 0 && baseTotal > 0) {
+      lines.push({ label: 'Base fare', value: baseTotal });
+    }
+  } else if (isHourly) {
+    const hours = Number(breakdown?.hours) || booking?.hourly?.durationHours || 0;
+    const slabTotal = Number(breakdown?.slabTotal)
+      || Number(breakdown?.hourlyTotal)
+      || 0;
+    if (slabTotal > 0 && hours > 0) {
+      lines.push({
+        label: `Hourly rate \u00d7 ${hours}h`,
+        value: slabTotal,
+      });
+    } else if (baseTotal > 0) {
+      lines.push({ label: 'Base fare', value: baseTotal });
+    }
+  } else if (baseTotal > 0) {
     lines.push({ label: 'Base fare', value: baseTotal });
   }
+
   const serviceCharge = Number(breakdown?.serviceCharge) || 0;
   if (serviceCharge > 0) {
     lines.push({ label: 'Service charge', value: serviceCharge, muted: true });
@@ -658,6 +860,19 @@ function FareCard({
       value: ext.fareDelta,
     });
   });
+  const bufferRefund = Number(waiting?.bufferRefundRupees) || 0;
+  // Surface any waiting-buffer money we sent back to the wallet as
+  // its own muted row so the customer can reconcile it against their
+  // wallet ledger. We render it with a "(refunded)" tag instead of a
+  // negative number to avoid the awkward "₹-50.00" formatting.
+  if (bufferRefund > 0) {
+    lines.push({
+      label: 'Waiting buffer refunded',
+      value: bufferRefund,
+      muted: true,
+      refund: true,
+    });
+  }
 
   return (
     <Card>
@@ -685,9 +900,14 @@ function FareCard({
               </span>
               <span
                 className={`text-sm tabular-nums ${
-                  line.muted ? 'text-text-muted' : 'text-text font-medium'
+                  line.refund
+                    ? 'text-emerald-700 font-medium'
+                    : line.muted
+                      ? 'text-text-muted'
+                      : 'text-text font-medium'
                 }`}
               >
+                {line.refund ? '\u2212 ' : ''}
                 {formatRupees(line.value)}
               </span>
             </div>
@@ -777,6 +997,216 @@ function LedgerRow({ label, value }) {
       <span className="text-text-muted">{label}</span>
       <span className="text-text font-medium">{value}</span>
     </div>
+  );
+}
+
+function VehicleCard({ car }) {
+  const title = `${getCarBrandName(car)} \u00b7 ${getCarModelName(car)}`;
+  const transmission = car?.transmission || null;
+  const fuel = car?.fuelTypeId?.name || null;
+  const carType = car?.carTypeId?.name || null;
+  const plate = car?.vehicleNumber || null;
+  const meta = [carType, transmission, fuel].filter(Boolean).join(' \u00b7 ');
+  return (
+    <Card>
+      <p className="text-[11px] uppercase tracking-wide text-text-muted font-semibold mb-3">
+        Your vehicle
+      </p>
+      <div className="flex items-center gap-3">
+        <div className="w-12 h-12 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center shrink-0 overflow-hidden">
+          {car?.image ? (
+            <img src={car.image} alt={title} className="w-full h-full object-cover" />
+          ) : (
+            <CarIcon className="w-5 h-5" />
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-text truncate">{title}</p>
+          {meta && (
+            <p className="text-[12px] text-text-muted truncate">{meta}</p>
+          )}
+        </div>
+        {plate && (
+          <span className="text-[11px] font-mono font-semibold uppercase tracking-wide bg-slate-100 text-slate-700 px-2 py-1 rounded-md">
+            {plate}
+          </span>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function FoodStayCard({ needsFood, needsStay, days, nights }) {
+  // `needsFood === true` means the customer IS arranging food (matches
+  // the backend's `foodProvided` semantic — see booking.service.js's
+  // `foodProvided: outstation?.needsFood ?? true`), so the allowance
+  // is waived and no charge lands in the fare.
+  const customerArrangingFood = needsFood === true;
+  const customerArrangingStay = needsStay === true;
+  return (
+    <Card>
+      <p className="text-[11px] uppercase tracking-wide text-text-muted font-semibold mb-3">
+        Driver food & stay
+      </p>
+      <div className="space-y-2.5">
+        <FactRow
+          icon={Sun}
+          label="Driver's food"
+          value={
+            customerArrangingFood
+              ? 'You\u2019re arranging \u2014 no charge'
+              : `Included in fare \u00b7 ${days} day${days === 1 ? '' : 's'}`
+          }
+          tone={customerArrangingFood ? 'emerald' : 'indigo'}
+          hint={
+            customerArrangingFood
+              ? `You\u2019ll feed the driver directly for all ${days} day${days === 1 ? '' : 's'}.`
+              : `Your fare covers the driver\u2019s meals across the trip (${days} day${days === 1 ? '' : 's'}).`
+          }
+        />
+        <FactRow
+          icon={Moon}
+          label="Driver's stay"
+          value={
+            nights <= 0
+              ? 'Same-day trip \u2014 no overnight stay'
+              : customerArrangingStay
+                ? 'You\u2019re arranging \u2014 no charge'
+                : `Included in fare \u00b7 ${nights} night${nights === 1 ? '' : 's'}`
+          }
+          tone={
+            nights <= 0
+              ? 'slate'
+              : customerArrangingStay
+                ? 'emerald'
+                : 'indigo'
+          }
+          hint={
+            nights <= 0
+              ? null
+              : customerArrangingStay
+                ? `You\u2019ll host the driver overnight for all ${nights} night${nights === 1 ? '' : 's'}.`
+                : `Your fare covers the driver\u2019s lodging across the trip (${nights} night${nights === 1 ? '' : 's'}).`
+          }
+        />
+      </div>
+    </Card>
+  );
+}
+
+function FactRow({ icon: Icon, label, value, tone = 'slate', hint = null }) {
+  const palette = {
+    emerald: { bg: 'bg-emerald-50 text-emerald-700', text: 'text-emerald-800' },
+    amber: { bg: 'bg-amber-50 text-amber-700', text: 'text-amber-800' },
+    indigo: { bg: 'bg-indigo-50 text-indigo-700', text: 'text-indigo-800' },
+    slate: { bg: 'bg-slate-100 text-slate-600', text: 'text-text-muted' },
+  }[tone];
+  return (
+    <div className="flex items-start gap-3">
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${palette.bg}`}>
+        <Icon className="w-4 h-4" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[11px] uppercase tracking-wide text-text-muted">
+          {label}
+        </p>
+        <p className={`text-sm font-semibold ${palette.text}`}>{value}</p>
+        {hint && (
+          <p className="text-[11px] text-text-muted leading-snug mt-0.5">{hint}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OtpCard({ otp, status }) {
+  const label =
+    status === BOOKING_STATUS.ARRIVED
+      ? 'Read this code to your driver'
+      : 'Share at pickup';
+  const digits = String(otp).split('');
+  return (
+    <Card className="bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100">
+      <div className="flex items-start gap-3">
+        <div className="w-10 h-10 rounded-xl bg-white text-indigo-600 flex items-center justify-center shrink-0 shadow-sm">
+          <KeyRound className="w-5 h-5" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] uppercase tracking-wide text-indigo-700 font-semibold">
+            Pickup OTP
+          </p>
+          <p className="text-sm text-indigo-900 mb-2">{label}</p>
+          <div className="flex gap-1.5">
+            {digits.map((d, idx) => (
+              <span
+                key={`otp-${idx}`}
+                className="w-9 h-10 rounded-lg bg-white text-indigo-900 font-bold text-lg flex items-center justify-center shadow-sm tabular-nums"
+              >
+                {d}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function ScheduledTimelineCard({ booking }) {
+  const inPool = booking.status === BOOKING_STATUS.IN_EMERGENCY_POOL;
+  const assignAt = booking?.scheduled?.assignAt;
+  const escalateAt = booking?.scheduled?.escalateAt;
+  const enteredAt = booking?.scheduled?.emergencyPool?.enteredAt;
+  const tier = booking?.scheduled?.tier;
+  return (
+    <Card>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-[11px] uppercase tracking-wide text-text-muted font-semibold">
+          Scheduled dispatch
+        </p>
+        {tier && (
+          <span className="text-[10px] font-semibold uppercase tracking-wide bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full">
+            {tier.replace(/_/g, ' ')}
+          </span>
+        )}
+      </div>
+      <div className="space-y-2.5">
+        {inPool ? (
+          <FactRow
+            icon={AlertCircle}
+            label="Manual assignment"
+            value={
+              enteredAt
+                ? `In queue since ${formatDateTime(enteredAt)}`
+                : 'Our team is assigning a driver'
+            }
+            tone="amber"
+            hint="Drivers in your area were busy, so an operator is hand-picking one for you."
+          />
+        ) : (
+          <>
+            {assignAt && (
+              <FactRow
+                icon={Sparkles}
+                label="Driver search starts"
+                value={formatDateTime(assignAt)}
+                tone="emerald"
+                hint="We start looking a few hours before pickup so the closest, best-rated driver gets your ride."
+              />
+            )}
+            {escalateAt && (
+              <FactRow
+                icon={ShieldCheck}
+                label="Backup window"
+                value={formatDateTime(escalateAt)}
+                tone="slate"
+                hint="If we still don't have a driver by then, our team takes over and assigns one manually."
+              />
+            )}
+          </>
+        )}
+      </div>
+    </Card>
   );
 }
 

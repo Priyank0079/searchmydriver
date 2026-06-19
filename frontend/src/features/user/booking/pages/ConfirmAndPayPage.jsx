@@ -28,12 +28,20 @@ import useBookingDraftStore from '../../../../store/user/useBookingDraftStore';
 import useUserActiveBookingStore from '../../../../store/user/useUserActiveBookingStore';
 import useUserWalletStore from '../../../../store/user/useUserWalletStore';
 import { SERVICE_TYPES, SERVICE_TYPE_LABELS } from '../../../../constants/serviceTypes';
-import { BOOKING_STATUS } from '../../../../constants/bookingStatus';
+import {
+  BOOKING_STATUS,
+  mergeScheduledDispatchConfig,
+} from '../../../../constants/bookingStatus';
 import { formatPickupDateTime } from '../../../../utils/datetime';
+import { computeOutstationDuration } from '../../../../utils/outstationSchedule';
 import { getCarBrandName, getCarModelName } from '../../../../utils/vehicleCatalog';
 import FareCard from '../components/FareCard';
 import useFareEstimate from '../hooks/useFareEstimate';
 import TopupSheet from '../../wallet/components/TopupSheet';
+import DateTimePickerField from '../../../../components/inputs/DateTimePickerField';
+import { useCachedQuery } from '../../../../hooks/useCachedQuery';
+import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
+import { useUserServicePricingsStore } from '../../../../store/user/useUserPricingStore';
 
 /**
  * Combined Review + Confirm & pay screen.
@@ -84,6 +92,12 @@ const ConfirmAndPayPage = () => {
   const [shortfall, setShortfall] = useState(0);
   const [carEditOpen, setCarEditOpen] = useState(false);
   const [pickupEditOpen, setPickupEditOpen] = useState(false);
+  // Outstation has its own in-place edit dialog (a `DateTimePickerField`
+  // popup) because dumping the customer onto the hourly type page —
+  // which is where the hourly Edit confirm flow leads — would lose the
+  // outstation context entirely. Hourly stays on the existing
+  // navigate-back-to-type flow.
+  const [outstationPickupEditOpen, setOutstationPickupEditOpen] = useState(false);
   const [conflictError, setConflictError] = useState(null); // { title, message, type: 'car'|'time' }
   const [tollAckOpen, setTollAckOpen] = useState(false);
 
@@ -165,6 +179,37 @@ const ConfirmAndPayPage = () => {
   const available = Math.max(0, Math.round((balance - heldElsewhere) * 100) / 100);
   const canPay = available >= total && total > 0;
 
+  // Pull the service pricing for the active service type so we can
+  // surface the admin-configured outstation lead time on the in-place
+  // pickup edit dialog. The list is cached so this is essentially a
+  // selector — no extra request when the customer arrives from the
+  // duration page (already populated upstream).
+  const { data: pricingList } = useCachedQuery(
+    useUserServicePricingsStore,
+    buildCacheKey('user-services-active'),
+  );
+  const servicePricing = useMemo(() => {
+    const list = Array.isArray(pricingList) ? pricingList : [];
+    return list.find((s) => s.serviceType === draft.serviceType) || null;
+  }, [pricingList, draft.serviceType]);
+  const dispatchConfig = useMemo(
+    () => mergeScheduledDispatchConfig(servicePricing?.scheduledDispatch),
+    [servicePricing?.scheduledDispatch],
+  );
+  const minLeadHours = Math.max(
+    0,
+    Number(dispatchConfig.MIN_SCHEDULED_LEAD_HOURS) || 0,
+  );
+  // Lazy-snapshot the wall clock so the derived `minPickupDate` memo
+  // stays pure (Date.now is impure under react-hooks/purity). Fine to
+  // be stable for the lifetime of the page — the backend re-validates
+  // against the live clock when the user hits Pay.
+  const [nowAnchorMs] = useState(() => Date.now());
+  const minPickupDate = useMemo(
+    () => new Date(nowAnchorMs + minLeadHours * 60 * 60 * 1000),
+    [nowAnchorMs, minLeadHours],
+  );
+
   // Mandatory food acknowledgement gate (hourly only). The slab page
   // is meant to capture this, but a direct landing on /confirm — or a
   // back-nav after toggling slabs — could leave the flag stale, so we
@@ -177,29 +222,80 @@ const ConfirmAndPayPage = () => {
   const foodGateUnmet = isHourly && foodRequired && !foodAcknowledged;
   const setHourly = useBookingDraftStore((s) => s.setHourly);
 
-  // Outstation food + stay arrangement toggle — both flags flip
-  // together because the fare engine ANDs them into a single
-  // "customer arranges everything" signal. Convention is documented
-  // on the booking-draft store.
-  const customerArrangesAll =
-    isOutstation
-    && draft.outstation?.needsFood === true
-    && draft.outstation?.needsStay === true;
-  const handleArrangesToggle = useCallback(
+  // Outstation food + stay arrangement toggles — each flag is now
+  // independent (was a single combined toggle before). The fare
+  // engine waives the food allowance when `needsFood === true` and
+  // the stay allowance when `needsStay === true`, so the customer
+  // can opt into one without committing to both. For legacy pricing
+  // docs that still use the deprecated combined `allowancePerNight`
+  // the engine only waives the line when BOTH flags are true — the
+  // card surfaces that constraint in copy when it applies.
+  const foodProvided = isOutstation && draft.outstation?.needsFood === true;
+  const stayProvided = isOutstation && draft.outstation?.needsStay === true;
+  const handleFoodToggle = useCallback(
     (next) => {
-      setOutstation({
-        needsFood: next,
-        needsStay: next,
-      });
+      setOutstation({ needsFood: next });
+    },
+    [setOutstation],
+  );
+  const handleStayToggle = useCallback(
+    (next) => {
+      setOutstation({ needsStay: next });
     },
     [setOutstation],
   );
 
-  // Per-night allowance preview for the FoodStayCard subtitle —
-  // "₹X × N nights = ₹Y" so the customer sees the saving at a glance.
-  const allowancePerNight =
-    Number(estimate?.fareBreakdown?.allowancePerNight) || 0;
+  // Edit pickup time. Hourly bookings re-enter the type/duration flow
+  // (the existing confirm dialog) because changing the slab affects
+  // the fare significantly. Outstation has a much simpler shape
+  // (pickup + return only), so we open an in-place dialog that lets
+  // the customer adjust the times without losing destination/car.
+  const handleEditPickup = useCallback(() => {
+    if (isOutstation) {
+      setOutstationPickupEditOpen(true);
+    } else {
+      setPickupEditOpen(true);
+    }
+  }, [isOutstation]);
+
+  // Save handler for the outstation in-place edit dialog. Mirrors the
+  // patch the duration page applies on continue — both the new pair
+  // (`pickupAt`/`expectedReturnAt`) and the legacy `startDate`/`endDate`
+  // are written so the buildCreatePayload reads consistently. We also
+  // refresh `days` / `nights` so the trip summary chip updates without
+  // waiting on the next estimate round-trip.
+  const handleOutstationPickupSave = useCallback(
+    ({ pickupAt, expectedReturnAt }) => {
+      const { days, nights } = computeOutstationDuration(
+        pickupAt,
+        expectedReturnAt,
+      );
+      setOutstation({
+        pickupAt,
+        expectedReturnAt,
+        startDate: pickupAt,
+        endDate: expectedReturnAt,
+        days,
+        nights,
+      });
+      setOutstationPickupEditOpen(false);
+    },
+    [setOutstation],
+  );
+
+  // Allowance preview for the FoodStayCard subtitle. We pass the
+  // split food/day + stay/night line items so each toggle can show
+  // exactly "₹X × N (days|nights) = ₹Total" — the saving the user
+  // gets by flipping just that one allowance. Legacy pricing docs
+  // (combined per-night) fall back to the single deprecated line.
+  const tripDays = Number(estimate?.fareBreakdown?.days) || 0;
   const tripNights = Number(estimate?.fareBreakdown?.nights) || 0;
+  const foodAllowancePerDay =
+    Number(estimate?.fareBreakdown?.foodAllowancePerDay) || 0;
+  const stayAllowancePerNight =
+    Number(estimate?.fareBreakdown?.stayAllowancePerNight) || 0;
+  const legacyAllowancePerNight =
+    Number(estimate?.fareBreakdown?.allowancePerNight) || 0;
 
   // Actual booking creation. Split out from `handlePay` so the
   // toll/parking acknowledgement dialog can call it after the customer
@@ -342,32 +438,41 @@ const ConfirmAndPayPage = () => {
           draft={draft}
           car={selectedCar}
           onEditCar={() => setCarEditOpen(true)}
-          onEditPickup={() => setPickupEditOpen(true)}
+          onEditPickup={handleEditPickup}
         />
         {/*
-          Outstation: single all-or-nothing toggle for the customer
-          arranging the driver's food + stay themselves. Flipping it
-          patches both `needsFood` and `needsStay` on the draft, which
-          is the exact key `useFareEstimate` keys off — so the next
+          Outstation: two independent toggles for the driver's food
+          and stay arrangements. Each one patches its own
+          `needsFood` / `needsStay` flag on the draft, which is the
+          exact key `useFareEstimate` keys off — so the next
           `/auth/bookings/estimate` call (debounced ~250 ms) reflects
           the new choice and the fare card + pay CTA both update.
         */}
         {isOutstation && (
           <FoodStayCard
-            customerArrangesAll={customerArrangesAll}
-            allowancePerNight={allowancePerNight}
+            foodProvided={foodProvided}
+            stayProvided={stayProvided}
+            foodAllowancePerDay={foodAllowancePerDay}
+            stayAllowancePerNight={stayAllowancePerNight}
+            legacyAllowancePerNight={legacyAllowancePerNight}
+            days={tripDays}
             nights={tripNights}
-            onChange={handleArrangesToggle}
+            onFoodChange={handleFoodToggle}
+            onStayChange={handleStayToggle}
           />
         )}
         <FareCard estimate={estimate} estimating={estimating} error={estimateError} />
         <FareNotices estimate={estimate} />
-        {isOutstation && (
+        {isOutstation ? (
           <OutstationCancellationPolicySummary
             policy={estimate?.cancellationPolicy?.outstation}
             dailyRate={Number(estimate?.fareBreakdown?.dailyRate) || 0}
           />
-        )}
+        ) : isHourly ? (
+          <HourlyCancellationPolicySummary
+            policy={estimate?.cancellationPolicy?.hourly}
+          />
+        ) : null}
         {isHourly && foodRequired && (
           <FoodAcknowledgement
             thresholdHours={Number(
@@ -442,7 +547,7 @@ const ConfirmAndPayPage = () => {
         }}
       />
 
-      {/* Pickup time / hours change confirmation */}
+      {/* Pickup time / hours change confirmation — hourly only. */}
       <PickupTimeConfirmDialog
         open={pickupEditOpen}
         onClose={() => setPickupEditOpen(false)}
@@ -450,6 +555,27 @@ const ConfirmAndPayPage = () => {
           setPickupEditOpen(false);
           navigate('/user/book/hourly/type');
         }}
+      />
+
+      {/* Outstation in-place pickup time edit. Lets the customer
+          adjust the pickup/return without bouncing back through the
+          full flow — the scheduled-ride confirm dialog above would
+          land them on the hourly type page, which doesn't make
+          sense for outstation. */}
+      <OutstationPickupEditDialog
+        open={outstationPickupEditOpen}
+        initialPickupAt={
+          draft.outstation?.pickupAt || draft.outstation?.startDate || null
+        }
+        initialReturnAt={
+          draft.outstation?.expectedReturnAt
+            || draft.outstation?.endDate
+            || null
+        }
+        minPickupDate={minPickupDate}
+        minLeadHours={minLeadHours}
+        onClose={() => setOutstationPickupEditOpen(false)}
+        onSave={handleOutstationPickupSave}
       />
 
       {/* Conflict / validation error modal */}
@@ -462,7 +588,11 @@ const ConfirmAndPayPage = () => {
         }}
         onChangePickup={() => {
           setConflictError(null);
-          setPickupEditOpen(true);
+          if (isOutstation) {
+            setOutstationPickupEditOpen(true);
+          } else {
+            setPickupEditOpen(true);
+          }
         }}
       />
 
@@ -854,7 +984,7 @@ function TripSummary({ draft, car, onEditCar, onEditPickup }) {
               />
             )}
           </div>
-          {isHourly && onEditPickup && (
+          {onEditPickup && (
             <button
               type="button"
               onClick={onEditPickup}
@@ -1009,6 +1139,275 @@ function FactRow({ icon: Icon, label, value }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Outstation pickup edit dialog                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * In-place editor for the outstation pickup + expected-return times.
+ * Uses the shared `DateTimePickerField` so the popup matches the look
+ * of the original picker on the duration/variant pages, and enforces
+ * the same admin-configured lead-time floor (`minPickupDate`) so the
+ * backend's 422 check is never hit from this flow.
+ *
+ * Local state is reset every time the dialog opens (`open` key)
+ * because the customer might cancel and reopen — we don't want stale
+ * half-edits to leak across opens. Save is disabled until both fields
+ * are populated and `return > pickup`.
+ */
+function OutstationPickupEditDialog({
+  open,
+  initialPickupAt,
+  initialReturnAt,
+  minPickupDate,
+  minLeadHours,
+  onClose,
+  onSave,
+}) {
+  if (!open) return null;
+  return (
+    <OutstationPickupEditDialogBody
+      initialPickupAt={initialPickupAt}
+      initialReturnAt={initialReturnAt}
+      minPickupDate={minPickupDate}
+      minLeadHours={minLeadHours}
+      onClose={onClose}
+      onSave={onSave}
+    />
+  );
+}
+
+function OutstationPickupEditDialogBody({
+  initialPickupAt,
+  initialReturnAt,
+  minPickupDate,
+  minLeadHours,
+  onClose,
+  onSave,
+}) {
+  // Seed once per mount via lazy initialisers — the wrapper unmounts
+  // this body on close so re-opening starts fresh from the latest
+  // draft values. Keeps `useEffect` + setState off the hot path.
+  const [pickupAt, setPickupAt] = useState(() =>
+    sanitisePickup(initialPickupAt, minPickupDate),
+  );
+  const [expectedReturnAt, setExpectedReturnAt] = useState(() => {
+    const safePickup = sanitisePickup(initialPickupAt, minPickupDate);
+    return sanitiseReturn(initialReturnAt, safePickup);
+  });
+
+  // Derive the return floor from the picked pickup so the return
+  // picker never lets the customer choose a same-or-earlier moment.
+  // Add a 30-min buffer so the floor matches what the backend treats
+  // as a "real" outstation booking (anything shorter rounds to the
+  // same calendar day → 1 day, 0 night).
+  const minReturnDate = useMemo(() => {
+    if (!pickupAt) return minPickupDate;
+    const base = new Date(pickupAt);
+    if (Number.isNaN(base.getTime())) return minPickupDate;
+    return new Date(base.getTime() + 30 * 60 * 1000);
+  }, [pickupAt, minPickupDate]);
+
+  // Trip preview to give the customer a sense of what the change does
+  // before they commit. Mirrors the formula used downstream on save.
+  const previewDuration = useMemo(
+    () => computeOutstationDuration(pickupAt, expectedReturnAt),
+    [pickupAt, expectedReturnAt],
+  );
+
+  const handlePickupChange = (iso) => {
+    setPickupAt(iso);
+    // If the existing return is now earlier than (or equal to) the new
+    // pickup, clear it so the customer has to re-pick — keeps us out
+    // of an invalid state on save.
+    if (iso && expectedReturnAt) {
+      const newPickupMs = new Date(iso).getTime();
+      const currentReturnMs = new Date(expectedReturnAt).getTime();
+      if (
+        Number.isFinite(newPickupMs)
+        && Number.isFinite(currentReturnMs)
+        && currentReturnMs <= newPickupMs
+      ) {
+        setExpectedReturnAt(null);
+      }
+    }
+  };
+
+  const canSave = !!(pickupAt && expectedReturnAt)
+    && new Date(expectedReturnAt).getTime() > new Date(pickupAt).getTime();
+
+  // Lead-time banner: surfaces the EXACT earliest pickup the admin's
+  // `MIN_SCHEDULED_LEAD_HOURS` allows, so the customer doesn't have to
+  // mentally translate "2 hours from now" into a clock time. Hidden
+  // when lead time is zero (no useful floor to show).
+  const earliestPickupLabel = useMemo(() => {
+    if (!minPickupDate || !(minPickupDate instanceof Date)) return null;
+    if (Number.isNaN(minPickupDate.getTime())) return null;
+    return formatPickupDateTime(minPickupDate);
+  }, [minPickupDate]);
+
+  return (
+    // Mobile: full-width bottom sheet anchored to the bottom of the
+    // viewport. Desktop (≥ sm): centered floating card with a wider
+    // safety margin. The `flex` + `items-end sm:items-center` pair
+    // does the heavy lifting; we drop the outer padding entirely on
+    // mobile so the sheet stretches edge-to-edge.
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4">
+      <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl animate-fade-in-up max-h-[92dvh] sm:max-h-[90dvh] flex flex-col">
+        {/* Drag-handle: a thin pill that hints "swipe-down to dismiss"
+            on mobile. Hidden on desktop where the floating card
+            already reads as a modal. */}
+        <div className="flex justify-center pt-3 pb-1 sm:hidden">
+          <div className="w-10 h-1 rounded-full bg-gray-300" />
+        </div>
+
+        {/* Header — stays pinned to the top of the sheet so the title
+            is always visible while the body scrolls on short
+            viewports. */}
+        <div className="flex items-start gap-3 px-5 sm:px-6 pt-2 sm:pt-6 pb-4 border-b border-border-light shrink-0">
+          <div className="w-11 h-11 rounded-2xl bg-amber-100 flex items-center justify-center shrink-0">
+            <CalendarClock className="w-5 h-5 text-amber-700" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-base font-bold text-text">
+              Change pickup &amp; return
+            </p>
+            <p className="text-xs sm:text-sm text-text-secondary mt-1 leading-snug">
+              Pick a new pickup time and the day you&rsquo;d like to be
+              dropped back. Your pickup location and car stay the same.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-xl hover:bg-gray-100 text-text-muted shrink-0"
+            aria-label="Close"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Scrollable body so day chips, time slots, and the new-trip
+            preview never push the action buttons off-screen on short
+            phones. */}
+        <div className="flex-1 overflow-y-auto px-5 sm:px-6 py-4 space-y-3">
+          {/* Lead-time floor banner — shows the EXACT earliest pickup
+              moment so the customer doesn't have to compute
+              "now + N hours" themselves. The picker below independently
+              enforces the same floor by disabling any day/slot earlier
+              than this moment. */}
+          {minLeadHours > 0 && earliestPickupLabel && (
+            <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 flex items-start gap-2">
+              <Clock className="w-4 h-4 text-amber-700 mt-0.5 shrink-0" />
+              <p className="text-[12px] leading-snug text-amber-900">
+                <strong className="font-semibold">
+                  Earliest pickup: {earliestPickupLabel}.
+                </strong>{' '}
+                We need at least {formatLeadHours(minLeadHours)} between
+                booking and pickup so a driver can be assigned.
+              </p>
+            </div>
+          )}
+
+          <DateTimePickerField
+            label="Pickup date & time"
+            icon={CalendarClock}
+            value={pickupAt}
+            onChange={handlePickupChange}
+            minDate={minPickupDate}
+            placeholder="Tap to choose pickup"
+            sheetTitle="Pickup date & time"
+          />
+          <DateTimePickerField
+            label="Expected return"
+            icon={CalendarClock}
+            value={expectedReturnAt}
+            onChange={setExpectedReturnAt}
+            minDate={minReturnDate}
+            disabled={!pickupAt}
+            placeholder={
+              pickupAt ? 'Tap to choose return' : 'Pick a pickup first'
+            }
+            helper={
+              pickupAt
+                ? 'Round trip \u2014 the driver brings you back here on this date.'
+                : undefined
+            }
+            sheetTitle="Expected return"
+          />
+
+          {pickupAt && expectedReturnAt && (
+            <div className="rounded-xl bg-bg px-3 py-2 flex items-center justify-between">
+              <span className="text-xs text-text-muted">New trip length</span>
+              <span className="text-sm font-bold text-text">
+                {previewDuration.days} day
+                {previewDuration.days === 1 ? '' : 's'} {'\u00b7'}{' '}
+                {previewDuration.nights} night
+                {previewDuration.nights === 1 ? '' : 's'}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Sticky footer keeps the Save/Cancel buttons in reach on
+            small phones regardless of body scroll position. */}
+        <div className="px-5 sm:px-6 pt-3 pb-5 sm:pb-6 border-t border-border-light shrink-0 space-y-2 bg-white">
+          <Button
+            fullWidth
+            disabled={!canSave}
+            onClick={() => onSave({ pickupAt, expectedReturnAt })}
+          >
+            Save new time
+          </Button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full inline-flex items-center justify-center rounded-2xl border border-border bg-white text-text font-semibold py-3 text-sm hover:bg-gray-50 transition"
+          >
+            Keep current time
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function sanitisePickup(raw, minDate) {
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  if (minDate && d.getTime() < minDate.getTime()) return null;
+  return d.toISOString();
+}
+
+function sanitiseReturn(raw, pickupIso) {
+  if (!raw || !pickupIso) return null;
+  const r = new Date(raw);
+  const p = new Date(pickupIso);
+  if (Number.isNaN(r.getTime()) || Number.isNaN(p.getTime())) return null;
+  if (r.getTime() <= p.getTime()) return null;
+  return r.toISOString();
+}
+
+/**
+ * Mirror of the `formatLeadHours` helper used on the variant / duration
+ * pages — whole hours stay plain ("2 hours"); fractional ones drop to
+ * minutes ("90 minutes") so the customer doesn't see "1.5 hours" which
+ * reads awkwardly in this tight dialog.
+ */
+function formatLeadHours(hours) {
+  const safe = Math.max(0, Number(hours) || 0);
+  if (safe === 0) return 'a moment';
+  if (Number.isInteger(safe)) {
+    return `${safe} hour${safe === 1 ? '' : 's'}`;
+  }
+  const totalMinutes = Math.round(safe * 60);
+  if (totalMinutes < 60) return `${totalMinutes} minutes`;
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return m === 0 ? `${h} hours` : `${h}h ${m}m`;
+}
+
+/* ------------------------------------------------------------------ */
 /* Conflict Error Dialog                                                */
 /* ------------------------------------------------------------------ */
 
@@ -1100,51 +1499,184 @@ function ConflictErrorDialog({ error, onClose, onChangeCar, onChangePickup }) {
 /* ------------------------------------------------------------------ */
 
 /**
- * Single all-or-nothing toggle for the customer arranging the
- * driver's food and stay themselves. When ON, the per-night
- * allowance is waived. The subtitle line is data-driven off the
- * latest estimate so the customer sees the exact saving they'd get
- * at a glance.
+ * Two independent toggles — one for the driver's food (waived per
+ * day) and one for the driver's stay (waived per night). Each row
+ * shows the exact ₹X × N saving the customer gets by flipping it,
+ * and the running summary line at the bottom totals what the
+ * platform is currently adding to the fare.
+ *
+ * Legacy pricing docs that still use the combined `allowancePerNight`
+ * waive the line only when BOTH flags are on — we still render two
+ * toggles in that case but tell the customer they need both before
+ * the allowance drops off.
  */
-function FoodStayCard({ customerArrangesAll, allowancePerNight, nights, onChange }) {
-  const allowanceTotal = allowancePerNight * nights;
+function FoodStayCard({
+  foodProvided,
+  stayProvided,
+  foodAllowancePerDay = 0,
+  stayAllowancePerNight = 0,
+  legacyAllowancePerNight = 0,
+  days = 0,
+  nights = 0,
+  onFoodChange,
+  onStayChange,
+}) {
+  const hasSplit = foodAllowancePerDay > 0 || stayAllowancePerNight > 0;
+  const useLegacy =
+    !hasSplit && legacyAllowancePerNight > 0 && nights > 0;
+
+  // Per-row charged amounts. In split mode each toggle independently
+  // waives its own line; in legacy mode both toggles must be on or
+  // the full combined allowance still applies.
+  const foodChargedAmount = hasSplit
+    ? (foodProvided ? 0 : foodAllowancePerDay * days)
+    : 0;
+  const stayChargedAmount = hasSplit
+    ? (stayProvided ? 0 : stayAllowancePerNight * nights)
+    : 0;
+  const legacyChargedAmount = useLegacy
+    ? ((foodProvided && stayProvided) ? 0 : legacyAllowancePerNight * nights)
+    : 0;
+  const totalAllowanceCharged =
+    foodChargedAmount + stayChargedAmount + legacyChargedAmount;
+
+  // Summary copy at the bottom — shows the net allowance left on the
+  // fare so the customer always knows how their choices affect the
+  // total.
+  let summary;
+  if (foodProvided && stayProvided) {
+    summary =
+      'No driver allowance charged \u2014 you take care of meals and stay directly.';
+  } else if (totalAllowanceCharged <= 0) {
+    summary = 'No driver allowance applies on this trip.';
+  } else {
+    summary = `Driver allowance currently added: \u20B9${totalAllowanceCharged}. Toggle either row on to remove that part of the charge.`;
+  }
+
   return (
     <Card>
-      <div className="flex items-start gap-3">
-        <div className="w-9 h-9 rounded-xl bg-bg flex items-center justify-center shrink-0">
-          <HandCoins className="w-4 h-4 text-text-muted" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-text">
-            I will arrange the driver&rsquo;s food and stay
-          </p>
-          <p className="text-xs text-text-muted mt-0.5">
-            {customerArrangesAll
-              ? 'No allowance charged — you take care of meals and accommodation directly.'
-              : nights > 0 && allowancePerNight > 0
-                ? `We'll add ₹${allowancePerNight} × ${nights} night${nights === 1 ? '' : 's'} = ₹${allowanceTotal} as the driver's allowance (food + stay).`
-                : 'No allowance applies on a same-day trip.'}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => onChange(!customerArrangesAll)}
-          className={`shrink-0 w-10 h-6 rounded-full transition-colors ${customerArrangesAll ? 'bg-primary' : 'bg-gray-300'} relative`}
-          aria-pressed={customerArrangesAll}
-          aria-label="I will arrange the driver's food and stay"
-        >
-          <span
-            className={`absolute top-0.5 ${customerArrangesAll ? 'left-[18px]' : 'left-0.5'} w-5 h-5 bg-white rounded-full shadow transition-all`}
-          />
-        </button>
+      <div className="space-y-3">
+        {/* ── Food row ─────────────────────────────────────────── */}
+        <ToggleRow
+          icon={Utensils}
+          label="I will arrange the driver's food"
+          description={describeFoodRow({
+            foodProvided,
+            hasSplit,
+            useLegacy,
+            foodAllowancePerDay,
+            days,
+          })}
+          checked={foodProvided}
+          onChange={onFoodChange}
+          ariaLabel="I will arrange the driver's food"
+        />
+
+        {/* ── Stay row ─────────────────────────────────────────── */}
+        <ToggleRow
+          icon={Moon}
+          label="I will arrange the driver's stay"
+          description={describeStayRow({
+            stayProvided,
+            hasSplit,
+            useLegacy,
+            stayAllowancePerNight,
+            legacyAllowancePerNight,
+            nights,
+          })}
+          checked={stayProvided}
+          onChange={onStayChange}
+          ariaLabel="I will arrange the driver's stay"
+        />
       </div>
+
       <p className="text-[11px] text-text-muted mt-3 pt-3 border-t border-border-light">
-        Turn this on only if you can host the driver during the trip.
-        Otherwise we&rsquo;ll add a per-night allowance covering their
-        food and accommodation.
+        {summary}
+        {useLegacy && !(foodProvided && stayProvided) && (
+          <>
+            {' '}
+            <strong className="text-amber-700">
+              {'This trip uses a combined per-night allowance \u2014 both toggles must be on for it to be waived.'}
+            </strong>
+          </>
+        )}
       </p>
     </Card>
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* FoodStayCard internals                                              */
+/* ------------------------------------------------------------------ */
+
+function ToggleRow({ icon: Icon, label, description, checked, onChange, ariaLabel }) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="w-9 h-9 rounded-xl bg-bg flex items-center justify-center shrink-0">
+        <Icon className="w-4 h-4 text-text-muted" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-text">{label}</p>
+        <p className="text-xs text-text-muted mt-0.5">{description}</p>
+      </div>
+      <button
+        type="button"
+        onClick={() => onChange(!checked)}
+        className={`shrink-0 w-10 h-6 rounded-full transition-colors ${checked ? 'bg-primary' : 'bg-gray-300'} relative`}
+        aria-pressed={checked}
+        aria-label={ariaLabel}
+      >
+        <span
+          className={`absolute top-0.5 ${checked ? 'left-[18px]' : 'left-0.5'} w-5 h-5 bg-white rounded-full shadow transition-all`}
+        />
+      </button>
+    </div>
+  );
+}
+
+function describeFoodRow({
+  foodProvided,
+  hasSplit,
+  useLegacy,
+  foodAllowancePerDay,
+  days,
+}) {
+  if (foodProvided) {
+    return 'No food allowance charged \u2014 you\u2019ll feed the driver directly.';
+  }
+  if (hasSplit && foodAllowancePerDay > 0 && days > 0) {
+    const total = foodAllowancePerDay * days;
+    return `We add \u20B9${foodAllowancePerDay} \u00d7 ${days} day${days === 1 ? '' : 's'} = \u20B9${total} as the driver\u2019s food allowance.`;
+  }
+  if (useLegacy) {
+    return 'Food is bundled into this trip\u2019s combined per-night allowance.';
+  }
+  return 'No separate food allowance is configured for this trip.';
+}
+
+function describeStayRow({
+  stayProvided,
+  hasSplit,
+  useLegacy,
+  stayAllowancePerNight,
+  legacyAllowancePerNight,
+  nights,
+}) {
+  if (nights === 0) {
+    return 'Same-day trip \u2014 no overnight stay needed.';
+  }
+  if (stayProvided) {
+    return 'No stay allowance charged \u2014 you\u2019ll host the driver overnight.';
+  }
+  if (hasSplit && stayAllowancePerNight > 0) {
+    const total = stayAllowancePerNight * nights;
+    return `We add \u20B9${stayAllowancePerNight} \u00d7 ${nights} night${nights === 1 ? '' : 's'} = \u20B9${total} as the driver\u2019s stay allowance.`;
+  }
+  if (useLegacy) {
+    const total = legacyAllowancePerNight * nights;
+    return `We add \u20B9${legacyAllowancePerNight} \u00d7 ${nights} night${nights === 1 ? '' : 's'} = \u20B9${total} as the driver\u2019s combined food + stay allowance.`;
+  }
+  return 'No stay allowance is configured for this trip.';
 }
 
 /* ------------------------------------------------------------------ */
@@ -1299,6 +1831,83 @@ function OutstationCancellationPolicySummary({ policy, dailyRate }) {
             ) : (
               <>.</>
             )}
+          </span>
+        </li>
+      </ul>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* HourlyCancellationPolicySummary                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Customer-facing summary of the hourly cancellation policy. Hourly
+ * uses a STATUS-driven model (not time-driven like outstation) — the
+ * fee depends on how far the booking has progressed:
+ *
+ *   searching                          no fee, full wallet refund
+ *   driver assigned → en route         flat ₹ `flatFeeAfterAssignment`
+ *   arrived / started                  `arrivedFeeType` decides:
+ *                                        'flat'       → ₹ `arrivedFeeAmount`
+ *                                        'percentage' → % of paid fare
+ *
+ * Driven entirely off `cancellationPolicy.hourly` from the estimate so
+ * admin changes show up without redeploying the FE.
+ */
+function HourlyCancellationPolicySummary({ policy }) {
+  const cfg = policy || {};
+  const flatFee = Math.max(0, Number(cfg.flatFeeAfterAssignment) || 0);
+  const arrivedAmount = Math.max(0, Number(cfg.arrivedFeeAmount) || 0);
+  const isPct = cfg.arrivedFeeType === 'percentage';
+  const arrivedLabel = arrivedAmount > 0
+    ? isPct
+      ? `${arrivedAmount}% of the paid fare`
+      : `\u20B9${arrivedAmount}`
+    : 'no fee';
+
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        <div className="w-10 h-10 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+          <ShieldCheck className="w-5 h-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-text">Cancellation policy</p>
+          <p className="text-[11px] text-text-muted mt-0.5">
+            Depends on the booking stage when you cancel. Refunds go
+            straight back to your wallet.
+          </p>
+        </div>
+      </div>
+
+      <ul className="mt-3 space-y-2 text-[12px] text-text-secondary">
+        <li className="flex gap-2">
+          <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+          <span>
+            <strong className="text-text">Before a driver is assigned</strong>
+            {' '}&mdash; full refund, no cancellation fee.
+          </span>
+        </li>
+        <li className="flex gap-2">
+          <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+          <span>
+            <strong className="text-text">Driver assigned, not yet arrived</strong>
+            {' '}&mdash;{' '}
+            {flatFee > 0 ? (
+              <>flat <strong className="text-text">&#8377;{flatFee}</strong> mobilisation fee, the rest refunded.</>
+            ) : (
+              'no cancellation fee.'
+            )}
+          </span>
+        </li>
+        <li className="flex gap-2">
+          <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+          <span>
+            <strong className="text-text">After the driver reaches pickup</strong>
+            {' '}&mdash; {arrivedLabel}
+            {arrivedAmount > 0 ? ' is deducted, the rest refunded.' : '.'}
           </span>
         </li>
       </ul>

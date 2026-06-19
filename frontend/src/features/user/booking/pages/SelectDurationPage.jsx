@@ -9,9 +9,11 @@ import {
   RefreshCw,
   CalendarRange,
   AlertCircle,
+  CalendarClock,
 } from 'lucide-react';
 import Card from '../../../../components/Card';
 import Button from '../../../../components/Button';
+import DateTimePickerField from '../../../../components/inputs/DateTimePickerField';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
 import { useUserServicePricingsStore } from '../../../../store/user/useUserPricingStore';
@@ -19,10 +21,8 @@ import { SERVICE_TYPES } from '../../../../constants/serviceTypes';
 import useBookingDraftStore from '../../../../store/user/useBookingDraftStore';
 import {
   computeOutstationDuration,
-  defaultPickupInputValue,
-  defaultReturnInputValue,
-  toDateTimeInputValue,
 } from '../../../../utils/outstationSchedule';
+import { mergeScheduledDispatchConfig } from '../../../../constants/bookingStatus';
 
 /**
  * Step 3 — pick duration (hourly) or date range (outstation).
@@ -89,14 +89,40 @@ function HourlyBranch({ pricing, draft, onPatch, onContinue }) {
   const navigate = useNavigate();
   const slabs = pricing?.slabs || [];
   const [selectedSlabId, setSelectedSlabId] = useState(draft.slabId || slabs[0]?._id);
-  const [scheduledStartAt, setScheduledStartAt] = useState(
-    draft.scheduledStartAt || defaultIsoForInput(),
+
+  // Mirror the hourly lead-time the backend will enforce on create —
+  // skipping this floor sneaks in a "10 minutes from now" that the
+  // dispatcher can't serve.
+  const dispatchConfig = useMemo(
+    () => mergeScheduledDispatchConfig(pricing?.scheduledDispatch),
+    [pricing?.scheduledDispatch],
   );
+  const minLeadHours = Math.max(
+    0,
+    Number(dispatchConfig.MIN_SCHEDULED_LEAD_HOURS) || 0,
+  );
+  // Read the wall clock ONCE per mount so React's purity lint stays
+  // happy on the derived `minPickupDate` memo (Date.now() is impure).
+  // The backend re-validates against the live clock on Continue.
+  const [nowAnchorMs] = useState(() => Date.now());
+  const minPickupDate = useMemo(
+    () => new Date(nowAnchorMs + minLeadHours * 60 * 60 * 1000),
+    [nowAnchorMs, minLeadHours],
+  );
+
+  // Blank-by-default. We rehydrate from the draft only if the saved
+  // value is still in the valid window, otherwise force a re-confirm.
+  const [scheduledStartAt, setScheduledStartAt] = useState(() => {
+    const seed = draft.scheduledStartAt ? new Date(draft.scheduledStartAt) : null;
+    if (!seed || Number.isNaN(seed.getTime())) return null;
+    if (seed.getTime() < minPickupDate.getTime()) return null;
+    return seed.toISOString();
+  });
 
   const selectedSlab = slabs.find((s) => s._id === selectedSlabId);
 
   const handleContinue = () => {
-    if (!selectedSlab) return;
+    if (!selectedSlab || !scheduledStartAt) return;
     onPatch({
       slabId: selectedSlab._id,
       durationHours: selectedSlab.maxHours || selectedSlab.minHours,
@@ -115,13 +141,19 @@ function HourlyBranch({ pricing, draft, onPatch, onContinue }) {
 
       <div className="flex-1 p-4 space-y-4">
         <Card>
-          <label className="block text-xs font-semibold text-text-muted mb-2">Pickup time</label>
-          <input
-            type="datetime-local"
+          <DateTimePickerField
+            label="Pickup time"
+            icon={CalendarClock}
             value={scheduledStartAt}
-            min={defaultIsoForInput()}
-            onChange={(e) => setScheduledStartAt(e.target.value)}
-            className="w-full h-11 bg-gray-50 border border-border rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+            onChange={setScheduledStartAt}
+            minDate={minPickupDate}
+            placeholder="Tap to choose pickup date and time"
+            helper={
+              minLeadHours > 0
+                ? `We need at least ${formatLeadHours(minLeadHours)} between booking and pickup.`
+                : undefined
+            }
+            sheetTitle="Pickup time"
           />
         </Card>
 
@@ -184,16 +216,66 @@ function HourlyBranch({ pricing, draft, onPatch, onContinue }) {
 
 function OutstationBranch({ pricing, draft, onPatch, onContinue }) {
   const navigate = useNavigate();
-  const initialPickup =
-    toDateTimeInputValue(draft.pickupAt || draft.startDate) ||
-    defaultPickupInputValue();
-  const initialReturn =
-    toDateTimeInputValue(draft.expectedReturnAt || draft.endDate) ||
-    defaultReturnInputValue(initialPickup);
 
-  const [pickupAt, setPickupAt] = useState(initialPickup);
-  const [expectedReturnAt, setExpectedReturnAt] = useState(initialReturn);
+  // Pull the admin-configured outstation lead time. Mirrors the hourly
+  // scheduled flow — the backend enforces the same floor on create
+  // (see booking.service.js → outstation lead check). Falls back to
+  // the platform default when no override is set so the picker still
+  // works for fresh pricing docs.
+  const dispatchConfig = useMemo(
+    () => mergeScheduledDispatchConfig(pricing?.scheduledDispatch),
+    [pricing?.scheduledDispatch],
+  );
+  const minLeadHours = Math.max(0, Number(dispatchConfig.MIN_SCHEDULED_LEAD_HOURS) || 0);
+  // Lazy-snapshot the wall clock (Date.now is impure under
+  // react-hooks/purity). Floor is stable for the lifetime of the
+  // mount; backend re-validates against the live clock on Continue.
+  const [nowAnchorMs] = useState(() => Date.now());
+  const minPickupDate = useMemo(
+    () => new Date(nowAnchorMs + minLeadHours * 60 * 60 * 1000),
+    [nowAnchorMs, minLeadHours],
+  );
+
+  // Blank-by-default. Rehydrate from the draft only when the saved
+  // pickup is still in the valid window so the user re-confirms a
+  // stale-and-now-invalid time rather than silently 422-ing later.
+  const [pickupRaw, setPickupRaw] = useState(() => {
+    const raw = draft.pickupAt || draft.startDate;
+    if (!raw) return null;
+    const d = new Date(raw);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  });
+  const [expectedReturnAt, setExpectedReturnAt] = useState(() => {
+    const raw = draft.expectedReturnAt || draft.endDate;
+    if (!raw) return null;
+    const d = new Date(raw);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  });
   const [destination, setDestination] = useState(draft.destinationAddress || '');
+
+  // Derive the effective pickup from the raw draft + live lead-time
+  // floor. If pricing arrives after first paint and pushes the floor
+  // past a stale draft value, we surface "nothing picked" so the user
+  // re-confirms instead of submitting an out-of-window time.
+  const pickupAt = useMemo(() => {
+    if (!pickupRaw) return null;
+    const ms = new Date(pickupRaw).getTime();
+    if (!Number.isFinite(ms)) return null;
+    if (ms < minPickupDate.getTime()) return null;
+    return pickupRaw;
+  }, [pickupRaw, minPickupDate]);
+
+  // Expected return must come AFTER the chosen pickup — feed the
+  // picker the pickup moment as its min so the day-strip self-disables
+  // anything earlier. We give it a 30-minute cushion so same-day round
+  // trips don't get rejected at exactly the same minute as pickup.
+  const minReturnDate = useMemo(() => {
+    if (!pickupAt) return null;
+    const ms = new Date(pickupAt).getTime();
+    if (!Number.isFinite(ms)) return null;
+    return new Date(ms + 30 * 60 * 1000);
+  }, [pickupAt]);
+
   // Single all-or-nothing toggle: the customer commits to arranging
   // BOTH the driver's food AND stay themselves to skip the per-night
   // allowance. We mirror the boolean into both `needsFood` and
@@ -203,27 +285,29 @@ function OutstationBranch({ pricing, draft, onPatch, onContinue }) {
   const [customerArrangesAll, setCustomerArrangesAll] = useState(initialArranges);
 
   // Days = number of distinct calendar dates the trip spans; nights =
-  // days \u2212 1. Shared with the backend so the provisional fare
-  // here matches the server's authoritative breakdown on Review.
-  const { days, nights } = useMemo(
-    () => computeOutstationDuration(pickupAt, expectedReturnAt),
-    [pickupAt, expectedReturnAt],
-  );
+  // days − 1. Shared with the backend so the provisional fare here
+  // matches the server's authoritative breakdown on Review. Falls back
+  // to a 0-day "no trip yet" state until both pickers are filled.
+  const { days, nights } = useMemo(() => {
+    if (!pickupAt || !expectedReturnAt) return { days: 0, nights: 0 };
+    return computeOutstationDuration(pickupAt, expectedReturnAt);
+  }, [pickupAt, expectedReturnAt]);
 
-  // Auto-bump return when pickup pushes past it; keeps the diff
+  // Auto-clear return when pickup pushes past it; keeps the diff
   // non-negative without forcing a separate validation message.
-  const onPickupChange = (value) => {
-    setPickupAt(value);
+  const onPickupChange = (iso) => {
+    setPickupRaw(iso);
     if (
-      value &&
+      iso &&
       expectedReturnAt &&
-      new Date(value).getTime() >= new Date(expectedReturnAt).getTime()
+      new Date(iso).getTime() >= new Date(expectedReturnAt).getTime()
     ) {
-      setExpectedReturnAt(defaultReturnInputValue(value));
+      setExpectedReturnAt(null);
     }
   };
 
   const handleContinue = () => {
+    if (!pickupAt || !expectedReturnAt) return;
     const pickupIso = new Date(pickupAt).toISOString();
     const returnIso = new Date(expectedReturnAt).toISOString();
     // Both flags flip together so the backend's AND check waives the
@@ -245,15 +329,37 @@ function OutstationBranch({ pricing, draft, onPatch, onContinue }) {
   };
 
   // Inline provisional breakdown — same math the server-side
-  // calculateOutstationFare uses (pre-platform subtotal). The
-  // customer sees the full breakdown with GST + service charge on
-  // the Review screen.
+  // calculateOutstationFare uses (pre-platform subtotal). Food
+  // allowance scales with days, stay allowance with nights, and the
+  // single "I'll arrange food + stay" toggle waives both in lockstep.
+  // Legacy pricing docs (combined `allowancePerNight`, both split
+  // fields zero) fall back to the old per-night line.
   const o = pricing?.outstation || {};
   const dailyRate = Number(o.dailyRate) || 0;
-  const allowancePerNight = Number(o.allowancePerNight) || 0;
+  const foodAllowancePerDay = Number(o.foodAllowancePerDay) || 0;
+  const stayAllowancePerNight = Number(o.stayAllowancePerNight) || 0;
+  const legacyAllowancePerNight = Number(o.allowancePerNight) || 0;
+  const useLegacyAllowance =
+    foodAllowancePerDay <= 0 &&
+    stayAllowancePerNight <= 0 &&
+    legacyAllowancePerNight > 0;
 
   const lineDaily = dailyRate * days;
-  const lineAllowance = customerArrangesAll ? 0 : allowancePerNight * nights;
+  const lineFood = useLegacyAllowance
+    ? 0
+    : customerArrangesAll
+      ? 0
+      : foodAllowancePerDay * days;
+  const lineStay = useLegacyAllowance
+    ? 0
+    : customerArrangesAll
+      ? 0
+      : stayAllowancePerNight * nights;
+  const lineLegacyAllowance =
+    useLegacyAllowance && !customerArrangesAll
+      ? legacyAllowancePerNight * nights
+      : 0;
+  const lineAllowance = lineFood + lineStay + lineLegacyAllowance;
   const provisionalTotal = lineDaily + lineAllowance;
 
   return (
@@ -270,7 +376,7 @@ function OutstationBranch({ pricing, draft, onPatch, onContinue }) {
           <p className="text-[12px] leading-snug text-primary/90">
             <strong className="font-semibold">Round trip:</strong> the driver
             stays with you the whole trip and brings you back to your pickup
-            on day {days}.
+            {days >= 1 ? ` on day ${days}` : ''}.
           </p>
         </div>
 
@@ -286,41 +392,53 @@ function OutstationBranch({ pricing, draft, onPatch, onContinue }) {
         </Card>
 
         <Card>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-text-muted mb-2">
-                Pickup time
-              </label>
-              <input
-                type="datetime-local"
-                value={pickupAt}
-                min={defaultPickupInputValue()}
-                onChange={(e) => onPickupChange(e.target.value)}
-                className="w-full h-11 bg-gray-50 border border-border rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-text-muted mb-2">
-                Expected return
-              </label>
-              <input
-                type="datetime-local"
-                value={expectedReturnAt}
-                min={pickupAt}
-                onChange={(e) => setExpectedReturnAt(e.target.value)}
-                className="w-full h-11 bg-gray-50 border border-border rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-              />
-            </div>
+          <div className="space-y-3">
+            <DateTimePickerField
+              label="Pickup date & time"
+              icon={CalendarClock}
+              value={pickupAt}
+              onChange={onPickupChange}
+              minDate={minPickupDate}
+              placeholder="Tap to choose pickup"
+              helper={
+                minLeadHours > 0
+                  ? `We need at least ${formatLeadHours(minLeadHours)} between booking and pickup so a driver can be assigned.`
+                  : undefined
+              }
+              sheetTitle="Pickup date & time"
+            />
+            <DateTimePickerField
+              label="Expected return"
+              icon={CalendarClock}
+              value={expectedReturnAt}
+              onChange={setExpectedReturnAt}
+              minDate={minReturnDate}
+              disabled={!pickupAt}
+              placeholder={pickupAt ? 'Tap to choose return' : 'Pick a pickup first'}
+              helper={
+                pickupAt
+                  ? 'Round trip — the driver brings you back here on this date.'
+                  : undefined
+              }
+              sheetTitle="Expected return"
+            />
           </div>
-          <div className="mt-3 flex items-center justify-between bg-bg rounded-xl px-3 py-2">
-            <span className="text-xs text-text-muted inline-flex items-center gap-1.5">
-              <CalendarRange className="w-3.5 h-3.5" />
-              Trip length
-            </span>
-            <span className="text-sm font-bold text-text">
-              {days} day{days > 1 ? 's' : ''} · {nights} night{nights === 1 ? '' : 's'}
-            </span>
-          </div>
+          {pickupAt && expectedReturnAt ? (
+            <div className="mt-3 flex items-center justify-between bg-bg rounded-xl px-3 py-2">
+              <span className="text-xs text-text-muted inline-flex items-center gap-1.5">
+                <CalendarRange className="w-3.5 h-3.5" />
+                Trip length
+              </span>
+              <span className="text-sm font-bold text-text">
+                {days} day{days > 1 ? 's' : ''} · {nights} night{nights === 1 ? '' : 's'}
+              </span>
+            </div>
+          ) : (
+            <p className="mt-3 text-[11px] text-text-muted inline-flex items-center gap-1.5">
+              <AlertCircle className="w-3.5 h-3.5" />
+              Pick both a pickup and return so we can size the trip.
+            </p>
+          )}
         </Card>
 
         <Card>
@@ -330,52 +448,73 @@ function OutstationBranch({ pricing, draft, onPatch, onContinue }) {
           <ToggleRow
             icon={HandCoins}
             label="I will arrange the driver's food and stay"
-            description={
-              customerArrangesAll
-                ? 'No allowance charged \u2014 you take care of meals and accommodation directly.'
-                : nights > 0 && allowancePerNight > 0
-                ? `We'll add \u20B9${allowancePerNight} \u00d7 ${nights} night${nights === 1 ? '' : 's'} = \u20B9${lineAllowance} as the driver's allowance (food + stay).`
-                : 'No allowance applies on a same-day trip.'
-            }
+            description={describeAllowance({
+              customerArrangesAll,
+              useLegacyAllowance,
+              days,
+              nights,
+              foodAllowancePerDay,
+              stayAllowancePerNight,
+              legacyAllowancePerNight,
+              lineFood,
+              lineStay,
+              lineLegacyAllowance,
+            })}
             value={customerArrangesAll}
             onChange={(v) => setCustomerArrangesAll(v)}
           />
           <p className="text-[11px] text-text-muted mt-3 pt-3 border-t border-border-light">
-            Turn this on only if you can host the driver for the trip.
-            Otherwise we&rsquo;ll add a per-night allowance covering
-            their food and accommodation.
+            Turn this on only if you can feed and host the driver for
+            the trip. Otherwise we&rsquo;ll add a daily food allowance
+            plus a per-night stay allowance.
           </p>
         </Card>
 
         {/* Provisional breakdown so the user sees how the number is
             built before they reach the Review page (which shows the
-            authoritative server-computed breakdown). */}
-        <Card>
-          <h3 className="text-sm font-semibold text-text mb-3">
-            Provisional fare
-          </h3>
-          <div className="space-y-1.5 text-sm">
-            <MiniRow
-              label={`Daily rate \u00d7 ${days} day${days === 1 ? '' : 's'}`}
-              value={`\u20B9${lineDaily}`}
-            />
-            {lineAllowance > 0 && (
+            authoritative server-computed breakdown). Only meaningful
+            once both dates are picked — until then we keep the page
+            quiet rather than showing a fake "0 days · ₹0" total. */}
+        {days >= 1 && (
+          <Card>
+            <h3 className="text-sm font-semibold text-text mb-3">
+              Provisional fare
+            </h3>
+            <div className="space-y-1.5 text-sm">
               <MiniRow
-                label={`Driver allowance \u00d7 ${nights} night${nights === 1 ? '' : 's'}`}
-                value={`\u20B9${lineAllowance}`}
+                label={`Daily rate \u00d7 ${days} day${days === 1 ? '' : 's'}`}
+                value={`\u20B9${lineDaily}`}
               />
-            )}
-            <div className="h-px bg-border-light my-1" />
-            <MiniRow
-              label="Subtotal (excl. taxes)"
-              value={`\u20B9${provisionalTotal}`}
-              highlight
-            />
-            <p className="text-[11px] text-text-muted">
-              Service charge and GST are added on the next screen.
-            </p>
-          </div>
-        </Card>
+              {lineFood > 0 && (
+                <MiniRow
+                  label={`Driver food \u00d7 ${days} day${days === 1 ? '' : 's'}`}
+                  value={`\u20B9${lineFood}`}
+                />
+              )}
+              {lineStay > 0 && (
+                <MiniRow
+                  label={`Driver stay \u00d7 ${nights} night${nights === 1 ? '' : 's'}`}
+                  value={`\u20B9${lineStay}`}
+                />
+              )}
+              {lineLegacyAllowance > 0 && (
+                <MiniRow
+                  label={`Driver allowance \u00d7 ${nights} night${nights === 1 ? '' : 's'}`}
+                  value={`\u20B9${lineLegacyAllowance}`}
+                />
+              )}
+              <div className="h-px bg-border-light my-1" />
+              <MiniRow
+                label="Subtotal (excl. taxes)"
+                value={`\u20B9${provisionalTotal}`}
+                highlight
+              />
+              <p className="text-[11px] text-text-muted">
+                Service charge and GST are added on the next screen.
+              </p>
+            </div>
+          </Card>
+        )}
 
         {/* Toll & parking are paid by the customer directly to the
             driver \u2014 not part of the booking fare. Surfaced here
@@ -394,13 +533,39 @@ function OutstationBranch({ pricing, draft, onPatch, onContinue }) {
 
       <Footer
         primaryLabel="Continue"
-        priceLabel={`\u20B9${provisionalTotal}`}
+        priceLabel={days >= 1 ? `\u20B9${provisionalTotal}` : `\u20B9—`}
         priceHint="Provisional"
         onClick={handleContinue}
-        disabled={!destination.trim() || !pickupAt || !expectedReturnAt || days < 1}
+        disabled={
+          !destination.trim() ||
+          !pickupAt ||
+          !expectedReturnAt ||
+          days < 1
+        }
       />
     </div>
   );
+}
+
+/**
+ * Compact human label for the configured lead time. Whole hours stay
+ * plain ("2 hours"), fractional ones surface in minutes ("90 minutes")
+ * so the customer doesn't see "1.5 hours" which reads awkwardly next
+ * to the date picker.
+ */
+function formatLeadHours(hours) {
+  const safe = Math.max(0, Number(hours) || 0);
+  if (safe === 0) return 'a moment';
+  if (Number.isInteger(safe)) {
+    return `${safe} hour${safe === 1 ? '' : 's'}`;
+  }
+  const totalMinutes = Math.round(safe * 60);
+  if (totalMinutes < 60) {
+    return `${totalMinutes} minutes`;
+  }
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return m === 0 ? `${h} hours` : `${h}h ${m}m`;
 }
 
 function MiniRow({ label, value, highlight }) {
@@ -414,6 +579,53 @@ function MiniRow({ label, value, highlight }) {
       <span>{value}</span>
     </div>
   );
+}
+
+/**
+ * Subtitle for the outstation food + stay toggle. Mirrors the
+ * ConfirmAndPayPage copy so the customer sees the same breakdown on
+ * both screens: "₹A × D days food + ₹B × N nights stay = ₹Total"
+ * when the platform is paying, or "No allowance charged" once the
+ * customer opts in. Legacy pricing docs fall back to the old
+ * combined per-night line.
+ */
+function describeAllowance({
+  customerArrangesAll,
+  useLegacyAllowance,
+  days,
+  nights,
+  foodAllowancePerDay,
+  stayAllowancePerNight,
+  legacyAllowancePerNight,
+  lineFood,
+  lineStay,
+  lineLegacyAllowance,
+}) {
+  if (customerArrangesAll) {
+    return 'No allowance charged \u2014 you take care of the driver\u2019s meals and stay directly.';
+  }
+  if (useLegacyAllowance) {
+    if (nights > 0 && legacyAllowancePerNight > 0) {
+      return `We\u2019ll add \u20B9${legacyAllowancePerNight} \u00d7 ${nights} night${nights === 1 ? '' : 's'} = \u20B9${lineLegacyAllowance} as the driver\u2019s allowance (food + stay).`;
+    }
+    return 'No allowance applies on a same-day trip.';
+  }
+  const parts = [];
+  if (lineFood > 0) {
+    parts.push(
+      `\u20B9${foodAllowancePerDay} \u00d7 ${days} day${days === 1 ? '' : 's'} food`,
+    );
+  }
+  if (lineStay > 0) {
+    parts.push(
+      `\u20B9${stayAllowancePerNight} \u00d7 ${nights} night${nights === 1 ? '' : 's'} stay`,
+    );
+  }
+  if (!parts.length) {
+    return 'No driver allowance applies on this trip.';
+  }
+  const total = lineFood + lineStay;
+  return `We\u2019ll add ${parts.join(' + ')} = \u20B9${total} as the driver\u2019s allowance.`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -472,15 +684,6 @@ function ToggleRow({ icon: Icon, label, description, value, onChange }) {
       </button>
     </div>
   );
-}
-
-function pad(n) {
-  return String(n).padStart(2, '0');
-}
-
-function defaultIsoForInput() {
-  const d = new Date(Date.now() + 30 * 60 * 1000);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export default SelectDurationPage;

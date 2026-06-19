@@ -50,6 +50,7 @@ import {
   driverCompleteTrip,
   driverCancelBooking,
   driverDismissBookingExtension,
+  rateCustomerByDriver,
 } from '../controllers/booking.controller.js';
 
 const router = express.Router();
@@ -118,5 +119,8 @@ router.post(
   protectDriver,
   driverDismissBookingExtension,
 );
+// Post-trip rating — driver rates the customer they just drove.
+// Once-only; a duplicate submit hits 409 from the service.
+router.post('/bookings/:id/rate-customer', protectDriver, rateCustomerByDriver);
 
 export default router;

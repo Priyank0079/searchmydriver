@@ -70,7 +70,6 @@ const HourlySlabSelectionPage = lazy(
 );
 
 // User Tracking
-const DriverOnWayPage = lazy(() => import('./features/user/tracking/pages/DriverOnWayPage'));
 const DriverReachedPage = lazy(() => import('./features/user/tracking/pages/DriverReachedPage'));
 const TripInProgressPage = lazy(() => import('./features/user/tracking/pages/TripInProgressPage'));
 const TripCompletedPage = lazy(() => import('./features/user/tracking/pages/TripCompletedPage'));
@@ -227,7 +226,6 @@ function App() {
           <Route path="/user/book/assigned/:id" element={<DriverAssignedPage />} />
 
           {/* ========== User Tracking Flow ========== */}
-          <Route path="/user/tracking/on-way" element={<DriverOnWayPage />} />
           <Route path="/user/tracking/reached" element={<DriverReachedPage />} />
           <Route path="/user/tracking/in-progress" element={<TripInProgressPage />} />
           <Route path="/user/tracking/completed" element={<TripCompletedPage />} />

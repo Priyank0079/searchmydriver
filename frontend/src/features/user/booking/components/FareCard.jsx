@@ -41,16 +41,40 @@ function buildOutstationRows(bd) {
   const days = Number(bd.days) || 1;
   const nights = Number(bd.nights) || 0;
   const dailyRate = Number(bd.dailyRate) || 0;
-  const allowancePerNight = Number(bd.allowancePerNight) || 0;
+  const foodPerDay = Number(bd.foodAllowancePerDay) || 0;
+  const stayPerNight = Number(bd.stayAllowancePerNight) || 0;
+  const foodTotal = Number(bd.foodAllowanceTotal) || 0;
+  const stayTotal = Number(bd.stayAllowanceTotal) || 0;
+  const legacyAllowancePerNight = Number(bd.allowancePerNight) || 0;
+  const legacyAllowanceTotal = Number(bd.legacyAllowanceTotal) || 0;
   return [
     [
       `Daily rate ${rupees(dailyRate)} \u00d7 ${days} day${days === 1 ? '' : 's'}`,
       bd.dailyRateTotal,
     ],
+    // Per-day food (new model). Suppress when admin hasn't configured
+    // it or the customer opted to feed the driver themselves.
     [
-      `Driver allowance ${rupees(allowancePerNight)} \u00d7 ${nights} night${nights === 1 ? '' : 's'}`,
-      bd.allowanceTotal,
-      !(nights > 0 && allowancePerNight > 0 && (Number(bd.allowanceTotal) || 0) > 0),
+      `Driver food ${rupees(foodPerDay)} \u00d7 ${days} day${days === 1 ? '' : 's'}`,
+      foodTotal,
+      !(foodPerDay > 0 && foodTotal > 0),
+    ],
+    // Per-night stay (new model). Same suppression rules.
+    [
+      `Driver stay ${rupees(stayPerNight)} \u00d7 ${nights} night${nights === 1 ? '' : 's'}`,
+      stayTotal,
+      !(nights > 0 && stayPerNight > 0 && stayTotal > 0),
+    ],
+    // Legacy combined allowance — only renders when the pricing doc
+    // hasn't migrated to the split fields (both new fields are 0).
+    [
+      `Driver allowance ${rupees(legacyAllowancePerNight)} \u00d7 ${nights} night${nights === 1 ? '' : 's'}`,
+      legacyAllowanceTotal,
+      !(
+        nights > 0 &&
+        legacyAllowancePerNight > 0 &&
+        legacyAllowanceTotal > 0
+      ),
     ],
   ];
 }

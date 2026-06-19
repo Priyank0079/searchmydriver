@@ -21,7 +21,7 @@ import { BOOKING_TYPE } from '../../constants/bookingStatus';
 
 const DEFAULT_STATE = {
   serviceType: null,
-  /** 'instant' or 'scheduled' — picked on the first hourly screen. */
+  /** 'instant', 'scheduled', or 'outstation' — picked/derived by booking flow. */
   bookingType: null,
   pickup: null, // { address, city, lat, lng }
   dropoff: null, // { address, city, lat, lng }
@@ -96,7 +96,7 @@ const useBookingDraftStore = create(
       },
 
       setBookingType(bookingType) {
-        if (![BOOKING_TYPE.INSTANT, BOOKING_TYPE.SCHEDULED].includes(bookingType)) return;
+        if (![BOOKING_TYPE.INSTANT, BOOKING_TYPE.SCHEDULED, BOOKING_TYPE.OUTSTATION].includes(bookingType)) return;
         set({ bookingType });
       },
 
@@ -170,7 +170,13 @@ const useBookingDraftStore = create(
 
         const payload = {
           serviceType: s.serviceType,
-          bookingType: s.bookingType || BOOKING_TYPE.INSTANT,
+          // For outstation always send the outstation booking type —
+          // the backend also enforces this override, but sending it
+          // from the client keeps both sides consistent.
+          bookingType:
+            s.serviceType === SERVICE_TYPES.OUTSTATION
+              ? BOOKING_TYPE.OUTSTATION
+              : s.bookingType || BOOKING_TYPE.INSTANT,
           carId: s.carId || null,
           pickup: pickupPayload,
           dropoff: dropoffPayload,

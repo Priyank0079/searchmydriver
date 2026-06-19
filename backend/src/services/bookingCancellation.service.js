@@ -71,28 +71,23 @@ const ARRIVED_OR_LATER_STATUSES = new Set([
 ]);
 
 /**
- * Look up the cancellation knobs for the booking's service. Falls back to
- * the schema defaults if no `ServicePricing` doc is configured yet
- * (otherwise a missing config silently turns every cancel into "free").
+ * Pure normaliser for the hourly (status-driven) cancellation knobs on
+ * `ServicePricing.cancellation`. Centralised so the booking flow and
+ * the pricing-estimate response can both read a consistent shape —
+ * the customer-facing summary on /user/book/confirm reuses this via
+ * `cancellationPolicy.hourly` in the estimate payload.
+ *
+ * Tolerates legacy fields (`flatFeeAfterArrival`, `arrivedFeePercent`)
+ * so older saved docs keep loading.
  */
-export async function loadCancellationPolicy(serviceType) {
-  if (!serviceType) return { ...DEFAULT_POLICY };
-  const pricing = await ServicePricing.findOne({
-    serviceType,
-    isActive: true,
-  }).lean();
-  const cfg = pricing?.cancellation || {};
-  // Type of the arrived-stage fee. Falls back to the legacy
-  // `arrivedFeePercent` knob (interpreting it as 'percentage' if
-  // someone set it on an older doc), then to 'flat'.
+export function normaliseHourlyPolicy(raw) {
+  const cfg = raw || {};
   const arrivedFeeType =
     cfg.arrivedFeeType === 'percentage' || cfg.arrivedFeeType === 'flat'
       ? cfg.arrivedFeeType
       : Number(cfg.arrivedFeePercent) > 0
         ? 'percentage'
         : DEFAULT_POLICY.arrivedFeeType;
-  // Amount of the arrived-stage fee. Prefers the new `arrivedFeeAmount`,
-  // else legacy `flatFeeAfterArrival` (flat) / `arrivedFeePercent` (%).
   const arrivedFeeAmount =
     typeof cfg.arrivedFeeAmount === 'number'
       ? cfg.arrivedFeeAmount
@@ -122,6 +117,23 @@ export async function loadCancellationPolicy(serviceType) {
       typeof cfg.driverDailyFreeCancellations === 'number'
         ? Math.max(0, cfg.driverDailyFreeCancellations)
         : DEFAULT_POLICY.driverDailyFreeCancellations,
+  };
+}
+
+/**
+ * Look up the cancellation knobs for the booking's service. Falls back to
+ * the schema defaults if no `ServicePricing` doc is configured yet
+ * (otherwise a missing config silently turns every cancel into "free").
+ */
+export async function loadCancellationPolicy(serviceType) {
+  if (!serviceType) return { ...DEFAULT_POLICY };
+  const pricing = await ServicePricing.findOne({
+    serviceType,
+    isActive: true,
+  }).lean();
+  const cfg = pricing?.cancellation || {};
+  return {
+    ...normaliseHourlyPolicy(cfg),
     // Outstation has its own TIME-driven policy. Always present (filled
     // with the schema defaults when the admin hasn't customised it) so
     // every downstream caller can read `policy.outstation.<knob>`

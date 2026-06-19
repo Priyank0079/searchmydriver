@@ -192,7 +192,7 @@ function zoneScopeForStaff(staff) {
  * pagination envelope used by other admin list endpoints.
  */
 export async function listEmergencyPoolBookingsService({ staff, query = {} }) {
-  const { page = 1, limit = 20, search } = query;
+  const { page = 1, limit = 20, search, zoneId, bookingType, dateFrom, dateTo } = query;
   const skip = (Math.max(1, parseInt(page, 10)) - 1) * parseInt(limit, 10);
 
   const filter = {
@@ -200,6 +200,7 @@ export async function listEmergencyPoolBookingsService({ staff, query = {} }) {
     isDeleted: false,
   };
 
+  // Staff scope — team_members only see their assigned zones.
   const scope = zoneScopeForStaff(staff);
   if (scope !== null) {
     if (!scope.length) {
@@ -208,12 +209,49 @@ export async function listEmergencyPoolBookingsService({ staff, query = {} }) {
     filter.zoneIds = { $in: scope };
   }
 
+  // Optional zone filter (UI dropdown — must be within the staff scope for
+  // team_members, or any zone for admins).
+  if (zoneId) {
+    try {
+      const zoneObj = new mongoose.Types.ObjectId(String(zoneId));
+      if (filter.zoneIds?.$in) {
+        const allowed = filter.zoneIds.$in.map(String);
+        if (allowed.includes(String(zoneObj))) {
+          filter.zoneIds = { $in: [zoneObj] };
+        } else {
+          return { bookings: [], total: 0, page: parseInt(page, 10), pages: 0 };
+        }
+      } else {
+        filter.zoneIds = { $in: [zoneObj] };
+      }
+    } catch { /* ignore bad id */ }
+  }
+
   if (search) {
     const isObjectId = /^[0-9a-fA-F]{24}$/.test(search);
     filter.$or = [
       { bookingNumber: { $regex: search, $options: 'i' } },
       ...(isObjectId ? [{ _id: search }] : []),
     ];
+  }
+
+  if (bookingType) {
+    filter.bookingType = bookingType;
+  }
+
+  if (dateFrom || dateTo) {
+    filter['hourly.scheduledStartAt'] = {};
+    if (dateFrom) {
+      const d = new Date(dateFrom);
+      if (!Number.isNaN(d.getTime())) filter['hourly.scheduledStartAt'].$gte = d;
+    }
+    if (dateTo) {
+      const d = new Date(dateTo);
+      if (!Number.isNaN(d.getTime())) filter['hourly.scheduledStartAt'].$lte = d;
+    }
+    if (Object.keys(filter['hourly.scheduledStartAt']).length === 0) {
+      delete filter['hourly.scheduledStartAt'];
+    }
   }
 
   const [bookings, total] = await Promise.all([
@@ -387,32 +425,102 @@ export async function adminAssignDriverToEmergencyPoolService(
 }
 
 /**
- * Helper for the admin "assign driver" picker — returns the approved,
- * non-on-trip, online-ish drivers ordered by experience. Pure query;
- * the picker can fan out a more sophisticated geo search later.
+ * Helper for the admin "Schedule Pool" driver picker.
+ *
+ * Drivers are sorted by geo-distance from the booking's pickup
+ * coordinates (closest first) so the admin sees the most relevant
+ * candidates at the top. Falls back to the flat online→rating sort
+ * when the booking has no valid coordinates.
+ *
+ * Returns a paginated envelope: { drivers, total, page }.
+ * Each driver row has an extra `distanceKm` field (null when no geo).
  */
 export async function listAvailableDriversForAssignmentService({
   carTypeId,
-  limit = 50,
+  pickupCoords,   // { lng, lat } from booking.pickup
+  page = 1,
+  limit = 20,
 } = {}) {
-  const match = {
+  const pageNum = Math.max(1, parseInt(page, 10));
+  const limitNum = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
+  const skip = (pageNum - 1) * limitNum;
+
+  const hasGeo =
+    pickupCoords &&
+    Number.isFinite(pickupCoords.lng) &&
+    Number.isFinite(pickupCoords.lat) &&
+    !(pickupCoords.lng === 0 && pickupCoords.lat === 0);
+
+  // Base match conditions shared by both geo + flat paths.
+  const matchStage = {
     approvalStatus: 'approved',
     isDeleted: { $ne: true },
     isOnTrip: false,
   };
   if (carTypeId) {
     try {
-      match.carTypeExperience = new mongoose.Types.ObjectId(String(carTypeId));
-    } catch {
-      // ignore — bad id just means no car-type filter
-    }
+      matchStage.carTypeExperience = new mongoose.Types.ObjectId(String(carTypeId));
+    } catch { /* ignore bad id */ }
   }
-  const drivers = await Driver.find(match)
-    .select('name phone_no rating experienceYears isOnline location lastLocationAt')
-    .sort({ isOnline: -1, rating: -1, experienceYears: -1 })
-    .limit(Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200))
-    .lean();
-  return drivers;
+
+  if (hasGeo) {
+    // $geoNear must be the first stage in an aggregation pipeline.
+    // It injects a `distanceMeters` field that we convert to km.
+    const pipeline = [
+      {
+        $geoNear: {
+          near: { type: 'Point', coordinates: [pickupCoords.lng, pickupCoords.lat] },
+          distanceField: 'distanceMeters',
+          spherical: true,
+          // No maxDistance cap — admin may need far-away drivers in emergencies.
+          query: matchStage,
+        },
+      },
+      {
+        $addFields: {
+          distanceKm: { $round: [{ $divide: ['$distanceMeters', 1000] }, 1] },
+        },
+      },
+      {
+        $project: {
+          name: 1,
+          phone_no: 1,
+          rating: 1,
+          experienceYears: 1,
+          isOnline: 1,
+          location: 1,
+          lastLocationAt: 1,
+          distanceKm: 1,
+          distanceMeters: 1,
+        },
+      },
+      // Count facet for total (before skip/limit).
+      {
+        $facet: {
+          data: [{ $skip: skip }, { $limit: limitNum }],
+          count: [{ $count: 'n' }],
+        },
+      },
+    ];
+
+    const [result] = await Driver.aggregate(pipeline);
+    const drivers = result?.data || [];
+    const total = result?.count?.[0]?.n || 0;
+    return { drivers, total, page: pageNum, hasGeo: true };
+  }
+
+  // Flat fallback — no valid pickup coordinates.
+  const [drivers, total] = await Promise.all([
+    Driver.find(matchStage)
+      .select('name phone_no rating experienceYears isOnline location lastLocationAt')
+      .sort({ isOnline: -1, rating: -1, experienceYears: -1 })
+      .skip(skip)
+      .limit(limitNum)
+      .lean()
+      .then((rows) => rows.map((d) => ({ ...d, distanceKm: null }))),
+    Driver.countDocuments(matchStage),
+  ]);
+  return { drivers, total, page: pageNum, hasGeo: false };
 }
 
 /**

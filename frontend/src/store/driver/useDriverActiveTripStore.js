@@ -91,6 +91,16 @@ const useDriverActiveTripStore = create((set, get) => ({
     if (Array.isArray(patch.extensions)) {
       merged.extensions = patch.extensions;
     }
+    // Rating patch — surfaced when the customer rates this driver so
+    // the driver app can show "Customer rated you ⭐ 5" badges without
+    // a refetch. Merged shallow so a customer-only patch doesn't drop
+    // any driver-side rating already on the booking.
+    if (patch.rating) {
+      merged.rating = {
+        ...(current.rating || {}),
+        ...patch.rating,
+      };
+    }
     set({ booking: merged });
   },
 
@@ -193,6 +203,24 @@ const useDriverActiveTripStore = create((set, get) => ({
       'extensions/dismiss',
       { extensionId },
     );
+  },
+
+  /**
+   * Driver submits a 1–5 star rating + optional review for the
+   * customer they just drove. Once-only — a second submit hits 409
+   * from the backend. The store keeps the response booking around so
+   * the rating page can display the captured value.
+   */
+  async rateCustomer({ stars, review = '' } = {}) {
+    const id = get().booking?._id;
+    if (!id) throw new Error('No active trip');
+    const res = await api.post(`/driver/bookings/${id}/rate-customer`, {
+      stars,
+      review,
+    });
+    const data = res?.data?.data || {};
+    if (data.booking) set({ booking: data.booking });
+    return data;
   },
 }));
 

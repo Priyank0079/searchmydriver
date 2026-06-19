@@ -17,7 +17,11 @@ const paymentSchema = new mongoose.Schema(
     razorpayPaymentId: { type: String },
     razorpaySignature: { type: String },
 
-    amount: { type: Number, required: true, min: 1 },
+    // `min: 0` rather than `min: 1` because internal wallet credits
+    // (trip-fare / allowance settlements) can validly be sub-rupee on
+    // tiny fares — and even if they aren't, the upstream guards
+    // already filter zero-rupee rows out before we ever get here.
+    amount: { type: Number, required: true, min: 0 },
     currency: { type: String, default: 'INR' },
 
     status: {
@@ -29,6 +33,16 @@ const paymentSchema = new mongoose.Schema(
     failureReason: { type: String, default: '' },
 
     driverId: { type: mongoose.Schema.Types.ObjectId, ref: 'Driver', index: true },
+
+    /**
+     * Free-form payload for internal book-keeping. Used by the
+     * driver-earnings settlement (`completeTripService`) to stamp the
+     * fare-share / allowance-share split, the originating booking
+     * number, service type, and the breakdown components on the
+     * ledger row so admin audits don't have to re-derive any math.
+     * Razorpay-mediated rows leave this empty.
+     */
+    meta: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
   { timestamps: true },
 );

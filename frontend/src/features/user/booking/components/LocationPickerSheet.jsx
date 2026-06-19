@@ -30,6 +30,9 @@ import useUserSavedLocationsStore from '../../../../store/user/useUserSavedLocat
  *     - currentLocationLoading     boolean
  *     - currentLocationError       string | null
  *     - currentPickup              the active pickup so the user can save it
+ *     - hideCurrentLocation        hide the "Use my current location" CTA — set
+ *                                  for destination pickers where "where I am"
+ *                                  isn't a sensible default.
  */
 const LocationPickerSheet = ({
   open,
@@ -40,6 +43,7 @@ const LocationPickerSheet = ({
   currentLocationLoading = false,
   currentLocationError = null,
   currentPickup = null,
+  hideCurrentLocation = false,
 }) => {
   const { maps, ready } = useGoogleMaps();
   const inputRef = useRef(null);
@@ -175,30 +179,32 @@ const LocationPickerSheet = ({
         </div>
 
         {/* Use current location */}
-        <button
-          type="button"
-          onClick={handleUseCurrent}
-          disabled={currentLocationLoading}
-          className="w-full flex items-center gap-3 rounded-2xl bg-primary/10 hover:bg-primary/15 px-3 py-2.5 text-left transition disabled:opacity-60"
-        >
-          <span className="w-9 h-9 rounded-xl bg-primary text-slate-900 flex items-center justify-center shrink-0">
-            {currentLocationLoading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Navigation className="w-4 h-4" />
-            )}
-          </span>
-          <span className="flex-1 min-w-0">
-            <span className="block text-sm font-semibold text-text">
-              Use my current location
+        {!hideCurrentLocation && (
+          <button
+            type="button"
+            onClick={handleUseCurrent}
+            disabled={currentLocationLoading}
+            className="w-full flex items-center gap-3 rounded-2xl bg-primary/10 hover:bg-primary/15 px-3 py-2.5 text-left transition disabled:opacity-60"
+          >
+            <span className="w-9 h-9 rounded-xl bg-primary text-slate-900 flex items-center justify-center shrink-0">
+              {currentLocationLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Navigation className="w-4 h-4" />
+              )}
             </span>
-            <span className="block text-[11px] text-text-muted truncate">
-              {currentLocationError
-                ? currentLocationError
-                : 'We will detect your location automatically'}
+            <span className="flex-1 min-w-0">
+              <span className="block text-sm font-semibold text-text">
+                Use my current location
+              </span>
+              <span className="block text-[11px] text-text-muted truncate">
+                {currentLocationError
+                  ? currentLocationError
+                  : 'We will detect your location automatically'}
+              </span>
             </span>
-          </span>
-        </button>
+          </button>
+        )}
 
         {/* Save current pickup */}
         {currentPickup?.address && (

@@ -115,12 +115,16 @@ const HourlyPreview = ({ form }) => {
 
 // ─── Outstation preview ───────────────────────────────────────────────────────
 //
-// New billing model — only two line items:
-//   1. Daily rate × days
-//   2. Allowance × nights (waived when the customer arranges everything)
+// Billing model — up to three line items:
+//   1. Daily rate           × days
+//   2. Food allowance       × days   (waived if customer feeds driver)
+//   3. Stay allowance       × nights (waived if customer hosts driver)
 //
-// Toll & parking are NOT added to the fare; they're paid by the
-// customer directly to the driver.
+// When a legacy pricing doc only has the deprecated combined
+// `allowancePerNight`, the calculator returns a single
+// `legacyAllowanceTotal` line instead and we render it as the
+// fallback. Toll & parking are paid by the customer to the driver and
+// are not added to the fare here.
 const OutstationPreview = ({ form }) => {
   const [days, setDays] = useState(3);
   const [customerArrangesAll, setCustomerArrangesAll] = useState(false);
@@ -145,6 +149,10 @@ const OutstationPreview = ({ form }) => {
       </p>
     );
   }
+
+  const foodPerDay = Number(breakdown.foodAllowancePerDay) || 0;
+  const stayPerNight = Number(breakdown.stayAllowancePerNight) || 0;
+  const legacyAllowance = Number(breakdown.legacyAllowanceTotal) || 0;
 
   return (
     <>
@@ -171,10 +179,24 @@ const OutstationPreview = ({ form }) => {
           label={`Daily rate × ${breakdown.days}`}
           value={formatCurrency(breakdown.dailyRateTotal)}
         />
-        {breakdown.allowanceTotal > 0 && (
+        {foodPerDay > 0 && breakdown.foodAllowanceTotal > 0 && (
           <Row
-            label={`Allowance × ${breakdown.nights}`}
-            value={formatCurrency(breakdown.allowanceTotal)}
+            label={`Food allowance × ${breakdown.days}`}
+            value={formatCurrency(breakdown.foodAllowanceTotal)}
+            sub
+          />
+        )}
+        {stayPerNight > 0 && breakdown.stayAllowanceTotal > 0 && (
+          <Row
+            label={`Stay allowance × ${breakdown.nights}`}
+            value={formatCurrency(breakdown.stayAllowanceTotal)}
+            sub
+          />
+        )}
+        {legacyAllowance > 0 && (
+          <Row
+            label={`Allowance (legacy) × ${breakdown.nights}`}
+            value={formatCurrency(legacyAllowance)}
             sub
           />
         )}

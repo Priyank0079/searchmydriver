@@ -79,13 +79,32 @@ const ManagePricing = () => {
     }
     // Outstation
     const o = pricing.outstation || {};
+    const foodPerDay = Number(o.foodAllowancePerDay) || 0;
+    const stayPerNight = Number(o.stayAllowancePerNight) || 0;
+    const legacyAllowance = Number(o.allowancePerNight) || 0;
+    // Prefer the split fields; only show the legacy combined number if
+    // the admin hasn't migrated yet (and the engine is still using it).
+    const hasSplit = foodPerDay > 0 || stayPerNight > 0;
     return (
       <>
         <Row label="Daily rate" value={`${formatCurrency(o.dailyRate || 0)}/day`} />
-        <Row
-          label="Allowance"
-          value={`${formatCurrency(o.allowancePerNight || 0)}/night`}
-        />
+        {hasSplit ? (
+          <>
+            <Row
+              label="Food allowance"
+              value={`${formatCurrency(foodPerDay)}/day`}
+            />
+            <Row
+              label="Stay allowance"
+              value={`${formatCurrency(stayPerNight)}/night`}
+            />
+          </>
+        ) : (
+          <Row
+            label="Allowance (legacy)"
+            value={`${formatCurrency(legacyAllowance)}/night`}
+          />
+        )}
         <Row
           label="Trip length"
           value={`${o.minDays || 1}\u2013${

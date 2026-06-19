@@ -54,14 +54,44 @@ export function toDateTimeInputValue(value) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/**
- * Default pickup datetime — 1 hour from now (gives enough lead time
- * for the admin to assign a driver before the trip starts).
- */
-export function defaultPickupInputValue() {
-  const d = new Date(Date.now() + 60 * 60 * 1000);
-  d.setMinutes(0, 0, 0);
+function formatLocalDateTimeInput(d) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/**
+ * Earliest pickup the customer is allowed to pick, given the
+ * admin-configured outstation lead time (`scheduledDispatch
+ * .MIN_SCHEDULED_LEAD_HOURS` on the outstation `ServicePricing` doc).
+ * The backend enforces the same lower bound on create — keeping the
+ * input's `min` attribute in lockstep avoids a confusing "pick a later
+ * time" 422 after the user already submitted.
+ *
+ * Returns a value formatted for `<input type="datetime-local">` (local
+ * time, no timezone suffix).
+ */
+export function minPickupInputValue(leadHours = 1) {
+  const safeLead = Math.max(0, Number(leadHours) || 0);
+  const d = new Date(Date.now() + safeLead * 60 * 60 * 1000);
+  return formatLocalDateTimeInput(d);
+}
+
+/**
+ * Default pickup datetime — `leadHours` from now, rounded to the
+ * next whole hour. Falls back to "1 hour from now" when lead is
+ * unspecified so the picker still lands on a usable value before the
+ * pricing payload arrives.
+ */
+export function defaultPickupInputValue(leadHours = 1) {
+  const safeLead = Math.max(0, Number(leadHours) || 0);
+  const d = new Date(Date.now() + safeLead * 60 * 60 * 1000);
+  // Round UP to the next whole hour so the picker doesn't show a stale
+  // minute value (matters when `lead` is fractional, e.g. 1.5h).
+  if (d.getMinutes() > 0 || d.getSeconds() > 0 || d.getMilliseconds() > 0) {
+    d.setHours(d.getHours() + 1, 0, 0, 0);
+  } else {
+    d.setMinutes(0, 0, 0);
+  }
+  return formatLocalDateTimeInput(d);
 }
 
 /**
@@ -74,5 +104,5 @@ export function defaultReturnInputValue(pickupInputValue) {
     : new Date(Date.now() + 60 * 60 * 1000);
   if (Number.isNaN(base.getTime())) return defaultPickupInputValue();
   const d = new Date(base.getTime() + 24 * 60 * 60 * 1000);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return formatLocalDateTimeInput(d);
 }

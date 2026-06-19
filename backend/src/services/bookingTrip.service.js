@@ -47,6 +47,8 @@ import {
   settleWaitingBuffer,
   releaseBookingBufferHold,
   clearPendingExtensionsOnTerminate,
+  buildCommissionRevenueMeta,
+  settleDriverEarning,
 } from './bookingExtension.service.js';
 
 /**
@@ -712,14 +714,7 @@ export async function completeTripService(driverId, bookingId) {
       serviceType: booking.serviceType || '',
       userId: booking.userId,
       driverId: booking.driverId || null,
-      meta: {
-        commissionPercent:
-          Number(booking.fareSnapshot?.breakdown?.platformCommissionPercent) || 0,
-        driverEarning:
-          Number(booking.fareSnapshot?.breakdown?.driverEarning) || 0,
-        totalPayable:
-          Number(booking.fareSnapshot?.breakdown?.totalPayable) || 0,
-      },
+      meta: buildCommissionRevenueMeta(booking),
     }).catch((err) =>
       console.warn(
         '[bookingTrip] failed to log commission revenue:',
@@ -728,9 +723,23 @@ export async function completeTripService(driverId, bookingId) {
     );
   }
 
+  // Settle the driver's earning into their wallet. Mirrors the
+  // commission revenue write above — booking ↔ accounting are now
+  // both balanced at COMPLETED. Best-effort: a failure here just
+  // logs (admin can reconcile from the booking later) so trip
+  // completion never wedges on a wallet write.
+  await settleDriverEarning(booking).catch((err) =>
+    console.warn(
+      '[bookingTrip] failed to settle driver earning:',
+      err?.message,
+    ),
+  );
+
   broadcastUpdate(booking);
   return booking.toObject();
 }
+
+const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
 /* ------------------------------------------------------------------ */
 /* Driver-cancel helpers (re-dispatch vs. terminate)                    */
@@ -1101,7 +1110,15 @@ async function cancelOutstationByDriver(booking, driverId, reason = '') {
     return booking.toObject();
   }
 
-  // ── Re-dispatch path: park the booking in the emergency pool ──
+  // ── Re-dispatch path: send the booking back to the outstation queue ──
+  //
+  // Outstation has its own admin-managed assignment surface
+  // (`/admin/bookings/outstation-assignments`) which only lists
+  // `PENDING_ASSIGNMENT` bookings of `serviceType: outstation`. When a
+  // driver bails before the pickup we want the booking to land back
+  // there — NOT in the generic emergency pool used for hourly
+  // re-broadcasts — so the same admin who originally assigned can
+  // pick a replacement driver from the same screen they already use.
   //
   // We don't refund — the customer's wallet hold stays in place and
   // the next driver takes over the same booking. Withdraw the current
@@ -1117,7 +1134,7 @@ async function cancelOutstationByDriver(booking, driverId, reason = '') {
   }
 
   // Stamp the cancelling driver's offer with CANCELLED so the audit
-  // trail explains why the booking is back in the pool.
+  // trail explains why the booking is back in the queue.
   if (booking.dispatch?.offers?.length) {
     const offer = booking.dispatch.offers.find(
       (o) => String(o.driverId) === String(driverId),
@@ -1134,10 +1151,15 @@ async function cancelOutstationByDriver(booking, driverId, reason = '') {
     booking.dispatch.attemptsCount = 0;
   }
 
-  booking.status = BOOKING_STATUS.IN_EMERGENCY_POOL;
+  booking.status = BOOKING_STATUS.PENDING_ASSIGNMENT;
   booking.driverId = null;
   booking.timeline.driverAssignedAt = null;
   booking.timeline.paymentDeadlineAt = null;
+  // Cancellation block is kept on the booking purely as audit info —
+  // the outstation queue can surface a "previous driver bailed
+  // <hoursUntilPickup>h before pickup" hint so the admin knows why
+  // the booking re-appeared. Status above is what actually drives
+  // routing.
   booking.cancellation = {
     reason: reason || 'outstation_driver_cancelled_reassigning',
     cancelledBy: 'driver',
@@ -1146,18 +1168,6 @@ async function cancelOutstationByDriver(booking, driverId, reason = '') {
     tier: tier || '',
     hoursUntilPickup:
       typeof hoursUntilPickup === 'number' ? hoursUntilPickup : null,
-  };
-  // Stamp the emergency-pool entry timestamp the same way the
-  // dedicated escalate service does, so the admin list orders correctly.
-  booking.scheduled = {
-    ...(booking.scheduled?.toObject?.() || booking.scheduled || {}),
-    escalatedAt: new Date(),
-    emergencyPool: {
-      ...(booking.scheduled?.emergencyPool?.toObject?.() ||
-        booking.scheduled?.emergencyPool ||
-        {}),
-      enteredAt: new Date(),
-    },
   };
 
   await booking.save();

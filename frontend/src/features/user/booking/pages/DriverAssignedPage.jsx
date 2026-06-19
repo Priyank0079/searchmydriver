@@ -312,8 +312,13 @@ const DriverAssignedPage = () => {
       navigate('/user/home', { replace: true });
     }
     if (bookingStatus === BOOKING_STATUS.COMPLETED) {
+      // Route to the post-trip rating + invoice flow rather than home
+      // so the customer is prompted to rate the driver. The trip
+      // summary page lives at `/user/tracking/completed` and links to
+      // `/user/tracking/rate`. We keep the active booking around so
+      // those screens can hydrate from the store.
       draftReset();
-      navigate('/user/home', { replace: true });
+      navigate('/user/tracking/completed', { replace: true });
     }
     if (
       bookingStatus === BOOKING_STATUS.SEARCHING &&
@@ -426,6 +431,34 @@ const DriverAssignedPage = () => {
     }
     return 0;
   }, [liveEstimate, booking]);
+
+  const isOutstationBooking = booking?.serviceType === SERVICE_TYPES.OUTSTATION;
+
+  // Per-day rate the outstation extension modal quotes before the
+  // customer commits. Derived from the booking's existing fare
+  // snapshot so the preview matches what the original booking was
+  // paying per day (dailyRate + food allowance per day + stay
+  // allowance per night, when the customer didn't opt out). The
+  // server is the canonical source — this is just a friendly preview.
+  const outstationPerDayRate = useMemo(() => {
+    if (!isOutstationBooking) return 0;
+    const bd = booking?.fareSnapshot?.breakdown || {};
+    const dailyRate = Number(bd.dailyRate) || 0;
+    const foodPerDay =
+      booking?.outstation?.needsFood === false
+        ? 0
+        : Number(bd.foodAllowancePerDay) || 0;
+    const stayPerNight =
+      booking?.outstation?.needsStay === false
+        ? 0
+        : Number(bd.stayAllowancePerNight) || 0;
+    // We treat one extension day as one extra night for preview
+    // parity with the backend math (which uses extraNights = days
+    // when the original booking already crossed at least one night).
+    const hasOvernight = Number(booking?.outstation?.nights) > 0;
+    const stayShare = hasOvernight ? stayPerNight : 0;
+    return Math.max(0, Math.round(dailyRate + foodPerDay + stayShare));
+  }, [isOutstationBooking, booking?.fareSnapshot?.breakdown, booking?.outstation]);
 
   // Open the extension prompt as soon as we cross the lead-time threshold
   // — but never more than once per dismissal window. The user can also tap
@@ -902,7 +935,7 @@ const DriverAssignedPage = () => {
                 {/* Trip details card */}
                 <TripDetailsCard booking={booking} />
 
-                {/* In-ride duration tracker */}
+                {/* In-ride duration tracker (hourly) */}
                 {rideTimer.isStarted && rideTimer.scheduledEndAt && (
                   <Card>
                     <div className="flex items-center gap-3">
@@ -919,6 +952,34 @@ const DriverAssignedPage = () => {
                       </div>
                       <Button size="sm" variant="secondary" onClick={() => setExtensionPromptOpen(true)}>
                         Extend ride
+                      </Button>
+                    </div>
+                  </Card>
+                )}
+
+                {/* Outstation extension entry — visible only while the
+                    trip is STARTED. Outstation runs for days, so we
+                    surface a persistent "Extend trip" card rather than
+                    auto-prompting near a timer threshold. The same
+                    ExtendRideModal flow handles the OTP handshake. */}
+                {isOutstationBooking
+                  && booking.status === BOOKING_STATUS.STARTED
+                  && outstationPerDayRate > 0 && (
+                  <Card>
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full bg-primary/15 flex items-center justify-center">
+                        <Calendar className="w-4 h-4 text-primary-dark" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-text-muted">
+                          Need more time on the road?
+                        </p>
+                        <p className="text-sm font-semibold text-text">
+                          ~₹{outstationPerDayRate}/day for extra days
+                        </p>
+                      </div>
+                      <Button size="sm" variant="secondary" onClick={() => setExtensionPromptOpen(true)}>
+                        Extend trip
                       </Button>
                     </div>
                   </Card>
@@ -988,7 +1049,7 @@ const DriverAssignedPage = () => {
           // date held / available amounts.
           fetchWallet().catch(() => {});
         }}
-        onInitiate={(hours) => initiateExtension(hours)}
+        onInitiate={(amount) => initiateExtension(amount)}
         onVerifyOtp={(args) => verifyExtensionOtp(args)}
         onPay={async (args) => {
           const result = await payExtension(args);
@@ -1020,6 +1081,10 @@ const DriverAssignedPage = () => {
         }
         minHours={1}
         maxHours={8}
+        unit={isOutstationBooking ? 'days' : 'hours'}
+        perDayRate={outstationPerDayRate}
+        minDays={1}
+        maxDays={14}
       />
 
       <NoShowPromptModal
@@ -1414,6 +1479,14 @@ function NoShowPromptModal({
  */
 function PendingExtensionBanner({ extension, onResume, onChangeHours }) {
   const isPay = extension?.status === 'pending_payment';
+  // Outstation extensions store `additionalDays`; hourly stores
+  // `additionalHours`. Pick whichever is populated so the banner copy
+  // is correct on both flows.
+  const additionalDays = Number(extension?.additionalDays) || 0;
+  const additionalHours = Number(extension?.additionalHours) || 0;
+  const amountLabel = additionalDays > 0
+    ? `+${additionalDays}d`
+    : `+${additionalHours}h`;
   return (
     <div className="relative z-20 px-3 pb-2 pointer-events-auto">
       <div
@@ -1446,8 +1519,8 @@ function PendingExtensionBanner({ extension, onResume, onChangeHours }) {
             }`}
           >
             {isPay
-              ? `OTP verified for +${extension.additionalHours}h. Tap to pay or change hours.`
-              : `+${extension.additionalHours}h queued. Ask your driver for the code.`}
+              ? `OTP verified for ${amountLabel}. Tap to pay or change.`
+              : `${amountLabel} queued. Ask your driver for the code.`}
           </p>
         </div>
         <button

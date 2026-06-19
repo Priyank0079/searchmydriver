@@ -4,9 +4,12 @@ import {
   CalendarClock,
   Car,
   Clock,
+  Compass,
+  Loader2,
   MapPin,
   Phone,
   Receipt,
+  Route as RouteIcon,
   User as UserIcon,
   Wallet,
   AlertCircle,
@@ -60,15 +63,37 @@ function Field({ label, value, multiline = false }) {
   );
 }
 
-const BookingDetailsModal = ({ isOpen, onClose, booking }) => {
+const BookingDetailsModal = ({
+  isOpen,
+  onClose,
+  booking,
+  vehicle = null,
+  bufferMinutes = null,
+  loadingExtra = false,
+}) => {
   if (!booking) return null;
 
   const statusVariant = STATUS_VARIANTS[booking.status] || 'default';
   const isScheduled = booking.bookingType === 'scheduled';
-  const pickupAt = booking.hourly?.scheduledStartAt || booking.timeline?.createdAt;
+  const isOutstation = booking.serviceType === 'outstation';
+  const outstation = booking.outstation || {};
+  const outstationStart =
+    outstation.pickupAt || outstation.startDate || null;
+  const outstationEnd =
+    outstation.expectedReturnAt || outstation.endDate || null;
+  const pickupAt =
+    outstationStart ||
+    booking.hourly?.scheduledStartAt ||
+    booking.timeline?.createdAt;
   const fareSnapshot = booking.fareSnapshot || {};
   const timeline = booking.timeline || {};
   const scheduled = booking.scheduled || {};
+
+  const vehicleLabel = vehicle
+    ? `${vehicle.brandId?.name || ''} ${vehicle.modelId?.name || ''}`.trim() ||
+      vehicle.vehicleNumber ||
+      'Vehicle'
+    : null;
 
   return (
     <AdminDetailModal
@@ -118,13 +143,17 @@ const BookingDetailsModal = ({ isOpen, onClose, booking }) => {
                 <span className="capitalize">{booking.bookingType}</span>
               }
             />
+            {pickupAt && (
+              <Field label="Pickup time" value={fmtDate(pickupAt)} />
+            )}
+            {booking.hourly?.durationHours ? (
+              <Field
+                label="Duration"
+                value={`${booking.hourly.durationHours} h`}
+              />
+            ) : null}
             {isScheduled && (
               <>
-                <Field label="Pickup time" value={fmtDate(pickupAt)} />
-                <Field
-                  label="Duration"
-                  value={`${booking.hourly?.durationHours || 0} h`}
-                />
                 {scheduled.tier && (
                   <Field
                     label="Dispatch tier"
@@ -152,6 +181,64 @@ const BookingDetailsModal = ({ isOpen, onClose, booking }) => {
           </div>
         </Section>
 
+        {isOutstation && (
+          <Section title="Outstation trip" icon={Compass}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field
+                label="Start"
+                value={outstationStart ? fmtDate(outstationStart) : null}
+              />
+              <Field
+                label="Expected return"
+                value={outstationEnd ? fmtDate(outstationEnd) : null}
+              />
+              <Field
+                label="Duration"
+                value={
+                  outstation.days != null || outstation.nights != null
+                    ? `${outstation.days || 0} day${
+                        outstation.days === 1 ? '' : 's'
+                      } · ${outstation.nights || 0} night${
+                        outstation.nights === 1 ? '' : 's'
+                      }`
+                    : null
+                }
+              />
+              {outstation.estimatedKm ? (
+                <Field
+                  label="Estimated distance"
+                  value={`${outstation.estimatedKm} km`}
+                />
+              ) : null}
+              <Field
+                label="Needs stay"
+                value={outstation.needsStay ? 'Yes' : 'No'}
+              />
+              <Field
+                label="Needs food"
+                value={outstation.needsFood ? 'Yes' : 'No'}
+              />
+              {bufferMinutes != null && (
+                <Field
+                  label="Conflict buffer"
+                  value={`±${bufferMinutes} min`}
+                />
+              )}
+              {outstation.destinationAddress && (
+                <div className="sm:col-span-2">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">
+                    Destination
+                  </p>
+                  <p className="text-sm font-medium text-slate-900 break-words inline-flex items-start gap-1.5">
+                    <RouteIcon className="w-3.5 h-3.5 text-rose-500 mt-0.5 shrink-0" />
+                    {outstation.destinationAddress}
+                  </p>
+                </div>
+              )}
+            </div>
+          </Section>
+        )}
+
         <Section title="Trip locations" icon={MapPin}>
           <div className="space-y-3">
             <div>
@@ -172,7 +259,7 @@ const BookingDetailsModal = ({ isOpen, onClose, booking }) => {
                 </p>
               </div>
             )}
-            {booking.outstation?.destinationAddress && (
+            {!isOutstation && booking.outstation?.destinationAddress && (
               <div>
                 <p className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">
                   Destination
@@ -222,7 +309,7 @@ const BookingDetailsModal = ({ isOpen, onClose, booking }) => {
             )}
           </Section>
 
-          <Section title="Driver" icon={Car}>
+          <Section title="Driver" icon={UserIcon}>
             {booking.driverId ? (
               <div className="space-y-1">
                 <p className="font-semibold text-sm text-slate-900">
@@ -240,6 +327,49 @@ const BookingDetailsModal = ({ isOpen, onClose, booking }) => {
             )}
           </Section>
         </div>
+
+        {(vehicle || loadingExtra) && (
+          <Section title="Vehicle" icon={Car}>
+            {vehicle ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Field label="Vehicle" value={vehicleLabel} />
+                {vehicle.vehicleNumber && (
+                  <Field
+                    label="Number plate"
+                    value={
+                      <span className="font-mono">{vehicle.vehicleNumber}</span>
+                    }
+                  />
+                )}
+                {vehicle.carTypeId?.name && (
+                  <Field
+                    label="Type"
+                    value={
+                      <span className="capitalize">
+                        {vehicle.carTypeId.name}
+                      </span>
+                    }
+                  />
+                )}
+                {vehicle.fuelTypeId?.name && (
+                  <Field
+                    label="Fuel"
+                    value={
+                      <span className="capitalize">
+                        {vehicle.fuelTypeId.name}
+                      </span>
+                    }
+                  />
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Loading vehicle details…
+              </div>
+            )}
+          </Section>
+        )}
 
         <Section title="Fare & payment" icon={Receipt}>
           <div className="space-y-2">

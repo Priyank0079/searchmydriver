@@ -77,10 +77,26 @@ const ExtendRideModal = ({
   remainingMinutes = 0,
   minHours = 1,
   maxHours = 8,
+  // Outstation extensions count whole days instead of hours. Caller
+  // passes `unit="days"` + a `perDayRate` (the live preview shown
+  // before the customer commits). Defaults preserve the hourly UX so
+  // existing callers don't need to know about the prop.
+  unit = 'hours',
+  perDayRate = 0,
+  minDays = 1,
+  maxDays = 14,
 }) => {
+  const isDays = unit === 'days';
+  const min = isDays ? minDays : minHours;
+  const max = isDays ? maxDays : maxHours;
+  const unitLabel = isDays ? 'day' : 'h';
+  const unitLabelLong = isDays ? 'days' : 'hours';
+  const unitRate = isDays ? perDayRate : extraHourRate;
   // 'hours' | 'otp' | 'pay' | 'dismissed' | 'done'
+  // The 'hours' step name is retained even for days-based outstation
+  // extensions — it's purely the "pick amount" step label internally.
   const [step, setStep] = useState('hours');
-  const [hours, setHours] = useState(minHours);
+  const [hours, setHours] = useState(min);
   const [busy, setBusy] = useState(false);
   // Locked-in details from the server response after initiate.
   const [extension, setExtension] = useState(null);
@@ -111,14 +127,17 @@ const ExtendRideModal = ({
     const stage = pendingExtension?.status;
     if (stage === 'pending_payment' || stage === 'pending_otp') {
       setExtension(pendingExtension);
-      setHours(pendingExtension.additionalHours || minHours);
+      const fromExtension = isDays
+        ? pendingExtension.additionalDays
+        : pendingExtension.additionalHours;
+      setHours(Number(fromExtension) || min);
       setStep(stage === 'pending_payment' ? 'pay' : 'otp');
     } else {
       setExtension(null);
-      setHours(minHours);
+      setHours(min);
       setStep('hours');
     }
-  }, [open, pendingExtension, minHours, extensionRejection]);
+  }, [open, pendingExtension, min, extensionRejection, isDays]);
 
   // When a `dismissed_by_driver` event arrives, the parent passes the
   // rejection meta down. Switch the modal into the dismissed state
@@ -154,8 +173,8 @@ const ExtendRideModal = ({
   // Preview cost during step 1. After initiate we use the server's
   // fareDelta (canonical — includes service charge + GST).
   const previewCost = useMemo(
-    () => Math.max(0, hours) * extraHourRate,
-    [hours, extraHourRate],
+    () => Math.max(0, hours) * unitRate,
+    [hours, unitRate],
   );
 
   const lockedFareDelta = Number(extension?.fareDelta || 0);
@@ -224,7 +243,10 @@ const ExtendRideModal = ({
     setBusy(true);
     try {
       await onPay({ extensionId: extension._id });
-      toast.success(`Ride extended by ${extension.additionalHours}h`);
+      const extAmount = isDays
+        ? extension.additionalDays || 0
+        : extension.additionalHours || 0;
+      toast.success(`Ride extended by ${extAmount}${unitLabel}`);
       setStep('done');
       // Auto-close shortly after the success screen.
       setTimeout(() => onClose?.(), 1200);
@@ -320,9 +342,11 @@ const ExtendRideModal = ({
             </h2>
             <p className="text-xs text-text-muted mt-0.5">
               {step === 'hours'
-                ? remainingMinutes <= 0
-                  ? 'Your booked time is over. Add more hours to keep the driver.'
-                  : `About ${Math.max(1, remainingMinutes)} min left on your original booking.`
+                ? isDays
+                  ? 'Add extra days to your outstation trip. Driver confirms via OTP and you pay from wallet.'
+                  : remainingMinutes <= 0
+                    ? 'Your booked time is over. Add more hours to keep the driver.'
+                    : `About ${Math.max(1, remainingMinutes)} min left on your original booking.`
                 : step === 'otp'
                   ? 'Ask your driver to read the 4-digit code on their screen.'
                   : step === 'pay'
@@ -356,11 +380,14 @@ const ExtendRideModal = ({
             <HoursStep
               hours={hours}
               setHours={setHours}
-              minHours={minHours}
-              maxHours={maxHours}
+              minHours={min}
+              maxHours={max}
               busy={busy}
               previewCost={previewCost}
-              extraHourRate={extraHourRate}
+              extraHourRate={unitRate}
+              unitLabel={unitLabel}
+              unitLabelLong={unitLabelLong}
+              isDays={isDays}
             />
           )}
 
@@ -374,6 +401,8 @@ const ExtendRideModal = ({
               otpError={otpError}
               extension={extension}
               busy={busy}
+              unitLabel={unitLabel}
+              isDays={isDays}
             />
           )}
 
@@ -384,14 +413,22 @@ const ExtendRideModal = ({
               walletShortBy={walletShortBy}
               canPay={canPay}
               busy={busy}
+              unitLabel={unitLabel}
+              isDays={isDays}
             />
           )}
 
           {step === 'dismissed' && (
-            <DismissedStep extension={extension || extensionRejection} />
+            <DismissedStep
+              extension={extension || extensionRejection}
+              unitLabel={unitLabel}
+              isDays={isDays}
+            />
           )}
 
-          {step === 'done' && <DoneStep extension={extension} />}
+          {step === 'done' && (
+            <DoneStep extension={extension} unitLabel={unitLabel} isDays={isDays} />
+          )}
         </div>
 
         {/* Step actions ------------------------------------------ */}
@@ -403,7 +440,8 @@ const ExtendRideModal = ({
               onClick={handleInitiate}
               className="mt-5"
             >
-              Continue · +{hours}h
+              Continue · +{hours}
+              {unitLabel}
             </Button>
             <Button
               fullWidth
@@ -469,7 +507,7 @@ const ExtendRideModal = ({
                 setExtension(null);
                 setOtp('');
                 setOtpError(null);
-                setHours(minHours);
+                setHours(min);
                 setStep('hours');
               }}
               className="mt-5"
@@ -546,7 +584,11 @@ const ExtendRideModal = ({
         onClose={() => setTopupOpen(false)}
         suggestedAmount={walletShortBy}
         title="Add money to pay for extension"
-        subtitle={`You need ₹${walletShortBy} more to extend by ${extension?.additionalHours || hours}h`}
+        subtitle={`You need ₹${walletShortBy} more to extend by ${
+          isDays
+            ? extension?.additionalDays || hours
+            : extension?.additionalHours || hours
+        }${unitLabel}`}
         onSuccess={handleTopupSuccess}
       />
     </div>
@@ -600,17 +642,20 @@ function HoursStep({
   busy,
   previewCost,
   extraHourRate,
+  unitLabel = 'h',
+  unitLabelLong = 'hours',
+  isDays = false,
 }) {
   return (
     <>
       <div className="bg-bg rounded-2xl p-4 flex items-center justify-between">
         <div>
           <p className="text-[11px] text-text-muted uppercase tracking-wide">
-            Add hours
+            Add {unitLabelLong}
           </p>
           <p className="text-3xl font-bold text-text mt-1">
             {hours}
-            <span className="text-base font-medium text-text-muted">{' '}h</span>
+            <span className="text-base font-medium text-text-muted">{' '}{unitLabel}</span>
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -640,13 +685,16 @@ function HoursStep({
         <span className="text-base font-bold text-text">₹{previewCost}</span>
       </div>
       <p className="text-[11px] text-text-muted mt-1 leading-snug">
-        ~₹{extraHourRate}/hr (final amount shown after your driver shares the code).
+        ~₹{extraHourRate}/{isDays ? 'day' : 'hr'} (final amount shown after your driver shares the code).
       </p>
     </>
   );
 }
 
-function OtpStep({ otp, setOtp, otpError, extension, busy }) {
+function OtpStep({ otp, setOtp, otpError, extension, busy, unitLabel = 'h', isDays = false }) {
+  const extAmount = isDays
+    ? extension?.additionalDays || 0
+    : extension?.additionalHours || 0;
   const digits = (otp || '').split('').concat(['', '', '', '']).slice(0, 4);
   return (
     <>
@@ -692,7 +740,7 @@ function OtpStep({ otp, setOtp, otpError, extension, busy }) {
       {extension?.fareDelta != null && (
         <div className="mt-3 rounded-2xl border border-border-light px-3 py-2 text-[12px] text-text-muted">
           You&rsquo;re about to extend by{' '}
-          <strong className="text-text">{extension.additionalHours}h</strong>{' '}
+          <strong className="text-text">{extAmount}{unitLabel}</strong>{' '}
           for{' '}
           <strong className="text-text">₹{extension.fareDelta}</strong>.
         </div>
@@ -704,15 +752,25 @@ function OtpStep({ otp, setOtp, otpError, extension, busy }) {
   );
 }
 
-function PayStep({ extension, walletBalance, walletShortBy, canPay, busy }) {
-  const additionalHours = extension?.additionalHours || 0;
+function PayStep({
+  extension,
+  walletBalance,
+  walletShortBy,
+  canPay,
+  busy,
+  unitLabel = 'h',
+  isDays = false,
+}) {
+  const additionalAmount = isDays
+    ? extension?.additionalDays || 0
+    : extension?.additionalHours || 0;
   const fareDelta = Number(extension?.fareDelta || 0);
   return (
     <>
       <div className="bg-bg rounded-2xl p-4 space-y-1.5">
         <div className="flex items-center justify-between text-sm">
           <span className="text-text-muted">Add to your ride</span>
-          <strong className="text-text">+{additionalHours}h</strong>
+          <strong className="text-text">+{additionalAmount}{unitLabel}</strong>
         </div>
         <div className="flex items-center justify-between text-sm">
           <span className="text-text-muted">Extra fare</span>
@@ -752,8 +810,10 @@ function PayStep({ extension, walletBalance, walletShortBy, canPay, busy }) {
   );
 }
 
-function DismissedStep({ extension }) {
-  const additionalHours = Number(extension?.additionalHours || 0);
+function DismissedStep({ extension, unitLabel = 'h', isDays = false }) {
+  const additionalAmount = isDays
+    ? Number(extension?.additionalDays || 0)
+    : Number(extension?.additionalHours || 0);
   const fareDelta = Number(extension?.fareDelta || 0);
   return (
     <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col items-center text-center">
@@ -763,9 +823,9 @@ function DismissedStep({ extension }) {
       <p className="text-base font-bold text-amber-900 mt-2">
         Driver couldn’t accept the extension
       </p>
-      {additionalHours > 0 && (
+      {additionalAmount > 0 && (
         <p className="text-[12px] text-amber-800 mt-1">
-          Your request for <strong>+{additionalHours}h</strong>
+          Your request for <strong>+{additionalAmount}{unitLabel}</strong>
           {fareDelta > 0 ? <> at <strong>₹{fareDelta}</strong></> : null}{' '}
           was dismissed by your driver.
         </p>
@@ -778,16 +838,19 @@ function DismissedStep({ extension }) {
   );
 }
 
-function DoneStep({ extension }) {
+function DoneStep({ extension, unitLabel = 'h', isDays = false }) {
+  const amount = isDays
+    ? extension?.additionalDays || 0
+    : extension?.additionalHours || 0;
   return (
     <div className="bg-bg rounded-2xl p-5 flex flex-col items-center text-center">
       <CheckCircle2 className="w-12 h-12 text-emerald-500" />
       <p className="text-base font-bold text-text mt-2">
-        Extended by {extension?.additionalHours || 0}h
+        Extended by {amount}{unitLabel}
       </p>
       <p className="text-[12px] text-text-muted mt-1">
-        Your driver has been notified and the ride timer just got{' '}
-        {extension?.additionalHours || 0}h longer.
+        Your driver has been notified and the trip just got{' '}
+        {amount}{unitLabel} longer.
       </p>
     </div>
   );

@@ -29,6 +29,8 @@ import {
 } from '../../../../constants/bookingStatus';
 import OnlineBlockedDialog from '../../kit/components/OnlineBlockedDialog';
 import DriverKitHomeCard from '../../kit/components/DriverKitHomeCard';
+import OutstationOptInCard from '../components/OutstationOptInCard';
+import { useDriverProfileStore } from '../../../../store/driver/useDriverProfileStore';
 
 const ACTIVE_STATUS_COPY = {
   [BOOKING_STATUS.DRIVER_ASSIGNED]: 'Heading to customer',
@@ -54,6 +56,17 @@ const DriverHomePage = () => {
   const { data: summary, loading: summaryLoading } = useCachedQuery(
     useDriverHomeSummaryStore,
     summaryKey,
+    {},
+  );
+
+  // Driver profile drives the outstation opt-in card below —
+  // both the toggle state and the persisted zone selections live on
+  // the profile document. We piggyback on the existing profile fetch
+  // so the home screen only pays one extra request the first time.
+  const profileKey = buildCacheKey('driver-profile', {});
+  const { data: driverProfile } = useCachedQuery(
+    useDriverProfileStore,
+    profileKey,
     {},
   );
 
@@ -216,6 +229,11 @@ const DriverHomePage = () => {
             </div>
           </Card>
         )}
+
+        <OutstationOptInCard
+          initial={!!driverProfile?.availableForOutstation}
+          initialZones={driverProfile?.preferredOutstationZones || []}
+        />
 
         {isOnline && location.error && location.permission === 'denied' && (
           <Card className="animate-fade-in-up border-l-4 border-l-danger">

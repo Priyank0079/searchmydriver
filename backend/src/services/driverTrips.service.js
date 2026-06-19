@@ -1,5 +1,6 @@
 import Booking from '../models/booking.model.js';
 import {Driver} from '../models/driverModels/driver.model.js';
+import Payment from '../models/payment.model.js';
 import PlatformRevenue, {
   PLATFORM_REVENUE_SOURCE,
 } from '../models/platformRevenue.model.js';
@@ -8,6 +9,7 @@ import {
   ACTIVE_BOOKING_STATUSES,
   TERMINAL_BOOKING_STATUSES,
 } from '../constants/bookingStatus.js';
+import { PAYMENT_PURPOSE } from '../constants/kitStatus.js';
 import { sanitizeBookingForDriver } from './booking.service.js';
 import {
   loadCancellationPolicy,
@@ -17,11 +19,24 @@ import {
 /**
  * Driver-facing analytics + history.
  *
- * Everything in this file is read-only and scoped to a single `driverId`. The
- * pricing snapshot stored on `booking.fareSnapshot.total` is treated as the
- * driver-earning surrogate today — when commission/payout splits land, swap
- * the projected field here (and only here) and the rest of the stack stays
- * untouched.
+ * Everything in this file is read-only and scoped to a single `driverId`.
+ *
+ * Money-source policy:
+ *   - Trip earnings (today/week/month tiles, 7-day chart, ledger "trip"
+ *     rows, "recent payouts" feed) are sourced from the `Payment`
+ *     ledger (`trip_fare` + `trip_allowance` + `trip_waiting`). A
+ *     Payment row only exists when the wallet `$inc` succeeded, so
+ *     every rupee shown here was actually credited.
+ *   - Cancellation share is read from `Booking.cancellation.driverShare`
+ *     because the credit path does a direct `$inc` on the driver doc
+ *     (no Payment row is written).
+ *   - Penalty deductions are read from `PlatformRevenue` (source =
+ *     `driver_penalty`) which is also the source-of-truth across the
+ *     re-dispatch flow.
+ *
+ * Result: the sum of every credit row visible in the driver UI
+ * matches `Driver.wallet.totalEarnings`, and the dashboard cannot
+ * out-pace the wallet ever again.
  */
 
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
@@ -69,44 +84,71 @@ function startOfMonth(d = new Date()) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * Set of `Payment.purpose` values that represent a driver wallet
+ * credit at trip completion. The wallet $inc + a `Payment` row are
+ * written together by `settleDriverEarning` / `settleWaitingBuffer`,
+ * so summing these rows is the only source-of-truth that always
+ * matches `wallet.totalEarnings`.
+ *
+ * Trip rows we count:
+ *   trip_fare       — post-commission daily-rate share
+ *   trip_allowance  — food/stay allowance (outstation, net of commission)
+ *   trip_waiting    — waiting charge (100% to driver under current policy)
+ *
+ * Critically we DO NOT aggregate over completed Booking docs anymore:
+ * dev/admin tooling can force a booking to COMPLETED without crediting
+ * the wallet (e.g. `/dev/bookings/:id/force-status`) and a fire-and-
+ * forget wallet write can silently fail. The Payment ledger only
+ * exists when the credit actually landed, so the invariant
+ *
+ *   Σ earnings aggregation == wallet.totalEarnings
+ *
+ * holds forever — modulo cancellation shares, which are tracked
+ * separately from Bookings (they don't flow through Payment).
+ */
+const TRIP_PAYMENT_PURPOSES = [
+  PAYMENT_PURPOSE.TRIP_FARE,
+  PAYMENT_PURPOSE.TRIP_ALLOWANCE,
+  PAYMENT_PURPOSE.TRIP_WAITING,
+];
+
+/**
  * Sum the driver's net earnings in a window. Combines:
  *
- *   trip earnings        Σ fareSnapshot.breakdown.driverEarning over
- *                        completed bookings (post-commission, what the
- *                        driver actually receives).
+ *   trip earnings        Σ Payment.amount over driver-side trip credits
+ *                        (trip_fare + trip_allowance + trip_waiting)
+ *                        within the window. Each booking contributes 1-3
+ *                        Payment rows that together equal exactly what
+ *                        landed in the wallet.
  *   cancellation shares  Σ cancellation.driverShare over user-cancelled
  *                        bookings where this driver was the mobilised
- *                        driver — credited to their wallet on cancel.
+ *                        driver — credited via `Driver.updateOne` on
+ *                        cancel (no Payment row; we still source from
+ *                        Booking).
  *
- * `trips` counts only completed bookings (cancellations are not trips).
+ * `trips` counts distinct booking IDs in the Payment rows so a trip
+ * with both fare + waiting credits counts once, not twice.
  *
- * For older bookings without `breakdown.driverEarning`, falls back to
- * `fareSnapshot.total` so historical entries still surface non-zero
- * earnings — same fallback shape `driverEarningFromFareSnapshot` uses.
+ * `Payment.createdAt` is the time anchor — that's the instant the
+ * wallet was credited. We avoid `meta.completedAt` so a back-dated
+ * settle (rare) still shows up in the right window.
  */
 async function aggregateEarnings(driverId, gte, lte) {
   const [trips, cancels] = await Promise.all([
-    Booking.aggregate([
+    Payment.aggregate([
       {
         $match: {
           driverId,
-          status: BOOKING_STATUS.COMPLETED,
-          isDeleted: false,
-          'timeline.completedAt': { $gte: gte, $lte: lte },
+          purpose: { $in: TRIP_PAYMENT_PURPOSES },
+          status: 'captured',
+          createdAt: { $gte: gte, $lte: lte },
         },
       },
       {
         $group: {
           _id: null,
-          earnings: {
-            $sum: {
-              $ifNull: [
-                '$fareSnapshot.breakdown.driverEarning',
-                { $ifNull: ['$fareSnapshot.total', 0] },
-              ],
-            },
-          },
-          trips: { $sum: 1 },
+          earnings: { $sum: '$amount' },
+          bookings: { $addToSet: '$referenceId' },
         },
       },
     ]),
@@ -128,11 +170,11 @@ async function aggregateEarnings(driverId, gte, lte) {
       },
     ]),
   ]);
-  const tripsAgg = trips?.[0] || { earnings: 0, trips: 0 };
+  const tripsAgg = trips?.[0] || { earnings: 0, bookings: [] };
   const cancelsAgg = cancels?.[0] || { earnings: 0 };
   return {
     earnings: round2((tripsAgg.earnings || 0) + (cancelsAgg.earnings || 0)),
-    trips: tripsAgg.trips || 0,
+    trips: tripsAgg.bookings?.length || 0,
   };
 }
 
@@ -264,85 +306,94 @@ export async function getDriverTripsListService(driverId, query = {}) {
 /* Earnings page                                                       */
 /* ------------------------------------------------------------------ */
 
+/** Server-local YYYY-MM-DD key for a Date. */
+function localDateKey(d) {
+  const x = new Date(d);
+  const y = x.getFullYear();
+  const m = String(x.getMonth() + 1).padStart(2, '0');
+  const day = String(x.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 /**
- * Per-day earnings for the last 7 days, oldest → newest. Each bucket carries
- * its ISO date so the frontend can render the chart deterministically.
+ * Per-day earnings for the last N days, oldest → newest. Each bucket
+ * carries its ISO date so the frontend can render the chart
+ * deterministically.
  *
- * Sums trip earnings (post-commission `driverEarning`) plus cancellation
- * shares on the same date — same accounting `aggregateEarnings` uses.
+ * Sums:
+ *   - trip earnings:        Σ Payment.amount (trip_fare + trip_allowance
+ *                           + trip_waiting) on the same local date
+ *   - cancellation shares:  Σ cancellation.driverShare on the same date
+ *
+ * Trip earnings come from the Payment ledger (same source as
+ * `aggregateEarnings`) so the chart can never exceed
+ * `wallet.totalEarnings` — i.e. the chart never claims you earned
+ * money you didn't actually receive.
+ *
+ * Bucketing is done in JS using server-local time. Doing it in Mongo
+ * via `$dateToString` would default to UTC and drift the bucket
+ * boundary by ~5.5h for IST servers, putting late-evening credits
+ * into the wrong day. (`timezone` could be passed to `$dateToString`
+ * but the server's actual TZ varies by deployment — easier to keep
+ * the math here.)
  */
 async function buildDailyBuckets(driverId, fromDate, days = 7) {
   const start = startOfDay(fromDate);
   const end = endOfDay(addDays(start, days - 1));
 
-  const [tripRows, cancelRows] = await Promise.all([
-    Booking.aggregate([
-      {
-        $match: {
-          driverId,
-          status: BOOKING_STATUS.COMPLETED,
-          isDeleted: false,
-          'timeline.completedAt': { $gte: start, $lte: end },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            $dateToString: { format: '%Y-%m-%d', date: '$timeline.completedAt' },
-          },
-          earnings: {
-            $sum: {
-              $ifNull: [
-                '$fareSnapshot.breakdown.driverEarning',
-                { $ifNull: ['$fareSnapshot.total', 0] },
-              ],
-            },
-          },
-          trips: { $sum: 1 },
-        },
-      },
-    ]),
-    Booking.aggregate([
-      {
-        $match: {
-          driverId,
-          status: BOOKING_STATUS.CANCELLED,
-          isDeleted: false,
-          'cancellation.driverShare': { $gt: 0 },
-          'timeline.cancelledAt': { $gte: start, $lte: end },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            $dateToString: { format: '%Y-%m-%d', date: '$timeline.cancelledAt' },
-          },
-          earnings: { $sum: { $ifNull: ['$cancellation.driverShare', 0] } },
-        },
-      },
-    ]),
+  const [paymentRows, cancelBookings] = await Promise.all([
+    Payment.find({
+      driverId,
+      purpose: { $in: TRIP_PAYMENT_PURPOSES },
+      status: 'captured',
+      createdAt: { $gte: start, $lte: end },
+    })
+      .select('amount referenceId createdAt')
+      .lean(),
+    Booking.find({
+      driverId,
+      status: BOOKING_STATUS.CANCELLED,
+      isDeleted: false,
+      'cancellation.driverShare': { $gt: 0 },
+      'timeline.cancelledAt': { $gte: start, $lte: end },
+    })
+      .select('cancellation.driverShare timeline.cancelledAt')
+      .lean(),
   ]);
 
   const byDate = new Map();
-  for (const r of tripRows) {
-    byDate.set(r._id, { earnings: r.earnings || 0, trips: r.trips || 0 });
+  // Track distinct booking IDs per day so a trip with both fare + waiting
+  // Payment rows counts as one trip on that day.
+  const tripsByDate = new Map();
+
+  for (const row of paymentRows) {
+    const key = localDateKey(row.createdAt);
+    const cur = byDate.get(key) || { earnings: 0 };
+    cur.earnings += Number(row.amount) || 0;
+    byDate.set(key, cur);
+    const refKey = String(row.referenceId);
+    const set = tripsByDate.get(key) || new Set();
+    set.add(refKey);
+    tripsByDate.set(key, set);
   }
-  for (const r of cancelRows) {
-    const cur = byDate.get(r._id) || { earnings: 0, trips: 0 };
-    cur.earnings += r.earnings || 0;
-    byDate.set(r._id, cur);
+  for (const b of cancelBookings) {
+    const key = localDateKey(b.timeline?.cancelledAt);
+    const cur = byDate.get(key) || { earnings: 0 };
+    cur.earnings += Number(b.cancellation?.driverShare) || 0;
+    byDate.set(key, cur);
   }
 
   const buckets = [];
   for (let i = 0; i < days; i += 1) {
     const d = addDays(start, i);
-    const iso = d.toISOString().slice(0, 10);
-    const row = byDate.get(iso) || { earnings: 0, trips: 0 };
+    const iso = localDateKey(d);
+    const row = byDate.get(iso) || { earnings: 0 };
+    const trips = tripsByDate.get(iso)?.size || 0;
     buckets.push({
       date: iso,
       label: d.toLocaleDateString('en-IN', { weekday: 'short' }),
       earnings: round2(row.earnings),
-      trips: row.trips,
+      trips,
     });
   }
   return buckets;
@@ -363,21 +414,46 @@ export async function getDriverEarningsService(driverId) {
   const monthStart = startOfMonth(now);
   const sevenDaysAgo = addDays(startOfDay(now), -6); // last 7 days inclusive
 
-  const [today, week, month, daily, recentRaw] = await Promise.all([
+  // "Recent payouts" is sourced from the Payment ledger so we never
+  // surface a force-completed/un-credited booking under "payouts".
+  // We dedupe by bookingId because each completed trip may have up
+  // to three Payment rows (fare + allowance + waiting).
+  const recentPaymentIds = await Payment.aggregate([
+    {
+      $match: {
+        driverId,
+        purpose: { $in: TRIP_PAYMENT_PURPOSES },
+        status: 'captured',
+      },
+    },
+    {
+      $group: {
+        _id: '$referenceId',
+        latest: { $max: '$createdAt' },
+      },
+    },
+    { $sort: { latest: -1 } },
+    { $limit: 10 },
+  ]);
+  const recentBookingIds = recentPaymentIds.map((r) => r._id);
+
+  const [today, week, month, daily, recentBookings] = await Promise.all([
     aggregateEarnings(driverId, todayStart, todayEnd),
     aggregateEarnings(driverId, weekStart, todayEnd),
     aggregateEarnings(driverId, monthStart, todayEnd),
     buildDailyBuckets(driverId, sevenDaysAgo, 7),
-    Booking.find({
-      driverId,
-      status: BOOKING_STATUS.COMPLETED,
-      isDeleted: false,
-    })
-      .sort({ 'timeline.completedAt': -1, createdAt: -1 })
-      .limit(10)
-      .populate('userId', 'name')
-      .lean(),
+    recentBookingIds.length
+      ? Booking.find({ _id: { $in: recentBookingIds } })
+          .populate('userId', 'name')
+          .lean()
+      : Promise.resolve([]),
   ]);
+
+  // Preserve the Payment-ledger ordering (most-recent credit first).
+  const bookingById = new Map(recentBookings.map((b) => [String(b._id), b]));
+  const recentSorted = recentBookingIds
+    .map((id) => bookingById.get(String(id)))
+    .filter(Boolean);
 
   const peak = daily.reduce(
     (m, b) => (b.earnings > m ? b.earnings : m),
@@ -390,7 +466,7 @@ export async function getDriverEarningsService(driverId) {
       buckets: daily,
       peak: round2(peak),
     },
-    recent: recentRaw.map((b) => sanitizeBookingForDriver(b)),
+    recent: recentSorted.map((b) => sanitizeBookingForDriver(b)),
   };
 }
 
@@ -422,13 +498,20 @@ const LEDGER_KIND = Object.freeze({
  *           debits).
  *
  * Implementation note: we union three sources before paginating:
- *   - Booking.COMPLETED         → trip earnings (positive)
- *   - Booking.CANCELLED w/ share → cancellation share (positive)
- *   - PlatformRevenue.DRIVER_PENALTY for this driver → penalty (negative)
- *
- * PlatformRevenue is the source-of-truth for penalties because the
- * booking's `driverId` is cleared on the re-dispatch path, but the
- * revenue row keeps `driverId` set to whoever was penalised.
+ *   - Payment (trip_fare + trip_allowance + trip_waiting) grouped by
+ *     bookingId → one trip row per booking with a per-component
+ *     breakdown. Payment is the source-of-truth: rows exist only
+ *     when the wallet credit landed, so the ledger always matches
+ *     `wallet.totalEarnings` regardless of dev tooling or failed
+ *     fire-and-forget writes.
+ *   - Booking.CANCELLED w/ share → cancellation share (positive).
+ *     Cancellation share is credited via a direct `$inc` on the
+ *     driver doc (no Payment row), so we still source from Booking.
+ *   - PlatformRevenue.DRIVER_PENALTY for this driver → penalty
+ *     (negative). PlatformRevenue is the source-of-truth for
+ *     penalties because the booking's `driverId` is cleared on the
+ *     re-dispatch path, but the revenue row keeps `driverId` set to
+ *     whoever was penalised.
  */
 export async function listDriverEarningsLedgerService(
   driverId,
@@ -457,64 +540,138 @@ export async function listDriverEarningsLedgerService(
   const safePage = Math.max(1, Number(page) || 1);
   const skip = (safePage - 1) * safeLimit;
 
-  // Pull every booking-derived ledger row (trips + cancellation shares)
-  // and every penalty row from PlatformRevenue in parallel, then merge
-  // + paginate in-process. The cardinality here is bounded by the
-  // driver's full activity history, which is small.
-  const [bookingRows, penaltyRows] = await Promise.all([
-    Booking.aggregate([
+  // Three sources unioned in parallel:
+  //
+  //   1. Payment rows (trip_fare + trip_allowance + trip_waiting)
+  //      grouped by `referenceId` (bookingId) — each group is one
+  //      trip row with a per-component breakdown (fare / allowance /
+  //      waiting). Sourcing from Payment guarantees every row in the
+  //      ledger corresponds to an actual wallet credit, so the
+  //      invariant `Σ ledger trips == wallet.totalEarnings` holds.
+  //
+  //   2. Booking docs (cancellation share) — when the user cancels
+  //      after the driver was mobilised and the admin split routed
+  //      some of the fee to the driver. Cancellation shares don't
+  //      flow through `Payment` (they're a direct `$inc` on the
+  //      Driver doc), so we still source these from Booking.
+  //
+  //   3. PlatformRevenue penalty rows — driver cancelled out of
+  //      grace, wallet debited, revenue booked.
+  //
+  // Extension info on the trip row (count + additional hours) needs
+  // the original Booking — so we run a single $lookup on the grouped
+  // payments. Only `accepted` extensions are surfaced (paid intents);
+  // open OTP rows aren't earnings.
+  const [paymentTripRows, cancellationRows, penaltyRows] = await Promise.all([
+    Payment.aggregate([
       {
         $match: {
           driverId,
-          isDeleted: false,
-          $or: [
-            { status: BOOKING_STATUS.COMPLETED },
+          purpose: { $in: TRIP_PAYMENT_PURPOSES },
+          status: 'captured',
+        },
+      },
+      {
+        $group: {
+          _id: '$referenceId',
+          bookingId: { $first: '$referenceId' },
+          bookingNumber: { $first: '$meta.bookingNumber' },
+          serviceType: { $first: '$meta.serviceType' },
+          occurredAt: { $max: '$meta.completedAt' },
+          createdAt: { $max: '$createdAt' },
+          total: { $sum: '$amount' },
+          fareEarning: {
+            $sum: {
+              $cond: [
+                { $eq: ['$purpose', PAYMENT_PURPOSE.TRIP_FARE] },
+                '$amount',
+                0,
+              ],
+            },
+          },
+          allowanceEarning: {
+            $sum: {
+              $cond: [
+                { $eq: ['$purpose', PAYMENT_PURPOSE.TRIP_ALLOWANCE] },
+                '$amount',
+                0,
+              ],
+            },
+          },
+          waitingEarning: {
+            $sum: {
+              $cond: [
+                { $eq: ['$purpose', PAYMENT_PURPOSE.TRIP_WAITING] },
+                '$amount',
+                0,
+              ],
+            },
+          },
+          waitingMinutes: {
+            $max: { $ifNull: ['$meta.billableMinutes', 0] },
+          },
+          waitingNoShow: {
+            $max: { $ifNull: ['$meta.noShow', false] },
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: 'bookings',
+          localField: 'bookingId',
+          foreignField: '_id',
+          as: 'booking',
+          pipeline: [
             {
-              status: BOOKING_STATUS.CANCELLED,
-              'cancellation.driverShare': { $gt: 0 },
+              $project: {
+                extensions: {
+                  $let: {
+                    vars: {
+                      accepted: {
+                        $filter: {
+                          input: { $ifNull: ['$extensions', []] },
+                          as: 'e',
+                          cond: { $eq: ['$$e.status', 'accepted'] },
+                        },
+                      },
+                    },
+                    in: {
+                      count: { $size: '$$accepted' },
+                      additionalHours: {
+                        $sum: {
+                          $map: {
+                            input: '$$accepted',
+                            as: 'e',
+                            in: { $ifNull: ['$$e.additionalHours', 0] },
+                          },
+                        },
+                      },
+                      driverEarning: {
+                        $sum: {
+                          $map: {
+                            input: '$$accepted',
+                            as: 'e',
+                            in: { $ifNull: ['$$e.breakdown.driverEarning', 0] },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
             },
           ],
         },
       },
-      {
-        $project: {
-          _id: 1,
-          bookingNumber: 1,
-          serviceType: 1,
-          status: 1,
-          cancellation: 1,
-          timeline: 1,
-          createdAt: 1,
-          kind: {
-            $cond: [
-              { $eq: ['$status', BOOKING_STATUS.COMPLETED] },
-              LEDGER_KIND.TRIP,
-              LEDGER_KIND.CANCELLATION_SHARE,
-            ],
-          },
-          amount: {
-            $cond: [
-              { $eq: ['$status', BOOKING_STATUS.COMPLETED] },
-              {
-                $ifNull: [
-                  '$fareSnapshot.breakdown.driverEarning',
-                  { $ifNull: ['$fareSnapshot.total', 0] },
-                ],
-              },
-              { $ifNull: ['$cancellation.driverShare', 0] },
-            ],
-          },
-          occurredAt: {
-            $cond: [
-              { $eq: ['$status', BOOKING_STATUS.COMPLETED] },
-              { $ifNull: ['$timeline.completedAt', '$createdAt'] },
-              { $ifNull: ['$timeline.cancelledAt', '$createdAt'] },
-            ],
-          },
-        },
-      },
-      { $match: { amount: { $gt: 0 } } },
     ]),
+    Booking.find({
+      driverId,
+      status: BOOKING_STATUS.CANCELLED,
+      isDeleted: false,
+      'cancellation.driverShare': { $gt: 0 },
+    })
+      .select('bookingNumber serviceType cancellation timeline createdAt')
+      .lean(),
     PlatformRevenue.find({
       driverId,
       source: PLATFORM_REVENUE_SOURCE.DRIVER_PENALTY,
@@ -523,27 +680,62 @@ export async function listDriverEarningsLedgerService(
       .lean(),
   ]);
 
-  // Normalise both sources into a single ledger-row shape, then sort
-  // + paginate together.
-  const normalisedBookings = bookingRows.map((r) => ({
-    _id: r._id,
-    kind: r.kind,
-    direction: 'credit',
-    bookingNumber: r.bookingNumber || null,
-    bookingId: r._id,
-    serviceType: r.serviceType || null,
-    amountRupees: round2(r.amount || 0),
-    occurredAt: r.occurredAt,
-    status: r.status,
-    meta:
-      r.kind === LEDGER_KIND.CANCELLATION_SHARE
-        ? {
-            reason: r.cancellation?.reason || null,
-            cancelledBy: r.cancellation?.cancelledBy || null,
-            feeCharged: round2(r.cancellation?.feeCharged || 0),
-          }
-        : null,
-  }));
+  // Normalise the three sources into a single ledger-row shape, then
+  // sort + paginate together. Trip rows carry the per-component
+  // breakdown the breakdown sheet renders; cancellation rows carry
+  // their fee + reason; penalty rows their cancel reason.
+  const normalisedBookings = [];
+  for (const r of paymentTripRows) {
+    const ext = r.booking?.[0]?.extensions || { count: 0, additionalHours: 0, driverEarning: 0 };
+    const total = round2(r.total || 0);
+    if (!(total > 0)) continue;
+    normalisedBookings.push({
+      _id: r.bookingId,
+      kind: LEDGER_KIND.TRIP,
+      direction: 'credit',
+      bookingNumber: r.bookingNumber || null,
+      bookingId: r.bookingId,
+      serviceType: r.serviceType || null,
+      amountRupees: total,
+      occurredAt: r.occurredAt || r.createdAt,
+      status: BOOKING_STATUS.COMPLETED,
+      meta: {
+        // `fareEarning` includes paid extension uplifts already (the
+        // engine bumps `breakdown.driverEarning` at acceptance time,
+        // which is what TRIP_FARE was credited from), so the
+        // `extensionDriverEarning` field is a subset for display only,
+        // not an additional amount.
+        fareEarning: round2(r.fareEarning || 0),
+        allowanceEarning: round2(r.allowanceEarning || 0),
+        waitingChargeRupees: round2(r.waitingEarning || 0),
+        waitingMinutes: Number(r.waitingMinutes) || 0,
+        waitingNoShow: !!r.waitingNoShow,
+        extensionsCount: Number(ext.count) || 0,
+        extensionAdditionalHours: round2(ext.additionalHours || 0),
+        extensionDriverEarning: round2(ext.driverEarning || 0),
+      },
+    });
+  }
+  for (const b of cancellationRows) {
+    const amount = round2(Number(b.cancellation?.driverShare) || 0);
+    if (!(amount > 0)) continue;
+    normalisedBookings.push({
+      _id: b._id,
+      kind: LEDGER_KIND.CANCELLATION_SHARE,
+      direction: 'credit',
+      bookingNumber: b.bookingNumber || null,
+      bookingId: b._id,
+      serviceType: b.serviceType || null,
+      amountRupees: amount,
+      occurredAt: b.timeline?.cancelledAt || b.createdAt,
+      status: BOOKING_STATUS.CANCELLED,
+      meta: {
+        reason: b.cancellation?.reason || null,
+        cancelledBy: b.cancellation?.cancelledBy || null,
+        feeCharged: round2(b.cancellation?.feeCharged || 0),
+      },
+    });
+  }
 
   const normalisedPenalties = penaltyRows.map((r) => ({
     _id: r._id,

@@ -125,6 +125,15 @@ export const S2C_EVENTS = Object.freeze({
    */
   BOOKING_NOSHOW_PROMPT: 'booking:noshow:prompt',
 
+  /**
+   * Post-trip rating events. Each side submits exactly once after
+   * `COMPLETED`; the other side hears about it here (driver dashboard
+   * tile / admin feedback feed). Payload:
+   *   { bookingId, bookingNumber, stars, review, serviceType }
+   */
+  BOOKING_RATED_BY_CUSTOMER: 'booking:rated:by_customer',
+  BOOKING_RATED_BY_DRIVER: 'booking:rated:by_driver',
+
   /** Generic toast / in-app notification. */
   NOTIFICATION: 'notification:new',
 

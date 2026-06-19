@@ -1,24 +1,39 @@
 import Input from '../../../../components/Input';
 
 /**
- * Outstation pricing has been simplified to two knobs:
+ * Outstation pricing has three knobs:
  *
- *   - Daily rate (₹/day)        — flat base fare for every calendar day
- *                                 of the round trip.
- *   - Allowance per night (₹)   — single combined driver allowance
- *                                 (food + accommodation + driver bata
- *                                 rolled into one). Charged for every
- *                                 night (= days − 1) UNLESS the customer
- *                                 commits to arranging both the food
- *                                 AND stay themselves.
+ *   - Daily rate (₹/day)               — flat base fare for every
+ *                                        calendar day of the round trip.
+ *   - Food allowance (₹/day)           — driver food. Charged per day,
+ *                                        waived when the customer
+ *                                        agrees to feed the driver.
+ *   - Stay allowance (₹/night)         — driver accommodation. Charged
+ *                                        per overnight halt (= days − 1),
+ *                                        waived when the customer hosts
+ *                                        the driver.
+ *
+ * The customer UI currently exposes a single all-or-nothing toggle
+ * that waives BOTH allowances together. The split exists here so
+ * admins can tune the two costs independently (food scales with days,
+ * stay with nights) and future UIs can split the toggle.
  *
  * Toll & parking are NOT billed by the platform — the customer settles
- * those directly with the driver. The booking flow surfaces a notice
- * for transparency; no rupee is added to the fare for them.
+ * those directly with the driver.
  */
 const OutstationFieldsEditor = ({ outstation, onChange }) => {
   const update = (patch) => onChange({ ...outstation, ...patch });
   const o = outstation || {};
+
+  // Legacy combined per-night allowance — if a saved doc still has it
+  // and the new split fields are both 0, surface a notice so the admin
+  // knows to migrate. The fare engine keeps honouring the legacy
+  // value until the admin saves new split values.
+  const legacyAllowance = Number(o.allowancePerNight) || 0;
+  const hasSplit =
+    (Number(o.foodAllowancePerDay) || 0) > 0 ||
+    (Number(o.stayAllowancePerNight) || 0) > 0;
+  const showLegacyNotice = legacyAllowance > 0 && !hasSplit;
 
   return (
     <div className="space-y-3">
@@ -30,11 +45,12 @@ const OutstationFieldsEditor = ({ outstation, onChange }) => {
           </span>
         </h4>
         <p className="text-xs text-slate-500">
-          Fare = daily rate × days + allowance × nights (allowance is
-          waived when the customer arranges the driver&rsquo;s food and
-          stay themselves). Service charge and GST are added on top.
-          Toll &amp; parking are paid directly by the customer to the
-          driver and are not added to the fare.
+          Fare = daily rate × days + food allowance × days + stay
+          allowance × nights. Food and stay allowances are waived when
+          the customer agrees to arrange the driver&rsquo;s meals and
+          accommodation themselves. Service charge and GST are added on
+          top. Toll &amp; parking are paid directly by the customer to
+          the driver and are not added to the fare.
         </p>
       </div>
 
@@ -48,13 +64,26 @@ const OutstationFieldsEditor = ({ outstation, onChange }) => {
           helper="Flat ₹ billed for every calendar day of the round trip."
         />
         <Input
-          label="Allowance per night (₹)"
+          label="Food allowance (₹/day)"
           type="number"
           min={0}
-          value={o.allowancePerNight ?? 0}
-          onChange={(e) => update({ allowancePerNight: Number(e.target.value) })}
-          helper="Driver&rsquo;s combined food + stay + bata. Charged per night, waived when the customer arranges everything."
+          value={o.foodAllowancePerDay ?? 0}
+          onChange={(e) =>
+            update({ foodAllowancePerDay: Number(e.target.value) })
+          }
+          helper="Charged once per day of the trip. Waived when the customer agrees to feed the driver."
         />
+        <Input
+          label="Stay allowance (₹/night)"
+          type="number"
+          min={0}
+          value={o.stayAllowancePerNight ?? 0}
+          onChange={(e) =>
+            update({ stayAllowancePerNight: Number(e.target.value) })
+          }
+          helper="Charged for every overnight halt (= days − 1). Waived when the customer hosts the driver."
+        />
+        <div />
         <div className="grid grid-cols-2 gap-3 md:col-span-2">
           <Input
             label="Min days"
@@ -72,6 +101,17 @@ const OutstationFieldsEditor = ({ outstation, onChange }) => {
           />
         </div>
       </div>
+
+      {showLegacyNotice && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800 leading-snug">
+          <strong>Legacy allowance detected:</strong> this pricing doc
+          still uses the old combined &ldquo;allowance per night&rdquo;
+          of <strong>₹{legacyAllowance}</strong> for both food and
+          stay. The fare engine is using that as a fallback. Enter food
+          and stay amounts above to migrate — the legacy value will be
+          ignored once either of the new fields is non-zero.
+        </div>
+      )}
     </div>
   );
 };

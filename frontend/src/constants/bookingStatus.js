@@ -43,6 +43,8 @@ export const PAYMENT_MODE_LIST = Object.freeze(Object.values(PAYMENT_MODE));
 export const BOOKING_TYPE = Object.freeze({
   INSTANT: 'instant',
   SCHEDULED: 'scheduled',
+  /** Outstation (multi-day driver) bookings are always pre-scheduled. */
+  OUTSTATION: 'outstation',
 });
 
 export const BOOKING_TYPE_LIST = Object.freeze(Object.values(BOOKING_TYPE));
@@ -50,11 +52,13 @@ export const BOOKING_TYPE_LIST = Object.freeze(Object.values(BOOKING_TYPE));
 export const BOOKING_TYPE_LABELS = Object.freeze({
   [BOOKING_TYPE.INSTANT]: 'Book now',
   [BOOKING_TYPE.SCHEDULED]: 'Schedule for later',
+  [BOOKING_TYPE.OUTSTATION]: 'Outstation',
 });
 
 export const BOOKING_TYPE_DESCRIPTIONS = Object.freeze({
   [BOOKING_TYPE.INSTANT]: "We'll find a driver right now and they'll head over.",
   [BOOKING_TYPE.SCHEDULED]: 'Pick a date and time — we dispatch a driver closer to start.',
+  [BOOKING_TYPE.OUTSTATION]: 'Multi-day outstation trip with a dedicated driver.',
 });
 
 export const PAYMENT_MODE_LABELS = Object.freeze({

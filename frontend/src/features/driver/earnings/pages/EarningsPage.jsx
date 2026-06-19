@@ -1,16 +1,19 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Card from '../../../../components/Card';
 import Button from '../../../../components/Button';
+import BottomSheet from '../../../../components/BottomSheet';
 import {
   Loader2,
   AlertCircle,
-  TrendingUp,
   Wallet,
   Inbox,
   Car,
   XCircle,
   AlertOctagon,
+  Clock4,
+  TimerReset,
+  ChevronRight,
 } from 'lucide-react';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
@@ -18,6 +21,7 @@ import {
   useDriverEarningsStore,
   useDriverEarningsLedgerStore,
 } from '../../../../store/driver/useDriverTripsStore';
+import { useDriverProfileStore } from '../../../../store/driver/useDriverProfileStore';
 import { formatCurrency } from '../../../../utils/formatters';
 import DriverScreenShell from '../../components/DriverScreenShell';
 
@@ -40,6 +44,17 @@ const EarningsPage = () => {
     cacheKey,
     {},
   );
+
+  // Driver profile carries the live wallet balance — the header hero
+  // shows this (and the "withdraw" CTA implicitly anchors on it)
+  // instead of the weekly-earnings number, which is already covered by
+  // the stat tiles below.
+  const profileKey = buildCacheKey('driver-profile', {});
+  const { data: profile } = useCachedQuery(useDriverProfileStore, profileKey, {});
+  const wallet = profile?.wallet || {};
+  const walletBalance = Number(wallet.balance) || 0;
+  const lifetimeEarnings = Number(wallet.totalEarnings) || 0;
+  const totalWithdrawn = Number(wallet.totalWithdrawn) || 0;
 
   // Ledger: paginated feed of every earning (trip + cancellation share).
   const ledgerRows = useDriverEarningsLedgerStore((s) => s.rows);
@@ -78,33 +93,59 @@ const EarningsPage = () => {
     );
   };
 
+  const [selectedLedgerRow, setSelectedLedgerRow] = useState(null);
+
   return (
     <DriverScreenShell
       header={
         <header className="bg-dark px-4 pt-4 pb-5 rounded-b-3xl">
           <h1 className="text-lg font-bold text-white mb-3">Earnings</h1>
           <Card className="!bg-white/10 backdrop-blur-sm !shadow-none border-0">
-            <p className="text-xs text-white/70 uppercase tracking-wide font-semibold">
-              This Week
-            </p>
-            <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-3xl font-bold text-white">
-                {formatCurrency(week.earnings)}
-              </span>
-              {week.trips > 0 && (
-                <span className="text-xs text-white/70">
-                  · {week.trips} trip{week.trips === 1 ? '' : 's'}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs text-white/70 uppercase tracking-wide font-semibold">
+                  Wallet balance
+                </p>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-3xl font-bold text-white">
+                    {formatCurrency(walletBalance)}
+                  </span>
+                </div>
+                <p className="text-[11px] text-white/70 mt-1">
+                  Available to withdraw
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate('/driver/payments')}
+                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-dark text-xs font-semibold hover:bg-white/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={walletBalance <= 0}
+              >
+                <Wallet className="w-3.5 h-3.5" />
+                Withdraw
+              </button>
+            </div>
+            {(lifetimeEarnings > 0 || totalWithdrawn > 0) && (
+              <div className="flex items-center gap-3 mt-3 pt-3 border-t border-white/10 text-[11px] text-white/80">
+                <span>
+                  Lifetime{' '}
+                  <span className="font-semibold text-white">
+                    {formatCurrency(lifetimeEarnings)}
+                  </span>
                 </span>
-              )}
-            </div>
-            <div className="flex items-center gap-1.5 mt-2 text-xs text-white/80">
-              <TrendingUp className="w-3.5 h-3.5" />
-              {peak > 0 ? (
-                <span>Best day: {formatCurrency(peak)}</span>
-              ) : (
-                <span>Earn now to see your weekly trend</span>
-              )}
-            </div>
+                {totalWithdrawn > 0 && (
+                  <>
+                    <span className="text-white/30">&middot;</span>
+                    <span>
+                      Withdrawn{' '}
+                      <span className="font-semibold text-white">
+                        {formatCurrency(totalWithdrawn)}
+                      </span>
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
           </Card>
         </header>
       }
@@ -190,9 +231,15 @@ const EarningsPage = () => {
             fetched={ledgerFetched}
             hasMore={ledgerHasMore}
             onLoadMore={onLoadMore}
+            onSelect={setSelectedLedgerRow}
           />
         </>
       )}
+
+      <LedgerBreakdownSheet
+        row={selectedLedgerRow}
+        onClose={() => setSelectedLedgerRow(null)}
+      />
     </DriverScreenShell>
   );
 };
@@ -298,7 +345,7 @@ function BreakdownRow({ icon: Icon, tone, label, subLabel, amount, direction = '
  * old "last 10 completed trips" tile so drivers can scroll their full
  * history without leaving the page.
  */
-function AllEarningsFeed({ rows, loading, fetched, hasMore, onLoadMore }) {
+function AllEarningsFeed({ rows, loading, fetched, hasMore, onLoadMore, onSelect }) {
   const isEmpty = fetched && rows.length === 0;
   return (
     <section>
@@ -331,7 +378,11 @@ function AllEarningsFeed({ rows, loading, fetched, hasMore, onLoadMore }) {
         <>
           <Card padding="p-0" className="divide-y divide-border-light overflow-hidden">
             {rows.map((row) => (
-              <EarningsLedgerRow key={row._id} row={row} />
+              <EarningsLedgerRow
+                key={row._id}
+                row={row}
+                onSelect={onSelect}
+              />
             ))}
           </Card>
           {hasMore && (
@@ -352,7 +403,7 @@ function AllEarningsFeed({ rows, loading, fetched, hasMore, onLoadMore }) {
   );
 }
 
-function EarningsLedgerRow({ row }) {
+function EarningsLedgerRow({ row, onSelect }) {
   const isPenalty = row.kind === 'penalty';
   const isCancellation = row.kind === 'cancellation_share';
   const Icon = isPenalty ? AlertOctagon : isCancellation ? XCircle : Car;
@@ -379,7 +430,11 @@ function EarningsLedgerRow({ row }) {
     row.direction === 'debit' ? 'text-rose-700' : 'text-success';
 
   return (
-    <div className="flex items-center gap-3 px-3 py-3">
+    <button
+      type="button"
+      onClick={() => onSelect?.(row)}
+      className="w-full flex items-center gap-3 px-3 py-3 hover:bg-gray-50 transition-colors text-left"
+    >
       <div
         className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${tone}`}
       >
@@ -393,7 +448,8 @@ function EarningsLedgerRow({ row }) {
         {sign}
         {formatCurrency(row.amountRupees)}
       </p>
-    </div>
+      <ChevronRight className="w-4 h-4 text-text-muted shrink-0" />
+    </button>
   );
 }
 
@@ -457,6 +513,254 @@ function EarningsBarChart({ buckets, peak }) {
       })}
     </div>
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* Breakdown sheet                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Bottom sheet that opens when a driver taps any ledger row. Shows the
+ * source-specific breakdown so the driver can see exactly how the
+ * amount on that row was made up — fare share + waiting + extension
+ * uplift for trip rows, fee + share% for cancellation rows, and the
+ * cancel reason for penalty rows.
+ *
+ * Trip-row components come pre-computed on the row's `meta` (see
+ * `listDriverEarningsLedgerService` projection) so there's no extra
+ * round-trip on tap.
+ */
+function LedgerBreakdownSheet({ row, onClose }) {
+  const isOpen = !!row;
+  const meta = row?.meta || {};
+
+  let title = 'Earnings breakdown';
+  let Icon = Car;
+  let tone = 'text-success bg-success/10';
+  if (row?.kind === 'penalty') {
+    title = 'Cancellation penalty';
+    Icon = AlertOctagon;
+    tone = 'text-rose-700 bg-rose-100';
+  } else if (row?.kind === 'cancellation_share') {
+    title = 'Cancellation share';
+    Icon = XCircle;
+    tone = 'text-amber-600 bg-amber-100';
+  } else if (row?.kind === 'trip') {
+    title = 'Trip earning';
+  }
+
+  const direction = row?.direction === 'debit' ? 'debit' : 'credit';
+  const sign = direction === 'debit' ? '\u2212' : '+';
+  const amountTone = direction === 'debit' ? 'text-rose-700' : 'text-success';
+
+  return (
+    <BottomSheet
+      isOpen={isOpen}
+      onClose={onClose}
+      title={title}
+      showHandle
+    >
+      {row && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <div
+              className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${tone}`}
+            >
+              <Icon className="w-5 h-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-text truncate">
+                {row.bookingNumber ? `#${row.bookingNumber}` : title}
+              </p>
+              <p className="text-[11px] text-text-muted truncate">
+                {[
+                  row.serviceType ? labelForService(row.serviceType) : null,
+                  formatLedgerDate(row.occurredAt),
+                ]
+                  .filter(Boolean)
+                  .join(' \u00B7 ')}
+              </p>
+            </div>
+            <p className={`text-base font-bold ${amountTone} shrink-0`}>
+              {sign}
+              {formatCurrency(row.amountRupees)}
+            </p>
+          </div>
+
+          {row.kind === 'trip' && <TripBreakdownBlock meta={meta} row={row} />}
+          {row.kind === 'cancellation_share' && (
+            <CancellationShareBlock meta={meta} row={row} />
+          )}
+          {row.kind === 'penalty' && <PenaltyBlock meta={meta} row={row} />}
+        </div>
+      )}
+    </BottomSheet>
+  );
+}
+
+function TripBreakdownBlock({ meta, row }) {
+  const fareEarning = Number(meta.fareEarning) || 0;
+  const waitingCharge = Number(meta.waitingChargeRupees) || 0;
+  const waitingMinutes = Number(meta.waitingMinutes) || 0;
+  const waitingNoShow = !!meta.waitingNoShow;
+  const extensionsCount = Number(meta.extensionsCount) || 0;
+  const extensionHours = Number(meta.extensionAdditionalHours) || 0;
+  const extensionDriverEarning = Number(meta.extensionDriverEarning) || 0;
+  const baseFare = Math.max(0, fareEarning - extensionDriverEarning);
+
+  return (
+    <div className="bg-gray-50 rounded-2xl divide-y divide-border-light">
+      <BreakdownLine
+        icon={Car}
+        tone="text-emerald-700 bg-emerald-100"
+        label="Fare share"
+        sublabel="Daily rate after platform commission"
+        amount={baseFare}
+      />
+      {extensionsCount > 0 && (
+        <BreakdownLine
+          icon={TimerReset}
+          tone="text-indigo-700 bg-indigo-100"
+          label={`Extensions \u00B7 +${extensionHours}h`}
+          sublabel={`${extensionsCount} paid extension${
+            extensionsCount === 1 ? '' : 's'
+          }`}
+          amount={extensionDriverEarning}
+        />
+      )}
+      {waitingCharge > 0 && (
+        <BreakdownLine
+          icon={Clock4}
+          tone="text-amber-700 bg-amber-100"
+          label="Waiting charge"
+          sublabel={
+            waitingNoShow
+              ? 'Customer no-show \u2014 auto-billed'
+              : `${waitingMinutes} billable min \u00B7 100% to you`
+          }
+          amount={waitingCharge}
+        />
+      )}
+      <div className="flex items-center justify-between px-4 py-3">
+        <p className="text-sm font-semibold text-text">Total credited</p>
+        <p className="text-base font-bold text-success">
+          {formatCurrency(row.amountRupees)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function CancellationShareBlock({ meta, row }) {
+  const feeCharged = Number(meta.feeCharged) || 0;
+  const cancelledBy = meta.cancelledBy ? humanise(meta.cancelledBy) : '';
+  const reason = meta.reason ? humanise(meta.reason) : '';
+  return (
+    <div className="bg-gray-50 rounded-2xl divide-y divide-border-light">
+      {feeCharged > 0 && (
+        <BreakdownLine
+          icon={XCircle}
+          tone="text-amber-700 bg-amber-100"
+          label="Fee charged to customer"
+          sublabel="Split between you and the platform"
+          amount={feeCharged}
+        />
+      )}
+      <BreakdownLine
+        icon={Wallet}
+        tone="text-emerald-700 bg-emerald-100"
+        label="Your share"
+        sublabel="Credited to your wallet"
+        amount={row.amountRupees}
+      />
+      {(cancelledBy || reason) && (
+        <div className="px-4 py-3 text-xs text-text-muted space-y-1">
+          {cancelledBy && (
+            <p>
+              <span className="text-text-secondary">Cancelled by:</span>{' '}
+              {cancelledBy}
+            </p>
+          )}
+          {reason && (
+            <p>
+              <span className="text-text-secondary">Reason:</span> {reason}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PenaltyBlock({ meta, row }) {
+  const reason = meta.reason ? humanise(meta.reason) : '';
+  const bookingStatus = meta.bookingStatus ? humanise(meta.bookingStatus) : '';
+  return (
+    <div className="bg-gray-50 rounded-2xl divide-y divide-border-light">
+      <BreakdownLine
+        icon={AlertOctagon}
+        tone="text-rose-700 bg-rose-100"
+        label="Penalty deducted"
+        sublabel="Out-of-grace cancellation"
+        amount={row.amountRupees}
+        direction="debit"
+      />
+      {(reason || bookingStatus) && (
+        <div className="px-4 py-3 text-xs text-text-muted space-y-1">
+          {reason && (
+            <p>
+              <span className="text-text-secondary">Reason:</span> {reason}
+            </p>
+          )}
+          {bookingStatus && (
+            <p>
+              <span className="text-text-secondary">Cancelled at:</span>{' '}
+              {bookingStatus}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BreakdownLine({
+  icon: Icon,
+  tone,
+  label,
+  sublabel,
+  amount,
+  direction = 'credit',
+}) {
+  const isDebit = direction === 'debit';
+  return (
+    <div className="flex items-center gap-3 px-4 py-3">
+      <div
+        className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${tone}`}
+      >
+        <Icon className="w-4 h-4" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-text truncate">{label}</p>
+        {sublabel && (
+          <p className="text-[11px] text-text-muted truncate">{sublabel}</p>
+        )}
+      </div>
+      <p
+        className={`text-sm font-bold shrink-0 ${
+          isDebit ? 'text-rose-700' : 'text-text'
+        }`}
+      >
+        {isDebit ? '\u2212 ' : ''}
+        {formatCurrency(amount)}
+      </p>
+    </div>
+  );
+}
+
+function humanise(value) {
+  if (!value) return '';
+  return String(value).replace(/_/g, ' ');
 }
 
 export default EarningsPage;

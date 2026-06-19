@@ -30,16 +30,31 @@ function applySubscriptionDiscount(subtotal, subscription) {
   return Math.min(discount, subtotal);
 }
 
-function applyPlatformLayers(subtotal, pricing, subscription) {
+/**
+ * Mirror of backend `pricing.service.js#applyPlatformLayers`. See the
+ * backend doc-comment for the full reasoning — short version:
+ *
+ *   `allowancePassThrough` is the food + stay allowance portion of the
+ *   subtotal. Platform commission is NEVER applied to it; those rupees
+ *   flow 1:1 to the driver. Service charge + GST still hit the full
+ *   subtotal — they're customer-facing fees, not platform-vs-driver
+ *   math.
+ */
+function applyPlatformLayers(subtotal, pricing, subscription, allowancePassThrough = 0) {
   const serviceChargePercent = pricing.serviceChargePercent || 0;
   const gstPercent = pricing.gstPercent || 0;
   const serviceCharge = (subtotal * serviceChargePercent) / 100;
   const gstAmount = ((subtotal + serviceCharge) * gstPercent) / 100;
   const subscriptionDiscount = applySubscriptionDiscount(subtotal, subscription);
   const totalPayable = Math.max(0, subtotal + serviceCharge + gstAmount - subscriptionDiscount);
+
   const platformCommissionPercent = pricing.platformCommissionPercent || 0;
-  const platformCommission = (subtotal * platformCommissionPercent) / 100;
+  const passThrough = Math.max(0, Math.min(Number(allowancePassThrough) || 0, subtotal));
+  const commissionableSubtotal = Math.max(0, subtotal - passThrough);
+  const platformCommission = (commissionableSubtotal * platformCommissionPercent) / 100;
   const driverEarning = Math.max(0, subtotal - platformCommission);
+  const driverFareEarning = Math.max(0, commissionableSubtotal - platformCommission);
+  const driverAllowanceEarning = passThrough;
 
   return {
     serviceCharge: round2(serviceCharge),
@@ -50,6 +65,10 @@ function applyPlatformLayers(subtotal, pricing, subscription) {
     totalPayable: round2(totalPayable),
     platformCommission: round2(platformCommission),
     platformCommissionPercent,
+    commissionableSubtotal: round2(commissionableSubtotal),
+    allowancePassThrough: round2(passThrough),
+    driverFareEarning: round2(driverFareEarning),
+    driverAllowanceEarning: round2(driverAllowanceEarning),
     driverEarning: round2(driverEarning),
   };
 }
@@ -110,11 +129,18 @@ export function calculateHourlyFare({
 }
 
 /**
- * Mirrors the simplified backend outstation pricing model:
+ * Mirrors the backend outstation pricing model with separate food
+ * (per day) and stay (per night) allowances:
+ *
  *   subtotal = dailyRate × days
- *            + (customer arranges all ? 0 : allowancePerNight × nights)
- * Toll & parking are NOT added — they're paid by the customer directly
- * to the driver.
+ *            + (foodProvided ? 0 : foodAllowancePerDay   × days)
+ *            + (stayProvided ? 0 : stayAllowancePerNight × nights)
+ *
+ * Back-compat: when both split fields are 0 and the legacy
+ * `outstation.allowancePerNight` is set, fall back to the combined
+ * per-night charge (waived only when BOTH provided flags are true).
+ * Toll & parking are NEVER added — they're paid by the customer
+ * directly to the driver.
  */
 export function calculateOutstationFare({
   pricing,
@@ -134,18 +160,40 @@ export function calculateOutstationFare({
   const nights = Math.max(0, tripDays - 1);
 
   const dailyRate = Number(o.dailyRate) || 0;
-  const allowancePerNight = Number(o.allowancePerNight) || 0;
+  const foodAllowancePerDay = Number(o.foodAllowancePerDay) || 0;
+  const stayAllowancePerNight = Number(o.stayAllowancePerNight) || 0;
+  const legacyAllowancePerNight = Number(o.allowancePerNight) || 0;
+  const useLegacyAllowance =
+    foodAllowancePerDay <= 0 &&
+    stayAllowancePerNight <= 0 &&
+    legacyAllowancePerNight > 0;
 
   const dailyRateTotal = dailyRate * tripDays;
-  // Convention mirrors the backend engine: both flags must be exactly
-  // `true` to waive the per-night allowance.
+  let foodAllowanceTotal = 0;
+  let stayAllowanceTotal = 0;
+  let legacyAllowanceTotal = 0;
+  if (useLegacyAllowance) {
+    const bothProvided = foodProvided === true && stayProvided === true;
+    legacyAllowanceTotal = bothProvided ? 0 : legacyAllowancePerNight * nights;
+  } else {
+    foodAllowanceTotal = foodProvided === true ? 0 : foodAllowancePerDay * tripDays;
+    stayAllowanceTotal = stayProvided === true ? 0 : stayAllowancePerNight * nights;
+  }
+  const allowanceTotal =
+    foodAllowanceTotal + stayAllowanceTotal + legacyAllowanceTotal;
+
   const customerArrangesAll = foodProvided === true && stayProvided === true;
-  const allowanceTotal = customerArrangesAll
-    ? 0
-    : allowancePerNight * nights;
 
   const subtotal = dailyRateTotal + allowanceTotal;
-  const layers = applyPlatformLayers(subtotal, pricing, subscription);
+  // Outstation: the food + stay (and any legacy combined) allowance
+  // is pass-through to the driver — no platform commission on it.
+  // Only the daily-rate portion is commissionable.
+  const layers = applyPlatformLayers(
+    subtotal,
+    pricing,
+    subscription,
+    allowanceTotal,
+  );
 
   return {
     serviceType: SERVICE_TYPES.OUTSTATION,
@@ -153,8 +201,13 @@ export function calculateOutstationFare({
     nights,
     dailyRate: round2(dailyRate),
     dailyRateTotal: round2(dailyRateTotal),
-    allowancePerNight: round2(allowancePerNight),
+    foodAllowancePerDay: round2(foodAllowancePerDay),
+    foodAllowanceTotal: round2(foodAllowanceTotal),
+    stayAllowancePerNight: round2(stayAllowancePerNight),
+    stayAllowanceTotal: round2(stayAllowanceTotal),
     allowanceTotal: round2(allowanceTotal),
+    allowancePerNight: round2(legacyAllowancePerNight),
+    legacyAllowanceTotal: round2(legacyAllowanceTotal),
     customerArrangesAll,
     foodProvided: foodProvided === true,
     stayProvided: stayProvided === true,
@@ -164,8 +217,6 @@ export function calculateOutstationFare({
     extraKmCharge: 0,
     nightHaltCharge: 0,
     nightHaltTotal: 0,
-    foodAllowancePerDay: 0,
-    foodAllowanceTotal: 0,
     stayChargePerNight: 0,
     stayChargeTotal: 0,
     tollParking: 0,

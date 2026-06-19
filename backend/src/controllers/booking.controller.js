@@ -20,6 +20,10 @@ import {
   dismissExtensionByDriverService,
 } from '../services/bookingExtension.service.js';
 import {
+  rateDriverService,
+  rateCustomerService,
+} from '../services/bookingRating.service.js';
+import {
   recordCustomerOnMyWay,
   recordCustomerNotComing,
 } from '../services/bookingNoShowTimeout.service.js';
@@ -303,6 +307,36 @@ export const driverDismissBookingExtension = asyncHandler(async (req, res) => {
 });
 
 /**
+ * POST /auth/bookings/:id/rate-driver
+ *
+ * Customer submits a 1–5 star rating + optional review for the driver
+ * that completed this trip. Once-only: a second submit hits 409.
+ *
+ *   body: { stars: 1..5, review?: string<=500 }
+ */
+export const rateDriverByCustomer = asyncHandler(async (req, res) => {
+  const result = await rateDriverService(req.user._id, req.params.id, req.body);
+  return res
+    .status(201)
+    .json(new ApiResponse(201, result, 'Thanks for rating your driver'));
+});
+
+/**
+ * POST /driver/bookings/:id/rate-customer
+ *
+ * Driver submits a 1–5 star rating + optional review for the customer
+ * after the trip completes. Once-only: a second submit hits 409.
+ *
+ *   body: { stars: 1..5, review?: string<=500 }
+ */
+export const rateCustomerByDriver = asyncHandler(async (req, res) => {
+  const result = await rateCustomerService(req.driver._id, req.params.id, req.body);
+  return res
+    .status(201)
+    .json(new ApiResponse(201, result, 'Thanks for rating the customer'));
+});
+
+/**
  * POST /auth/bookings/:id/noshow/respond
  *
  * Customer's answer to the "are you coming?" prompt that fired when
@@ -375,17 +409,32 @@ export const getEmergencyPoolBookings = asyncHandler(async (req, res) => {
 });
 
 export const getEmergencyPoolAvailableDrivers = asyncHandler(async (req, res) => {
+  // Resolve carTypeId from query or from the booking's car.
   const carTypeId =
     req.query?.carTypeId ||
     (await getBookingCarTypeIdService(req.params.id)) ||
     null;
-  const drivers = await listAvailableDriversForAssignmentService({
+
+  // Look up the booking's pickup coordinates so the service can
+  // geo-sort drivers by distance from the pickup point.
+  const booking = await Booking.findById(req.params.id)
+    .select('pickup')
+    .lean();
+  const coords = booking?.pickup?.location?.coordinates;
+  const pickupCoords =
+    Array.isArray(coords) && coords.length === 2
+      ? { lng: coords[0], lat: coords[1] }
+      : null;
+
+  const result = await listAvailableDriversForAssignmentService({
     carTypeId,
+    pickupCoords,
+    page: req.query?.page,
     limit: req.query?.limit,
   });
   return res
     .status(200)
-    .json(new ApiResponse(200, { drivers, carTypeId }, 'Available drivers fetched'));
+    .json(new ApiResponse(200, { ...result, carTypeId }, 'Available drivers fetched'));
 });
 
 export const assignDriverToEmergencyPoolBooking = asyncHandler(async (req, res) => {
@@ -440,6 +489,7 @@ export const getOutstationAssignmentDetail = asyncHandler(async (req, res) => {
 export const getOutstationAssignmentDrivers = asyncHandler(async (req, res) => {
   const result = await listAvailableDriversForOutstationService(req.params.id, {
     search: req.query?.search,
+    page: req.query?.page,
     limit: req.query?.limit,
     staff: req.staff,
   });

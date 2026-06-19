@@ -1,4 +1,6 @@
 import Booking from '../models/booking.model.js';
+import { Driver } from '../models/driverModels/driver.model.js';
+import Payment from '../models/payment.model.js';
 import { ApiError } from '../utils/apiError.js';
 import {
   BOOKING_STATUS,
@@ -6,6 +8,10 @@ import {
 } from '../constants/bookingStatus.js';
 import { SERVICE_TYPES } from '../constants/serviceTypes.js';
 import { S2C_EVENTS } from '../constants/socketEvents.js';
+import {
+  PAYMENT_PROVIDER,
+  PAYMENT_PURPOSE,
+} from '../constants/kitStatus.js';
 import {
   emitToUser,
   emitToBooking,
@@ -18,6 +24,7 @@ import {
   releaseWalletHoldService,
 } from './wallet.service.js';
 import { WALLET_TXN_SOURCE } from '../models/walletTransaction.model.js';
+import { todayKey } from './bookingCancellation.service.js';
 
 /**
  * In-ride extension handling.
@@ -42,6 +49,17 @@ import { WALLET_TXN_SOURCE } from '../models/walletTransaction.model.js';
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const MIN_EXTENSION_HOURS = 0.5;
 const MAX_EXTENSION_HOURS_DEFAULT = 12;
+/**
+ * Outstation extensions are accumulated in WHOLE calendar days — the
+ * dailyRate / foodAllowancePerDay / stayAllowancePerNight knobs on
+ * `ServicePricing.outstation` are per-day numbers and the existing
+ * outstation booking flow already enforces day-granularity, so we
+ * keep the same unit on the extension side. The lower bound mirrors
+ * `outstation.minDays` (effectively 1) and the upper bound is a
+ * sanity cap.
+ */
+const MIN_EXTENSION_DAYS = 1;
+const MAX_EXTENSION_DAYS_DEFAULT = 14;
 
 /**
  * Sum of all CONFIRMED extension fare deltas for a booking — i.e. only
@@ -71,6 +89,87 @@ export function extensionsFareDelta(booking) {
       sum + (ext?.status === 'accepted' ? Number(ext.fareDelta) || 0 : 0),
     0,
   );
+}
+
+/**
+ * Build the `meta` blob written onto the `commission` PlatformRevenue
+ * row so the admin /revenue details popup can render every component
+ * the platform kept on a single booking:
+ *
+ *   base     fareSnapshot.breakdown.{platformCommission, driverEarning}
+ *            BEFORE any extension uplifts — derived by subtracting the
+ *            accepted-extensions sum from the post-uplift breakdown.
+ *   ext      sum of `accepted` extension fareDeltas + their driver /
+ *            commission shares (matches what `payExtensionService`
+ *            bumped onto `breakdown` at acceptance time).
+ *   waiting  the final `waiting.chargeRupees` (capped at the buffer by
+ *            `settleWaitingBuffer`). Per current policy the driver gets
+ *            100% and the platform gets 0% — we still surface it on the
+ *            popup so the admin sees the full "what did the customer
+ *            actually pay" story even though it's not platform revenue.
+ *
+ *   effectiveTotal = original total + accepted extensions + waiting
+ *                  = "what the customer actually paid for this trip"
+ *
+ * The `breakdown` post-uplift values are intentionally surfaced AS-IS
+ * (matching the row's `amountRupees`) so the popup never has to re-do
+ * the math — only display.
+ */
+export function buildCommissionRevenueMeta(booking) {
+  const bd = booking?.fareSnapshot?.breakdown || {};
+  const acceptedExtensions = (booking?.extensions || []).filter(
+    (e) => e.status === 'accepted',
+  );
+  const extensionFareDelta = acceptedExtensions.reduce(
+    (sum, e) => sum + (Number(e.fareDelta) || 0),
+    0,
+  );
+  const extensionDriverEarning = acceptedExtensions.reduce(
+    (sum, e) => sum + (Number(e.breakdown?.driverEarning) || 0),
+    0,
+  );
+  const extensionPlatformCommission = acceptedExtensions.reduce(
+    (sum, e) => sum + (Number(e.breakdown?.platformCommission) || 0),
+    0,
+  );
+  const extensionAdditionalHours = acceptedExtensions.reduce(
+    (sum, e) => sum + (Number(e.additionalHours) || 0),
+    0,
+  );
+
+  const totalCommission = Number(bd.platformCommission) || 0;
+  const totalDriverEarning = Number(bd.driverEarning) || 0;
+  const totalPayable = Number(bd.totalPayable) || Number(booking?.fareSnapshot?.total) || 0;
+  const waitingCharge = Number(booking?.waiting?.chargeRupees) || 0;
+
+  return {
+    commissionPercent: Number(bd.platformCommissionPercent) || 0,
+    // Post-uplift figures — these match `amountRupees` and the wallet
+    // credit the driver actually received.
+    driverEarning: round2(totalDriverEarning),
+    platformCommission: round2(totalCommission),
+    // Snapshot-level numbers (do NOT include extensions/waiting). Kept
+    // for the breakdown popup so admins can see the original quote.
+    totalPayable: round2(totalPayable),
+    baseDriverEarning: round2(totalDriverEarning - extensionDriverEarning),
+    basePlatformCommission: round2(totalCommission - extensionPlatformCommission),
+    // Extension components.
+    extensionsCount: acceptedExtensions.length,
+    extensionAdditionalHours: round2(extensionAdditionalHours),
+    extensionFareDelta: round2(extensionFareDelta),
+    extensionDriverEarning: round2(extensionDriverEarning),
+    extensionPlatformCommission: round2(extensionPlatformCommission),
+    // Waiting components (100% to driver under current policy).
+    waitingChargeRupees: round2(waitingCharge),
+    waitingDriverEarning: round2(waitingCharge),
+    waitingPlatformCommission: 0,
+    waitingBillableMinutes: Number(booking?.waiting?.billableMinutes) || 0,
+    waitingPerMinuteRupees: Number(booking?.waiting?.perMinuteRupees) || 0,
+    waitingFreeMinutes: Number(booking?.waiting?.freeMinutes) || 0,
+    waitingNoShow: !!booking?.waiting?.noShow,
+    // Customer-paid-it-all sanity number.
+    effectiveTotal: round2(totalPayable + extensionFareDelta + waitingCharge),
+  };
 }
 
 /**
@@ -181,6 +280,7 @@ export async function settleWaitingBuffer(booking) {
   // Step 1: debit the actual waiting charge from the wallet. Use the
   // bypassHeld escape hatch — this debit is exactly what the held funds
   // were earmarked for.
+  let userDebitOk = false;
   if (cappedCharge > 0) {
     try {
       const tx = await debitWalletService({
@@ -193,6 +293,7 @@ export async function settleWaitingBuffer(booking) {
         bypassHeld: true,
       });
       booking.waiting.bufferRefundTxId = tx._id;
+      userDebitOk = true;
     } catch (err) {
       console.warn(
         '[booking] waiting-charge debit failed for booking',
@@ -200,11 +301,31 @@ export async function settleWaitingBuffer(booking) {
         err?.message,
       );
       // Don't throw — completion must succeed. The hold release below
-      // still runs so the user's wallet returns to a sane state.
+      // still runs so the user's wallet returns to a sane state. The
+      // driver credit below is gated on a successful user debit so the
+      // ledger never shows a credit without the matching debit.
     }
   }
 
-  // Step 2: release the entire hold for this booking. Even if the debit
+  // Step 2: credit the driver's wallet with the full waiting charge.
+  // Policy: 100% of the waiting amount goes to the driver — they are
+  // the one who sat idle past the free-wait window. The platform
+  // takes no commission on this component (booked as a separate
+  // `TRIP_WAITING` Payment row so the driver's earnings page shows
+  // it distinctly from the daily fare). Best-effort: a failed credit
+  // logs but never wedges trip completion — the admin can reconcile
+  // from the booking later.
+  if (userDebitOk && cappedCharge > 0 && booking.driverId) {
+    await creditDriverForWaitingCharge(booking, cappedCharge).catch((err) =>
+      console.warn(
+        '[booking] failed to credit driver wallet for waiting charge:',
+        String(booking._id),
+        err?.message,
+      ),
+    );
+  }
+
+  // Step 3: release the entire hold for this booking. Even if the debit
   // failed we release — the audit trail (bufferConsumedRupees /
   // bufferRefundRupees) records the intent and admins can reconcile.
   try {
@@ -219,6 +340,253 @@ export async function settleWaitingBuffer(booking) {
       err?.message,
     );
   }
+}
+
+/**
+ * Credit `driverEarning` (= subtotal × (1 − commission%) on the daily
+ * rate, untouched on the food/stay allowance) to the driver's wallet
+ * at trip completion and write two `Payment` ledger rows so the
+ * driver's history page shows the credit split:
+ *
+ *   1. Trip fare         — the daily-rate / hourly portion the
+ *                          driver earned net of platform commission.
+ *   2. Food & stay       — the pass-through food + stay allowance
+ *      allowance           the customer paid because they opted not
+ *                          to host / feed the driver. Already net of
+ *                          commission per the engine's split so the
+ *                          two rows sum to `driverEarning` exactly.
+ *
+ * Wallet credits land in three places:
+ *   - driver.wallet.balance        (the spendable balance)
+ *   - driver.wallet.totalEarnings  (lifetime earnings counter)
+ *   - driver.todaySummary          (today's trips + earnings tile,
+ *                                   rolled over to a new dateKey
+ *                                   when crossing local midnight)
+ *
+ * `Payment.referenceModel` differentiates the two rows so they
+ * satisfy the `{ referenceId, referenceModel }` unique index without
+ * colliding with each other (or with KitOrder/waiting payments for
+ * the same booking — each uses a different model name).
+ *
+ * Shared by the normal trip-complete path AND the no-show auto-complete
+ * timer — both transition the booking to COMPLETED and must pay the
+ * driver. Lives next to `settleWaitingBuffer` because both functions
+ * settle driver-side rupees at trip-end and share the same Driver /
+ * Payment / todayKey helpers.
+ */
+export async function settleDriverEarning(booking) {
+  const driverId = booking?.driverId;
+  if (!driverId) return;
+  const breakdown = booking?.fareSnapshot?.breakdown || {};
+  const driverEarning = round2(Number(breakdown.driverEarning) || 0);
+  if (driverEarning <= 0) return;
+
+  // Prefer the explicit `driverFareEarning` / `driverAllowanceEarning`
+  // fields the pricing engine stamps when the booking was created
+  // under the "commission only on the daily rate" policy. For legacy
+  // bookings (older snapshots) those aren't present — fall back to a
+  // pro-rata split using `allowanceTotal / subtotal` so the two ledger
+  // rows still sum exactly to `driverEarning`.
+  let allowanceShare = round2(Number(breakdown.driverAllowanceEarning) || 0);
+  let fareShare = round2(Number(breakdown.driverFareEarning) || 0);
+  const explicitSplit = allowanceShare + fareShare > 0;
+  if (!explicitSplit) {
+    const subtotal = Number(breakdown.subtotal) || 0;
+    const allowanceTotal = Number(
+      breakdown.allowanceTotal
+        ?? ((Number(breakdown.foodAllowanceTotal) || 0)
+          + (Number(breakdown.stayAllowanceTotal) || 0)
+          + (Number(breakdown.legacyAllowanceTotal) || 0)),
+    ) || 0;
+    if (subtotal > 0 && allowanceTotal > 0) {
+      allowanceShare = round2(driverEarning * (allowanceTotal / subtotal));
+    } else {
+      allowanceShare = 0;
+    }
+    fareShare = round2(driverEarning - allowanceShare);
+  }
+  // Defensive anchor: absorb any FP drift into the fare row so the
+  // ledger always sums exactly to the wallet credit.
+  const drift = round2(driverEarning - (fareShare + allowanceShare));
+  if (drift !== 0) fareShare = round2(fareShare + drift);
+
+  const todayDateKey = todayKey();
+  const driverDoc = await Driver.findById(driverId)
+    .select('todaySummary')
+    .lean()
+    .catch(() => null);
+  const sameDay = driverDoc?.todaySummary?.dateKey === todayDateKey;
+
+  if (sameDay) {
+    await Driver.updateOne(
+      { _id: driverId },
+      {
+        $inc: {
+          'wallet.balance': driverEarning,
+          'wallet.totalEarnings': driverEarning,
+          'todaySummary.trips': 1,
+          'todaySummary.earnings': driverEarning,
+        },
+      },
+    );
+  } else {
+    // Roll today's bucket over, replacing the stale counters with this
+    // trip's numbers (the waiting-credit path, if it runs first, leaves
+    // dateKey at today already and we just $inc above).
+    await Driver.updateOne(
+      { _id: driverId },
+      {
+        $inc: {
+          'wallet.balance': driverEarning,
+          'wallet.totalEarnings': driverEarning,
+        },
+        $set: {
+          'todaySummary.dateKey': todayDateKey,
+          'todaySummary.trips': 1,
+          'todaySummary.earnings': driverEarning,
+        },
+      },
+    );
+  }
+
+  const commonMeta = {
+    bookingNumber: booking.bookingNumber || '',
+    serviceType: booking.serviceType || '',
+    completedAt: booking.timeline?.completedAt || new Date(),
+  };
+  if (fareShare > 0) {
+    Payment.create({
+      provider: PAYMENT_PROVIDER.WALLET,
+      purpose: PAYMENT_PURPOSE.TRIP_FARE,
+      referenceId: booking._id,
+      referenceModel: 'BookingTripFare',
+      amount: fareShare,
+      currency: 'INR',
+      status: 'captured',
+      method: 'wallet',
+      driverId,
+      meta: { ...commonMeta, driverEarning, allowanceShare, fareShare },
+    }).catch((err) =>
+      console.warn(
+        '[booking] failed to write trip-fare ledger row:',
+        err?.message,
+      ),
+    );
+  }
+  if (allowanceShare > 0) {
+    Payment.create({
+      provider: PAYMENT_PROVIDER.WALLET,
+      purpose: PAYMENT_PURPOSE.TRIP_ALLOWANCE,
+      referenceId: booking._id,
+      referenceModel: 'BookingTripAllowance',
+      amount: allowanceShare,
+      currency: 'INR',
+      status: 'captured',
+      method: 'wallet',
+      driverId,
+      meta: {
+        ...commonMeta,
+        driverEarning,
+        allowanceShare,
+        fareShare,
+        foodAllowanceTotal: Number(breakdown.foodAllowanceTotal) || 0,
+        stayAllowanceTotal: Number(breakdown.stayAllowanceTotal) || 0,
+        legacyAllowanceTotal: Number(breakdown.legacyAllowanceTotal) || 0,
+      },
+    }).catch((err) =>
+      console.warn(
+        '[booking] failed to write trip-allowance ledger row:',
+        err?.message,
+      ),
+    );
+  }
+}
+
+/**
+ * Credit `amount` rupees of waiting charge to the driver's wallet and
+ * write the matching audit row.
+ *
+ * Mirrors the rolling-day pattern used by `settleDriverEarning` (in
+ * `bookingTrip.service.js`) so the driver's `todaySummary.earnings`
+ * tile picks the credit up correctly across local-midnight boundaries.
+ * We intentionally do NOT increment `todaySummary.trips` here — the
+ * waiting charge is part of the same trip the fare-share settle is
+ * counting, not a second trip.
+ *
+ * The `Payment` row uses `referenceModel = 'BookingTripWaiting'` so it
+ * coexists with the `BookingTripFare` / `BookingTripAllowance` rows the
+ * fare-share settle writes for the same booking (unique index is on
+ * `{ referenceId, referenceModel }`).
+ */
+async function creditDriverForWaitingCharge(booking, amount) {
+  const driverId = booking.driverId;
+  if (!driverId || !(amount > 0)) return;
+
+  const todayDateKey = todayKey();
+  const driverDoc = await Driver.findById(driverId)
+    .select('todaySummary')
+    .lean()
+    .catch(() => null);
+  const sameDay = driverDoc?.todaySummary?.dateKey === todayDateKey;
+
+  if (sameDay) {
+    await Driver.updateOne(
+      { _id: driverId },
+      {
+        $inc: {
+          'wallet.balance': amount,
+          'wallet.totalEarnings': amount,
+          'todaySummary.earnings': amount,
+        },
+      },
+    );
+  } else {
+    // Roll the today bucket. Set `trips: 0` because the matching
+    // fare-share settle (which DOES bump trips) runs separately; if it
+    // runs after us it will find sameDay = true and increment to 1.
+    await Driver.updateOne(
+      { _id: driverId },
+      {
+        $inc: {
+          'wallet.balance': amount,
+          'wallet.totalEarnings': amount,
+        },
+        $set: {
+          'todaySummary.dateKey': todayDateKey,
+          'todaySummary.trips': 0,
+          'todaySummary.earnings': amount,
+        },
+      },
+    );
+  }
+
+  Payment.create({
+    provider: PAYMENT_PROVIDER.WALLET,
+    purpose: PAYMENT_PURPOSE.TRIP_WAITING,
+    referenceId: booking._id,
+    referenceModel: 'BookingTripWaiting',
+    amount,
+    currency: 'INR',
+    status: 'captured',
+    method: 'wallet',
+    driverId,
+    meta: {
+      bookingNumber: booking.bookingNumber || '',
+      serviceType: booking.serviceType || '',
+      completedAt: booking.timeline?.completedAt || new Date(),
+      waitedMinutes: Number(booking.waiting?.waitedMinutes) || 0,
+      billableMinutes: Number(booking.waiting?.billableMinutes) || 0,
+      freeMinutes: Number(booking.waiting?.freeMinutes) || 0,
+      perMinuteRupees: Number(booking.waiting?.perMinuteRupees) || 0,
+      noShow: !!booking.waiting?.noShow,
+    },
+  }).catch((err) =>
+    console.warn(
+      '[booking] failed to write waiting-charge driver ledger row:',
+      String(booking._id),
+      err?.message,
+    ),
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -281,6 +649,139 @@ function computeExtensionDelta(pricing, fareBreakdown, additionalHours) {
 }
 
 /**
+ * Outstation extension delta — N extra calendar days at the daily
+ * rate, plus the per-day food allowance and per-night stay allowance
+ * the booking was already paying for (mirrors the at-create math in
+ * `pricing.service.js#calculateOutstationFare`).
+ *
+ * Conventions:
+ *   - The food + stay allowance is pass-through to the driver (same
+ *     as the original booking) — so platform commission only applies
+ *     to the daily-rate portion. This keeps the post-uplift breakdown
+ *     symmetric with the at-create breakdown and the company-revenue
+ *     ledger remains balanced when `payExtensionService` bumps it.
+ *   - Service charge + GST percentages are re-derived from the
+ *     original fare snapshot so the extension uses the same
+ *     percentages even if the admin tweaks pricing mid-trip.
+ *   - For an N-day extension, `extraNights` is treated as N (the
+ *     customer needs the driver overnight for each of the N added
+ *     days, including the new "last" night before pickup of the next
+ *     extra day) when the original booking already crossed at least
+ *     one night. For a same-day add-on (rare), the stay allowance
+ *     skips. We approximate this from the original booking's
+ *     `outstation.nights / days` ratio so the extension's per-day
+ *     cost matches the original's per-day cost.
+ *
+ * Honours the booking's `outstation.needsFood` / `needsStay` flags so
+ * customers who arranged food + stay upfront aren't surprise-charged
+ * for the extension.
+ */
+function computeOutstationExtensionDelta(
+  pricing,
+  fareBreakdown,
+  booking,
+  additionalDays,
+) {
+  const o = pricing?.outstation || {};
+  const dailyRate = Number(o.dailyRate) || 0;
+  if (!dailyRate) {
+    throw new ApiError(
+      400,
+      'Daily-rate pricing is not configured for outstation extensions',
+    );
+  }
+  const days = Math.max(1, Math.floor(additionalDays));
+
+  // The original booking's per-day allowances. We honour the customer's
+  // food/stay flags (set at booking-create) so an extension never
+  // bills for an allowance the original trip already opted out of.
+  const needsFood = booking?.outstation?.needsFood !== false;
+  const needsStay = booking?.outstation?.needsStay !== false;
+  const foodAllowancePerDay = needsFood ? Number(o.foodAllowancePerDay) || 0 : 0;
+  const stayAllowancePerNight = needsStay
+    ? Number(o.stayAllowancePerNight) || 0
+    : 0;
+  // Legacy back-compat: when both split fields are 0 and the doc still
+  // has the combined per-night number, the original at-create math
+  // used `legacyAllowancePerNight × nights`. Mirror that here so the
+  // extension fare matches the original's per-day cost. Waived when
+  // BOTH provided flags are true (same as `calculateOutstationFare`).
+  const legacyAllowancePerNight =
+    foodAllowancePerDay <= 0 && stayAllowancePerNight <= 0
+      ? (needsFood && needsStay ? 0 : Number(o.allowancePerNight) || 0)
+      : 0;
+
+  // For an N-day extension we add N "extra nights" the driver will
+  // sleep over (one per added day) IF the original booking already
+  // had at least one overnight halt; otherwise we treat the extension
+  // as zero-night (a same-day add-on) so the customer isn't
+  // surprise-charged for a stay they didn't need on day 1.
+  const originalNights = Number(booking?.outstation?.nights) || 0;
+  const extraNights = originalNights > 0 ? days : 0;
+
+  const dailyRateTotal = dailyRate * days;
+  const foodAllowanceTotal = foodAllowancePerDay * days;
+  const stayAllowanceTotal = stayAllowancePerNight * extraNights;
+  const legacyAllowanceTotal = legacyAllowancePerNight * extraNights;
+  const allowanceTotal =
+    foodAllowanceTotal + stayAllowanceTotal + legacyAllowanceTotal;
+
+  const subtotal = dailyRateTotal + allowanceTotal;
+  const { serviceChargePercent, gstPercent } = inferRates(fareBreakdown);
+  const serviceCharge = (subtotal * serviceChargePercent) / 100;
+  const gst = ((subtotal + serviceCharge) * gstPercent) / 100;
+  const fareDelta = round2(subtotal + serviceCharge + gst);
+
+  // Commission applies only to the daily-rate portion — the food +
+  // stay allowance is pass-through to the driver (same policy as the
+  // original outstation booking). See `applyPlatformLayers` in
+  // `pricing.service.js`.
+  const platformCommissionPercent =
+    Number(fareBreakdown?.platformCommissionPercent) ||
+    Number(pricing?.platformCommissionPercent) ||
+    0;
+  const commissionableSubtotal = dailyRateTotal;
+  const platformCommission =
+    (commissionableSubtotal * platformCommissionPercent) / 100;
+  // Driver keeps the full allowance + (dailyRateTotal − commission).
+  const driverFareEarning = Math.max(
+    0,
+    commissionableSubtotal - platformCommission,
+  );
+  const driverAllowanceEarning = allowanceTotal;
+  const driverEarning = round2(driverFareEarning + driverAllowanceEarning);
+
+  return {
+    fareDelta,
+    breakdown: {
+      // Hours field is set to days × 24 so legacy aggregations that
+      // read `additionalHours` still produce sensible numbers.
+      additionalHours: days * 24,
+      additionalDays: days,
+      dailyRate: round2(dailyRate),
+      dailyRateTotal: round2(dailyRateTotal),
+      foodAllowancePerDay: round2(foodAllowancePerDay),
+      foodAllowanceTotal: round2(foodAllowanceTotal),
+      stayAllowancePerNight: round2(stayAllowancePerNight),
+      stayAllowanceTotal: round2(stayAllowanceTotal),
+      legacyAllowanceTotal: round2(legacyAllowanceTotal),
+      allowanceTotal: round2(allowanceTotal),
+      extraNights,
+      subtotal: round2(subtotal),
+      serviceCharge: round2(serviceCharge),
+      serviceChargePercent,
+      gst: round2(gst),
+      gstPercent,
+      platformCommission: round2(platformCommission),
+      platformCommissionPercent,
+      driverEarning: round2(driverEarning),
+      driverFareEarning: round2(driverFareEarning),
+      driverAllowanceEarning: round2(driverAllowanceEarning),
+    },
+  };
+}
+
+/**
  * Window (in minutes) the customer has to verify the OTP and pay before
  * the pending extension row auto-expires. Kept conservative so a stale
  * intent doesn't block the next attempt.
@@ -313,14 +814,42 @@ function serialiseExtensionForCustomer(ext) {
 }
 
 /**
- * Same shape as `serialiseExtensionForCustomer` but includes the OTP
- * code so the driver app can show it to read aloud to the customer.
- * Only used on driver-targeted socket payloads.
+ * Driver-safe extension row for driver-targeted socket payloads and
+ * the booking's `extensions[]` array as the driver sees it.
+ *
+ * Critical: customer-side pricing fields are scrubbed out. The driver
+ * never sees `fareDelta` (= what the customer paid), `breakdown.subtotal`,
+ * `breakdown.serviceCharge`, `breakdown.gst` or `breakdown.platformCommission`.
+ * They only see `driverEarning` (their actual wallet credit on this
+ * extension) and the lifecycle stamps. OTP code is included so the
+ * driver can read it aloud to the customer — same as the ride-start
+ * OTP handshake.
  */
 function serialiseExtensionForDriver(ext) {
   if (!ext) return null;
   const obj = ext.toObject ? ext.toObject() : { ...ext };
-  return obj;
+  const bd = obj.breakdown || {};
+  return {
+    _id: obj._id || null,
+    status: obj.status || null,
+    additionalHours: Number(obj.additionalHours) || 0,
+    additionalDays: Number(obj.additionalDays) || 0,
+    driverEarning: round2(Number(bd.driverEarning) || 0),
+    requestedAt: obj.requestedAt || null,
+    respondedAt: obj.respondedAt || null,
+    paidAt: obj.paidAt || null,
+    // Driver banners read the OTP from here when reading aloud; the
+    // customer-targeted serializer strips it instead.
+    otp: obj.otp
+      ? {
+          code: obj.otp.code || '',
+          generatedAt: obj.otp.generatedAt || null,
+          verifiedAt: obj.otp.verifiedAt || null,
+          expiresAt: obj.otp.expiresAt || null,
+          attempts: obj.otp.attempts || 0,
+        }
+      : null,
+  };
 }
 
 /**
@@ -371,21 +900,54 @@ function getExtensionOrThrow(booking, extensionId) {
  * Returns the customer-safe extension shape (no OTP code).
  */
 export async function initiateExtensionService(userId, bookingId, body = {}) {
-  const additionalHours = Number(body?.additionalHours);
-  if (!Number.isFinite(additionalHours) || additionalHours < MIN_EXTENSION_HOURS) {
-    throw new ApiError(400, `additionalHours must be at least ${MIN_EXTENSION_HOURS}`);
-  }
-  if (additionalHours > MAX_EXTENSION_HOURS_DEFAULT) {
-    throw new ApiError(400, `additionalHours cannot exceed ${MAX_EXTENSION_HOURS_DEFAULT}`);
-  }
-
   const booking = await Booking.findOne({ _id: bookingId, userId, isDeleted: false });
   if (!booking) throw new ApiError(404, 'Booking not found');
   if (booking.status !== BOOKING_STATUS.STARTED) {
     throw new ApiError(400, 'Ride must be in progress to extend');
   }
-  if (booking.serviceType !== SERVICE_TYPES.HOURLY) {
-    throw new ApiError(400, 'Only hourly bookings can be extended');
+
+  // Branch on serviceType — hourly accepts `additionalHours`, outstation
+  // accepts `additionalDays`. We normalise both into the same row shape
+  // (the model stores both `additionalHours` AND `additionalDays`,
+  // populating the unused one with 0).
+  const isOutstation = booking.serviceType === SERVICE_TYPES.OUTSTATION;
+  const isHourly = booking.serviceType === SERVICE_TYPES.HOURLY;
+  if (!isOutstation && !isHourly) {
+    throw new ApiError(400, 'This service type does not support extensions');
+  }
+
+  let additionalHours = 0;
+  let additionalDays = 0;
+  if (isOutstation) {
+    additionalDays = Number(body?.additionalDays);
+    if (!Number.isFinite(additionalDays) || additionalDays < MIN_EXTENSION_DAYS) {
+      throw new ApiError(
+        400,
+        `additionalDays must be at least ${MIN_EXTENSION_DAYS}`,
+      );
+    }
+    if (additionalDays > MAX_EXTENSION_DAYS_DEFAULT) {
+      throw new ApiError(
+        400,
+        `additionalDays cannot exceed ${MAX_EXTENSION_DAYS_DEFAULT}`,
+      );
+    }
+    additionalDays = Math.floor(additionalDays);
+    additionalHours = additionalDays * 24;
+  } else {
+    additionalHours = Number(body?.additionalHours);
+    if (!Number.isFinite(additionalHours) || additionalHours < MIN_EXTENSION_HOURS) {
+      throw new ApiError(
+        400,
+        `additionalHours must be at least ${MIN_EXTENSION_HOURS}`,
+      );
+    }
+    if (additionalHours > MAX_EXTENSION_HOURS_DEFAULT) {
+      throw new ApiError(
+        400,
+        `additionalHours cannot exceed ${MAX_EXTENSION_HOURS_DEFAULT}`,
+      );
+    }
   }
 
   expireStaleExtensions(booking);
@@ -408,11 +970,9 @@ export async function initiateExtensionService(userId, bookingId, body = {}) {
     throw new ApiError(400, 'Pricing for this service is not configured');
   }
   const fareBreakdown = booking.fareSnapshot?.breakdown || {};
-  const { fareDelta, breakdown } = computeExtensionDelta(
-    pricing,
-    fareBreakdown,
-    additionalHours,
-  );
+  const { fareDelta, breakdown } = isOutstation
+    ? computeOutstationExtensionDelta(pricing, fareBreakdown, booking, additionalDays)
+    : computeExtensionDelta(pricing, fareBreakdown, additionalHours);
 
   const otpCode = generateExtensionOtp();
   const now = new Date();
@@ -421,6 +981,7 @@ export async function initiateExtensionService(userId, bookingId, body = {}) {
   booking.extensions.push({
     requestedAt: now,
     additionalHours,
+    additionalDays,
     fareDelta,
     breakdown,
     status: 'pending_otp',
@@ -441,15 +1002,21 @@ export async function initiateExtensionService(userId, bookingId, body = {}) {
   // Push the OTP to the driver so they can read it to the customer.
   // Customer NEVER sees the code on their own device — that's the
   // whole point of the handshake.
+  //
+  // The driver-targeted payload deliberately omits `fareDelta` and the
+  // full `breakdown` (those carry customer-side numbers — subtotal,
+  // service charge, GST, platform commission — which the driver app
+  // shouldn't display). They only see what they will earn.
   if (booking.driverId) {
     emitToDriver(booking.driverId, S2C_EVENTS.BOOKING_EXTENSION_OTP, {
       bookingId: String(booking._id),
       extensionId: String(ext._id),
       otp: otpCode,
       additionalHours,
-      fareDelta,
+      additionalDays,
+      serviceType: booking.serviceType,
+      driverEarning: round2(Number(breakdown?.driverEarning) || 0),
       expiresAt,
-      breakdown,
     });
   }
   // Admin audit trail (with the code so support can troubleshoot live).
@@ -458,6 +1025,8 @@ export async function initiateExtensionService(userId, bookingId, body = {}) {
     extensionId: String(ext._id),
     otp: otpCode,
     additionalHours,
+    additionalDays,
+    serviceType: booking.serviceType,
     fareDelta,
     expiresAt,
   });
@@ -539,14 +1108,16 @@ export async function verifyExtensionOtpService(userId, bookingId, body = {}) {
   await booking.save();
 
   // Driver hears that the OTP was accepted so their pending banner can
-  // transition to "waiting for customer to pay".
+  // transition to "waiting for customer to pay". We pass `driverEarning`
+  // (their share), not `fareDelta` (the customer's bill) — the driver
+  // app should never display customer-side pricing.
   if (booking.driverId) {
     emitToDriver(booking.driverId, S2C_EVENTS.BOOKING_EXTENSION_RESOLVED, {
       bookingId: String(booking._id),
       extensionId: String(ext._id),
       stage: 'otp_verified',
       additionalHours: ext.additionalHours,
-      fareDelta: ext.fareDelta,
+      driverEarning: round2(Number(ext.breakdown?.driverEarning) || 0),
     });
   }
 
@@ -681,8 +1252,10 @@ export async function payExtensionService(userId, bookingId, body = {}) {
   emitToUser(booking.userId, S2C_EVENTS.BOOKING_EXTENSION_PAID, userPayload);
   emitToUser(booking.userId, S2C_EVENTS.BOOKING_UPDATED, userPayload);
 
-  // Driver gets a richer payload so they can see the full extension
-  // detail (with OTP code stripped — driver already used it).
+  // Driver gets a driver-safe payload — only their share, never the
+  // customer-paid total. `serialiseExtensionForDriver` strips the
+  // customer-pricing fields off the row (see its docstring for the
+  // shape).
   if (booking.driverId) {
     const driverPayload = {
       bookingId: String(booking._id),

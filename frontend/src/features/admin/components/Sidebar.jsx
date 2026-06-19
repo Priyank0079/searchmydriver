@@ -48,7 +48,7 @@ const navItems = [
       },
       {
         path: '/admin/bookings/emergency-pool',
-        label: 'Emergency Pool',
+        label: 'Schedule Pool',
         icon: LifeBuoy,
         // All staff can view; the page itself scopes team_members to
         // their assigned zones and hides the "assign driver" CTA.
@@ -56,7 +56,7 @@ const navItems = [
       },
       {
         path: '/admin/bookings/outstation-assignments',
-        label: 'Outstation Queue',
+        label: 'Outstation Pool',
         icon: Compass,
         // Outstation rides skip auto-dispatch entirely; staff assign
         // here. Team members see read-only rows in their zones.

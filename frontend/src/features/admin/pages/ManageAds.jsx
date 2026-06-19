@@ -16,6 +16,7 @@ import {
 import Card from '../../../components/Card';
 import Button from '../../../components/Button';
 import Input from '../../../components/Input';
+import Drawer from '../../../components/Drawer';
 import api from '../../../utils/api';
 import ConfirmDialog from '../../../components/ConfirmDialog';
 
@@ -356,30 +357,46 @@ function AdFormModal({ ad, onClose, onSaved }) {
   const hasMedia = !!mediaUrl;
   const isVideo = mediaType === 'video';
 
-  return (
-    <div className="fixed inset-0 z-[9999] flex">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <aside className="ml-auto relative w-full max-w-xl h-full bg-white shadow-2xl overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-slate-200 px-5 py-4 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[11px] uppercase tracking-wide text-slate-500">
-              {isEdit ? 'Edit ad' : 'New ad'}
-            </p>
-            <h2 className="text-base font-bold text-slate-900 truncate">
-              {isEdit ? title || 'Untitled ad' : 'Create promotional ad'}
-            </h2>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 rounded-xl hover:bg-slate-100"
-            aria-label="Close"
-          >
-            <X className="w-5 h-5 text-slate-600" />
-          </button>
-        </div>
+  const drawerHeader = (
+    <div className="px-5 py-4 flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <p className="text-[11px] uppercase tracking-wide text-slate-500">
+          {isEdit ? 'Edit ad' : 'New ad'}
+        </p>
+        <h2 className="text-base font-bold text-slate-900 truncate">
+          {isEdit ? title || 'Untitled ad' : 'Create promotional ad'}
+        </h2>
+      </div>
+      <button
+        type="button"
+        onClick={onClose}
+        className="p-2 rounded-xl hover:bg-slate-100"
+        aria-label="Close"
+      >
+        <X className="w-5 h-5 text-slate-600" />
+      </button>
+    </div>
+  );
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-5">
+  const drawerFooter = (
+    <div className="px-5 py-3 flex gap-3">
+      <Button variant="outline" fullWidth onClick={onClose} disabled={submitting}>
+        Cancel
+      </Button>
+      <Button
+        fullWidth
+        loading={submitting}
+        disabled={uploading || !mediaUrl}
+        onClick={handleSubmit}
+      >
+        {isEdit ? 'Save changes' : 'Publish ad'}
+      </Button>
+    </div>
+  );
+
+  return (
+    <Drawer isOpen onClose={onClose} header={drawerHeader} footer={drawerFooter} width="max-w-xl">
+      <form onSubmit={handleSubmit} className="p-5 space-y-5">
           <div>
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
               Media (image or short video)
@@ -508,22 +525,7 @@ function AdFormModal({ ad, onClose, onSaved }) {
             </div>
           </div>
         </form>
-
-        <div className="sticky bottom-0 bg-white border-t border-slate-200 px-5 py-3 flex gap-3">
-          <Button variant="outline" fullWidth onClick={onClose} disabled={submitting}>
-            Cancel
-          </Button>
-          <Button
-            fullWidth
-            loading={submitting}
-            disabled={uploading || !mediaUrl}
-            onClick={handleSubmit}
-          >
-            {isEdit ? 'Save changes' : 'Publish ad'}
-          </Button>
-        </div>
-      </aside>
-    </div>
+    </Drawer>
   );
 }
 

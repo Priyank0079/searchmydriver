@@ -73,12 +73,15 @@ export const PAYMENT_MODE = Object.freeze({
 export const PAYMENT_MODE_LIST = Object.freeze(Object.values(PAYMENT_MODE));
 
 /**
- * Whether the user wants the ride to start right away or at a future time.
- * Decided on the very first screen of the hourly flow.
+ * Whether the user wants the ride to start right away, at a future time,
+ * or is making an outstation (multi-day) booking.
+ * Decided on the very first screen of the booking flow.
  */
 export const BOOKING_TYPE = Object.freeze({
   INSTANT: 'instant',
   SCHEDULED: 'scheduled',
+  /** Outstation (multi-day driver) bookings are always pre-scheduled. */
+  OUTSTATION: 'outstation',
 });
 
 export const BOOKING_TYPE_LIST = Object.freeze(Object.values(BOOKING_TYPE));

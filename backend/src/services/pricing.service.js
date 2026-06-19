@@ -9,6 +9,7 @@ import {
   SUBSCRIPTION_STATUS,
 } from '../constants/serviceTypes.js';
 import { normaliseOutstationPolicy } from './bookingOutstationCancellation.service.js';
+import { normaliseHourlyPolicy } from './bookingCancellation.service.js';
 
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
@@ -96,6 +97,18 @@ function validatePricingForType(serviceType, data) {
     const o = data.outstation || {};
     if (o.dailyRate == null || o.dailyRate < 0) {
       throw new ApiError(400, 'Outstation: dailyRate must be a non-negative number');
+    }
+    if (o.foodAllowancePerDay != null && o.foodAllowancePerDay < 0) {
+      throw new ApiError(
+        400,
+        'Outstation: foodAllowancePerDay must be a non-negative number',
+      );
+    }
+    if (o.stayAllowancePerNight != null && o.stayAllowancePerNight < 0) {
+      throw new ApiError(
+        400,
+        'Outstation: stayAllowancePerNight must be a non-negative number',
+      );
     }
     if (o.allowancePerNight != null && o.allowancePerNight < 0) {
       throw new ApiError(
@@ -370,16 +383,49 @@ function applySubscriptionDiscount(subtotal, subscription) {
   return Math.min(discount, subtotal);
 }
 
-function applyPlatformLayers(subtotal, pricing, subscription) {
+/**
+ * Apply the customer-facing layers (service charge, GST, subscription
+ * discount) and split the booked subtotal into platform commission +
+ * driver earning.
+ *
+ * `allowancePassThrough` is the portion of `subtotal` we treat as a
+ * pure driver allowance (food + stay): the platform doesn't take any
+ * commission on it — the rupees flow 1:1 to the driver to offset
+ * their out-of-pocket food / lodging on the trip. Commission applies
+ * only to `commissionableSubtotal = subtotal − allowancePassThrough`
+ * (the daily-rate / slab-price portion the platform actually brokered).
+ *
+ * Service charge + GST are still computed on the full `subtotal` —
+ * those are customer-facing fees, not platform-vs-driver math.
+ *
+ * Defaults to 0 so callers that don't carry an allowance (extensions,
+ * waiting buffer reservations, etc.) keep the original "commission on
+ * full subtotal" behaviour.
+ */
+function applyPlatformLayers(subtotal, pricing, subscription, allowancePassThrough = 0) {
   const serviceChargePercent = pricing.serviceChargePercent || 0;
   const gstPercent = pricing.gstPercent || 0;
   const serviceCharge = (subtotal * serviceChargePercent) / 100;
   const gstAmount = ((subtotal + serviceCharge) * gstPercent) / 100;
   const subscriptionDiscount = applySubscriptionDiscount(subtotal, subscription);
   const totalPayable = Math.max(0, subtotal + serviceCharge + gstAmount - subscriptionDiscount);
+
   const platformCommissionPercent = pricing.platformCommissionPercent || 0;
-  const platformCommission = (subtotal * platformCommissionPercent) / 100;
+  // Allowance is pass-through to the driver — never commissionable.
+  const passThrough = Math.max(0, Math.min(Number(allowancePassThrough) || 0, subtotal));
+  const commissionableSubtotal = Math.max(0, subtotal - passThrough);
+  const platformCommission = (commissionableSubtotal * platformCommissionPercent) / 100;
+  // Driver gets:
+  //   commissionable × (1 − commission%)   the daily-rate / slab portion they earned
+  //  + passThrough                          the customer-paid allowance, untouched
+  // = subtotal − platformCommission (kept as the headline number for
+  //   back-compat — downstream aggregations and ledgers consume this).
   const driverEarning = Math.max(0, subtotal - platformCommission);
+  const driverFareEarning = Math.max(
+    0,
+    commissionableSubtotal - platformCommission,
+  );
+  const driverAllowanceEarning = passThrough;
 
   return {
     serviceCharge: round2(serviceCharge),
@@ -390,6 +436,13 @@ function applyPlatformLayers(subtotal, pricing, subscription) {
     totalPayable: round2(totalPayable),
     platformCommission: round2(platformCommission),
     platformCommissionPercent,
+    // New explicit fields. `driverEarning` keeps its existing meaning
+    // (= driverFareEarning + driverAllowanceEarning) so legacy
+    // aggregations don't need to be touched.
+    commissionableSubtotal: round2(commissionableSubtotal),
+    allowancePassThrough: round2(passThrough),
+    driverFareEarning: round2(driverFareEarning),
+    driverAllowanceEarning: round2(driverAllowanceEarning),
     driverEarning: round2(driverEarning),
   };
 }
@@ -501,7 +554,19 @@ export function calculateHourlyFare({
     foodAllowance +
     stayAllowance +
     toll;
-  const layers = applyPlatformLayers(subtotal, pricing, subscription);
+  // Hourly long-booking food + stay allowances follow the same
+  // pass-through rule as outstation: the driver keeps them in full,
+  // the platform commissions only the slab / extra-hour / night /
+  // waiting / toll layers. Toll stays commissionable here (it's
+  // already part of the platform-brokered fare in hourly), unlike
+  // outstation where toll is paid directly to the driver and
+  // omitted from subtotal entirely.
+  const layers = applyPlatformLayers(
+    subtotal,
+    pricing,
+    subscription,
+    foodAllowance + stayAllowance,
+  );
 
   return {
     serviceType: SERVICE_TYPES.HOURLY,
@@ -540,24 +605,27 @@ export function calculateHourlyFare({
 // ─── OUTSTATION fare ──────────────────────────────────────────────────────────
 
 /**
- * Outstation pricing model:
- *   subtotal = dailyRate × days
- *            + (customerArrangesAll ? 0 : allowancePerNight × nights)
+ * Outstation pricing model — split food (per day) and stay (per night)
+ * allowances so admins can tune the two costs independently:
  *
- * `customerArrangesAll` is the customer's single all-or-nothing
- * commitment to arrange BOTH the driver's food AND stay themselves.
- * It's derived from `foodProvided && stayProvided` so the legacy
- * two-flag client payload still works — the customer UI today only
- * exposes one toggle that flips both flags in lockstep.
+ *   subtotal = dailyRate × days
+ *            + (foodProvided ? 0 : foodAllowancePerDay   × days)
+ *            + (stayProvided ? 0 : stayAllowancePerNight × nights)
+ *
+ * The customer UI today still exposes a single all-or-nothing toggle
+ * that flips both `foodProvided` and `stayProvided` together, so both
+ * allowances waive in lockstep from the customer's point of view. The
+ * fields remain independent in the data model so the toggles can be
+ * split in the future without another schema change.
+ *
+ * Back-compat: when both split fields are 0 we fall back to the
+ * legacy `outstation.allowancePerNight × nights` (waived only when
+ * BOTH provided flags are true) — that keeps older saved pricing docs
+ * producing the same fare without a manual migration.
  *
  * Toll & parking are NEVER added to the outstation fare. The customer
  * pays those directly to the driver during the trip; the booking flow
  * surfaces a notice but no rupee is added here.
- *
- * The legacy line items (`extraKmCharge`, `nightHaltTotal`,
- * `foodAllowanceTotal`, `stayChargeTotal`, `tollParking`) are kept in
- * the response shape — always 0 — so older clients reading those
- * fields don't crash.
  */
 export function calculateOutstationFare({
   pricing,
@@ -577,29 +645,53 @@ export function calculateOutstationFare({
   const nights = Math.max(0, tripDays - 1);
 
   const dailyRate = Number(o.dailyRate) || 0;
-  const allowancePerNight = Number(o.allowancePerNight) || 0;
+  const foodAllowancePerDay = Number(o.foodAllowancePerDay) || 0;
+  const stayAllowancePerNight = Number(o.stayAllowancePerNight) || 0;
+  const legacyAllowancePerNight = Number(o.allowancePerNight) || 0;
+  // If the admin hasn't migrated to the split fields yet, treat the
+  // legacy combined `allowancePerNight` as the per-night charge —
+  // waived only when BOTH provided flags are true so the legacy
+  // behaviour is preserved exactly.
+  const useLegacyAllowance =
+    foodAllowancePerDay <= 0 &&
+    stayAllowancePerNight <= 0 &&
+    legacyAllowancePerNight > 0;
 
-  const dailyRateTotal = dailyRate * tripDays;
-
-  // Single all-or-nothing toggle on the customer side. Convention:
+  // Convention:
   //   foodProvided/stayProvided === true   → that need is taken care
-  //                                          of (by the customer or
-  //                                          included in base) → no
+  //                                          of by the customer → no
   //                                          allowance charged for it
   //   foodProvided/stayProvided === false  → that need is NOT taken
   //                                          care of → allowance must
   //                                          be charged
-  // Only when BOTH flags are explicitly `true` do we waive the
-  // per-night allowance. The booking-create defaults remain
-  // `?? true` upstream so legacy clients that omit the flags keep
-  // their "no extra charge" behaviour.
+  // Booking-create defaults upstream remain `?? true` so legacy
+  // clients omitting the flags keep their "no extra charge" behaviour.
+  const dailyRateTotal = dailyRate * tripDays;
+  let foodAllowanceTotal = 0;
+  let stayAllowanceTotal = 0;
+  let legacyAllowanceTotal = 0;
+  if (useLegacyAllowance) {
+    const bothProvided = foodProvided === true && stayProvided === true;
+    legacyAllowanceTotal = bothProvided ? 0 : legacyAllowancePerNight * nights;
+  } else {
+    foodAllowanceTotal = foodProvided === true ? 0 : foodAllowancePerDay * tripDays;
+    stayAllowanceTotal = stayProvided === true ? 0 : stayAllowancePerNight * nights;
+  }
+  const allowanceTotal =
+    foodAllowanceTotal + stayAllowanceTotal + legacyAllowanceTotal;
+
   const customerArrangesAll = foodProvided === true && stayProvided === true;
-  const allowanceTotal = customerArrangesAll
-    ? 0
-    : allowancePerNight * nights;
 
   const subtotal = dailyRateTotal + allowanceTotal;
-  const layers = applyPlatformLayers(subtotal, pricing, subscription);
+  // Outstation: the food + stay (and any legacy combined) allowance
+  // is pass-through to the driver — no platform commission on it.
+  // Only the daily-rate portion is commissionable.
+  const layers = applyPlatformLayers(
+    subtotal,
+    pricing,
+    subscription,
+    allowanceTotal,
+  );
 
   return {
     serviceType: SERVICE_TYPES.OUTSTATION,
@@ -608,8 +700,20 @@ export function calculateOutstationFare({
     // ── New shape ──
     dailyRate: round2(dailyRate),
     dailyRateTotal: round2(dailyRateTotal),
-    allowancePerNight: round2(allowancePerNight),
+    foodAllowancePerDay: round2(foodAllowancePerDay),
+    foodAllowanceTotal: round2(foodAllowanceTotal),
+    stayAllowancePerNight: round2(stayAllowancePerNight),
+    stayAllowanceTotal: round2(stayAllowanceTotal),
+    // Combined total — surfaced for back-compat with clients that read
+    // a single `allowanceTotal` line (sums food + stay + legacy
+    // fallback).
     allowanceTotal: round2(allowanceTotal),
+    // Legacy combined per-night number — only non-zero when the
+    // pricing doc hasn't been migrated to the split fields. Clients
+    // should prefer the split fields above and fall back to this only
+    // when both are zero.
+    allowancePerNight: round2(legacyAllowancePerNight),
+    legacyAllowanceTotal: round2(legacyAllowanceTotal),
     customerArrangesAll,
     foodProvided: foodProvided === true,
     stayProvided: stayProvided === true,
@@ -619,8 +723,6 @@ export function calculateOutstationFare({
     extraKmCharge: 0,
     nightHaltCharge: 0,
     nightHaltTotal: 0,
-    foodAllowancePerDay: 0,
-    foodAllowanceTotal: 0,
     stayChargePerNight: 0,
     stayChargeTotal: 0,
     tollParking: 0,
@@ -768,6 +870,13 @@ export const estimateFareService = async ({
       },
       fareBreakdown: breakdown,
       subscription: serializeSubscriptionForResponse(subscription),
+      // Hourly cancellation snapshot — status-driven (searching is free,
+      // pre-arrival flat ₹, post-arrival flat ₹ or %). Surfaced so the
+      // review/confirm page can render a "Cancellation policy" summary
+      // without an extra round-trip.
+      cancellationPolicy: {
+        hourly: normaliseHourlyPolicy(pricing.cancellation),
+      },
     };
   }
 

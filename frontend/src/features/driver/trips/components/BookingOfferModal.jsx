@@ -23,10 +23,9 @@ import { formatDistance } from '../../../../utils/geo';
 import Button from '../../../../components/Button';
 
 /**
- * Visual themes for the two offer flavours. Drivers were misreading
- * scheduled offers as instant pings during testing — keeping the two
- * shades far apart on the spectrum (orange-amber for instant urgency,
- * indigo-violet for scheduled planning) makes it obvious at a glance.
+ * Visual themes for the three offer flavours: instant (amber), scheduled
+ * (indigo), and outstation (emerald). Keeping them visually distinct helps
+ * drivers immediately identify the type of ride at a glance.
  */
 const OFFER_THEMES = {
   [BOOKING_TYPE.INSTANT]: {
@@ -53,6 +52,19 @@ const OFFER_THEMES = {
     badgeText: 'text-white',
     progressBar: 'bg-indigo-500',
     label: 'Scheduled ride',
+    Icon: CalendarClock,
+  },
+  [BOOKING_TYPE.OUTSTATION]: {
+    headerBg: 'bg-emerald-50',
+    headerRing: 'ring-2 ring-emerald-300',
+    headerText: 'text-emerald-700',
+    headerHeading: 'text-emerald-900',
+    pillBg: 'bg-emerald-200/70',
+    pillText: 'text-emerald-900',
+    badgeBg: 'bg-emerald-600',
+    badgeText: 'text-white',
+    progressBar: 'bg-emerald-500',
+    label: 'Outstation trip',
     Icon: CalendarClock,
   },
 };

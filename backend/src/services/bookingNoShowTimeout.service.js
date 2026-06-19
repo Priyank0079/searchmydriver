@@ -14,6 +14,8 @@ import {
 import {
   settleWaitingBuffer,
   clearPendingExtensionsOnTerminate,
+  buildCommissionRevenueMeta,
+  settleDriverEarning,
 } from './bookingExtension.service.js';
 
 /**
@@ -345,10 +347,7 @@ async function autoCompleteForNoShow(bookingId) {
         userId: booking.userId,
         driverId: booking.driverId || null,
         meta: {
-          commissionPercent:
-            booking.fareSnapshot?.breakdown?.platformCommissionPercent || 0,
-          totalPayable: booking.fareSnapshot?.total || 0,
-          driverEarning: booking.fareSnapshot?.breakdown?.driverEarning || 0,
+          ...buildCommissionRevenueMeta(booking),
           noShowAutoComplete: true,
         },
       });
@@ -356,6 +355,16 @@ async function autoCompleteForNoShow(bookingId) {
       console.warn('[noShow] revenue write failed:', err?.message);
     }
   }
+
+  // Mirror normal trip-complete: settle the driver's earning into their
+  // wallet (fare share + allowance share). Without this the no-show
+  // auto-complete left the driver unpaid for the daily rate — only the
+  // platform commission was being booked. Best-effort so the auto-
+  // complete transition never wedges on a wallet write; admins can
+  // reconcile from the booking later if it fails.
+  await settleDriverEarning(booking).catch((err) =>
+    console.warn('[noShow] failed to settle driver earning:', err?.message),
+  );
 
   const payload = {
     bookingId: String(booking._id),

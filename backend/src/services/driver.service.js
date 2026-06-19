@@ -1,6 +1,8 @@
 import bcrypt from 'bcryptjs';
+import mongoose from 'mongoose';
 import { OTP } from '../models/otp.model.js';
 import { Driver } from '../models/driverModels/driver.model.js';
+import Zone from '../models/zone.model.js';
 import { ApiError } from '../utils/apiError.js';
 import { sendSmsOtp } from '../utils/otpService.js';
 import {
@@ -380,6 +382,7 @@ const vehicleExperiencePopulate = [
   { path: 'vehicleExperience.modelId', select: 'name' },
   { path: 'vehicleExperience.fuelTypeId', select: 'name' },
   { path: 'carTypeExperience', select: 'name' },
+  { path: 'preferredOutstationZones', select: 'name code city isActive' },
 ];
 
 export const getProfileService = async (driverId) => {
@@ -406,26 +409,87 @@ export const getProfileService = async (driverId) => {
  * Outstation rides are manually dispatched from the admin queue (see
  * `bookingOutstationAssignment.service.js`). The picker only lists
  * drivers with `availableForOutstation === true`, so flipping this
- * flag off means the driver won't appear in the queue at all \u2014
+ * flag off means the driver won't appear in the queue at all —
  * useful for drivers who only want short local hourly trips, or who
  * are unavailable for multi-day trips this week.
+ *
+ * `zoneIds` is the driver's preferred set of pickup zones for
+ * outstation. When toggling availability ON, at least one valid
+ * active zone is required — the driver UI enforces this with a
+ * picker sheet, but we re-validate here because a stale FE could
+ * always submit `available: true` with an empty array. When
+ * toggling OFF we keep the previously chosen zones intact so the
+ * driver doesn't have to re-pick them next time.
  *
  * Returns the same shape `getProfileService` returns so the caller
  * can hand the result straight back to the FE store.
  */
 export const updateOutstationAvailabilityService = async (
   driverId,
-  { available },
+  { available, zoneIds },
 ) => {
   const next = !!available;
+  const update = {
+    availableForOutstation: next,
+    outstationAvailabilityUpdatedAt: new Date(),
+  };
+
+  // Resolve the zone list we should persist. Caller-supplied wins;
+  // otherwise fall back to whatever is already on the driver. We
+  // only validate / persist zones when turning availability ON.
+  if (next) {
+    let resolvedZoneIds = null;
+    if (Array.isArray(zoneIds)) {
+      const seen = new Set();
+      const cleaned = [];
+      for (const raw of zoneIds) {
+        const id = String(raw || '').trim();
+        if (!id || seen.has(id)) continue;
+        if (!mongoose.Types.ObjectId.isValid(id)) continue;
+        seen.add(id);
+        cleaned.push(new mongoose.Types.ObjectId(id));
+      }
+      resolvedZoneIds = cleaned;
+    }
+
+    if (resolvedZoneIds === null) {
+      // Caller didn't pass zones — reuse what's already saved.
+      const existing = await Driver.findById(driverId)
+        .select('preferredOutstationZones')
+        .lean();
+      resolvedZoneIds = (existing?.preferredOutstationZones || []).map(
+        (id) => new mongoose.Types.ObjectId(String(id)),
+      );
+    }
+
+    if (!resolvedZoneIds.length) {
+      throw new ApiError(
+        400,
+        'Pick at least one preferred outstation zone before turning this on.',
+      );
+    }
+
+    // Verify the zones exist and are active. We don't want a driver
+    // pinned to an archived zone that admins are no longer dispatching.
+    const activeZones = await Zone.find({
+      _id: { $in: resolvedZoneIds },
+      isActive: true,
+    })
+      .select('_id')
+      .lean();
+    if (activeZones.length !== resolvedZoneIds.length) {
+      throw new ApiError(
+        400,
+        'One or more selected zones are no longer available. Refresh and try again.',
+      );
+    }
+
+    update.preferredOutstationZones = resolvedZoneIds;
+  }
+
   const driver = await Driver.findByIdAndUpdate(
     driverId,
-    {
-      $set: {
-        availableForOutstation: next,
-        outstationAvailabilityUpdatedAt: new Date(),
-      },
-    },
+    { $set: update },
     { new: true },
   ).populate(vehicleExperiencePopulate);
   if (!driver) {
