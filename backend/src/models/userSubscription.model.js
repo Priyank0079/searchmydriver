@@ -18,18 +18,40 @@ const userSubscriptionSchema = new mongoose.Schema(
       ref: 'SubscriptionPlan',
       required: true,
     },
+    zoneId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Zone',
+      required: true,
+      index: true,
+    },
 
     status: {
       type: String,
       enum: Object.values(SUBSCRIPTION_STATUS),
-      default: SUBSCRIPTION_STATUS.ACTIVE,
+      default: SUBSCRIPTION_STATUS.PENDING_PAYMENT,
       index: true,
     },
     startDate: { type: Date, required: true },
     expiryDate: { type: Date, required: true },
 
     // ── Payment (Razorpay) ──
+    /** Total amount the customer paid (base + service charge + GST). */
     amount: { type: Number, required: true, min: 0 },
+    basePrice: { type: Number, default: 0, min: 0 },
+    serviceCharge: { type: Number, default: 0, min: 0 },
+    serviceChargePercent: { type: Number, default: 0, min: 0, max: 100 },
+    gstAmount: { type: Number, default: 0, min: 0 },
+    gstPercent: { type: Number, default: 0, min: 0, max: 100 },
+    platformShareRupees: { type: Number, default: 0, min: 0 },
+    driverShareRupees: { type: Number, default: 0, min: 0 },
+    platformSharePercent: { type: Number, default: 0, min: 0, max: 100 },
+    driverSharePercent: { type: Number, default: 0, min: 0, max: 100 },
+    driverSharePaidAt: { type: Date, default: null },
+    driverSharePaidTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Driver',
+      default: null,
+    },
     razorpayOrderId: { type: String, default: '' },
     razorpayPaymentId: { type: String, default: '' },
     razorpaySignature: { type: String, default: '' },
@@ -78,13 +100,16 @@ const userSubscriptionSchema = new mongoose.Schema(
       default: SUBSCRIPTION_DISCOUNT_TYPES.PERCENTAGE,
     },
     bookingDiscountValue: { type: Number, default: 0, min: 0 },
+    bookingDiscountMinAmount: { type: Number, default: 0, min: 0 },
     planNameSnapshot: { type: String, default: '' },
   },
   { timestamps: true },
 );
 
 userSubscriptionSchema.index({ userId: 1, status: 1 });
+userSubscriptionSchema.index({ zoneId: 1, status: 1, assignmentStatus: 1 });
 userSubscriptionSchema.index({ expiryDate: 1 });
+userSubscriptionSchema.index({ assignedDriverId: 1, status: 1, assignmentStatus: 1 });
 
 const UserSubscription =
   mongoose.models.UserSubscription ||

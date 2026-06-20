@@ -62,6 +62,12 @@ const navItems = [
         // here. Team members see read-only rows in their zones.
         roles: ['admin', 'sub_admin', 'team_member'],
       },
+      {
+        path: '/admin/bookings/subscription-requests',
+        label: 'Subscription Requests',
+        icon: Sparkles,
+        roles: ['admin', 'sub_admin', 'team_member'],
+      },
     ],
   },
   {
@@ -73,6 +79,12 @@ const navItems = [
         path: '/admin/account/revenue',
         label: 'Revenue',
         icon: DollarSign,
+        roles: ['admin'],
+      },
+      {
+        path: '/admin/account/subscription-revenue',
+        label: 'Subscription Revenue',
+        icon: Sparkles,
         roles: ['admin'],
       },
       {

@@ -21,13 +21,40 @@ export function isNightRideAt(date, nightConfig) {
 
 function applySubscriptionDiscount(subtotal, subscription) {
   if (!subscription) return 0;
+  const minAmount = Number(subscription.bookingDiscountMinAmount) || 0;
+  if (subtotal < minAmount) return 0;
   const value = subscription.bookingDiscountValue || 0;
   if (value <= 0) return 0;
   const discount =
     subscription.bookingDiscountType === 'percentage'
       ? (subtotal * value) / 100
       : value;
-  return Math.min(discount, subtotal);
+  return Math.min(round2(discount), round2(subtotal));
+}
+
+export function calculateSubscriptionCheckout(plan) {
+  const basePrice = round2(Number(plan?.price) || 0);
+  const serviceChargePercent = Number(plan?.serviceChargePercent) || 0;
+  const gstPercent = plan?.gstPercent != null ? Number(plan.gstPercent) : 18;
+  const platformSharePercent = Number(plan?.platformSharePercent ?? 50);
+  const driverSharePercent = Number(plan?.driverSharePercent ?? 50);
+  const serviceCharge = round2((basePrice * serviceChargePercent) / 100);
+  const gstAmount = round2(((basePrice + serviceCharge) * gstPercent) / 100);
+  const totalPayable = round2(basePrice + serviceCharge + gstAmount);
+  const platformShareRupees = round2((basePrice * platformSharePercent) / 100);
+  const driverShareRupees = round2((basePrice * driverSharePercent) / 100);
+  return {
+    basePrice,
+    serviceCharge,
+    serviceChargePercent,
+    gstAmount,
+    gstPercent,
+    totalPayable,
+    platformSharePercent,
+    driverSharePercent,
+    platformShareRupees,
+    driverShareRupees,
+  };
 }
 
 /**

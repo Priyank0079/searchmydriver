@@ -23,6 +23,9 @@ import {
   getActiveServicePricings,
   getActiveSubscriptionPlans,
   estimateFare,
+  purchaseSubscription,
+  verifySubscriptionPayment,
+  getMySubscription,
 } from '../controllers/pricing.controller.js';
 import { getNearbyDriversForUser } from '../controllers/driverLocation.controller.js';
 import {
@@ -72,6 +75,11 @@ router.use(protectUser);
 
 // Fare estimate (auth required so we can apply the user's subscription discount)
 router.post('/bookings/estimate', estimateFare);
+
+// Subscriptions — purchase + active subscription read
+router.get('/subscriptions/me', getMySubscription);
+router.post('/subscriptions/purchase', purchaseSubscription);
+router.post('/subscriptions/verify-payment', verifySubscriptionPayment);
 
 // Booking lifecycle (Phase 4)
 router.post('/bookings', createBooking);

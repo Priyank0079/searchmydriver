@@ -32,6 +32,7 @@ export const PAYMENT_PROVIDER = Object.freeze({
 
 export const PAYMENT_PURPOSE = Object.freeze({
   DRIVER_KIT: 'driver_kit',
+  SUBSCRIPTION: 'subscription',
   /** Driver-side credit: their share of the daily-rate × commission split. */
   TRIP_FARE: 'trip_fare',
   /**

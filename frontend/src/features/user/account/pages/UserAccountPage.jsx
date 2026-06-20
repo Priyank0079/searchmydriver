@@ -12,13 +12,16 @@ import {
   Settings,
   LogOut,
   ChevronRight,
+  Sparkles,
 } from 'lucide-react';
 import useUserAuthStore from '../../../../store/useUserAuthStore';
 import useUserWalletStore from '../../../../store/user/useUserWalletStore';
+import { useUserSubscriptionStore } from '../../../../store/user/useUserPricingStore';
 
 const menuItems = [
   { id: 'profile', icon: User, label: 'My Profile', path: '#' },
   { id: 'cars', icon: Car, label: 'My Cars', path: '/user/my-cars' },
+  { id: 'subscription', icon: Sparkles, label: 'My Subscription', path: '/user/account/subscription', dynamic: 'subscription' },
   { id: 'payments', icon: CreditCard, label: 'Payment Methods', path: '#' },
   { id: 'wallet', icon: Wallet, label: 'My Wallet', path: '/user/wallet', dynamic: 'wallet' },
   { id: 'refer', icon: Users, label: 'Refer & Earn', path: '#' },
@@ -32,10 +35,18 @@ const UserAccountPage = () => {
   const logout = useUserAuthStore((s) => s.logout);
   const wallet = useUserWalletStore((s) => s.wallet);
   const fetchWallet = useUserWalletStore((s) => s.fetchWallet);
+  const mySubscription = useUserSubscriptionStore((s) => s.mySubscription);
+  const fetchMySubscription = useUserSubscriptionStore((s) => s.fetchMySubscription);
 
   useEffect(() => {
     fetchWallet().catch(() => {});
-  }, [fetchWallet]);
+    fetchMySubscription().catch(() => {});
+  }, [fetchWallet, fetchMySubscription]);
+
+  const subscriptionLabel = useMemo(() => {
+    if (!mySubscription?._id) return 'No active plan';
+    return mySubscription.planNameSnapshot || mySubscription.planId?.name || 'Active';
+  }, [mySubscription]);
 
   const walletLabel = useMemo(
     () =>
@@ -64,7 +75,12 @@ const UserAccountPage = () => {
       <div className="flex-1 p-4">
         <Card className="divide-y divide-border-light">
           {menuItems.map((item) => {
-            const sub = item.dynamic === 'wallet' ? walletLabel : null;
+            const sub =
+              item.dynamic === 'wallet'
+                ? walletLabel
+                : item.dynamic === 'subscription'
+                  ? subscriptionLabel
+                  : null;
             const Icon = item.icon;
             return (
               <button

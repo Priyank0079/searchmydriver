@@ -83,6 +83,7 @@ const TripDetailsPage = lazy(
 );
 const UserAccountPage = lazy(() => import('./features/user/account/pages/UserAccountPage'));
 const SubscriptionsPage = lazy(() => import('./features/user/subscriptions/pages/SubscriptionsPage'));
+const MySubscriptionPage = lazy(() => import('./features/user/account/pages/MySubscriptionPage'));
 
 // Driver Registration
 const DriverLoginPage = lazy(() => import('./features/driver/auth/pages/DriverLoginPage'));
@@ -129,6 +130,7 @@ const UserProfilePage = lazy(() => import('./features/admin/pages/UserProfilePag
 const ManageBookings = lazy(() => import('./features/admin/pages/ManageBookings'));
 const ManageEmergencyPool = lazy(() => import('./features/admin/pages/ManageEmergencyPool'));
 const ManageOutstationAssignments = lazy(() => import('./features/admin/pages/ManageOutstationAssignments'));
+const ManageUserSubscriptions = lazy(() => import('./features/admin/pages/ManageUserSubscriptions'));
 const ManageScheduledJobs = lazy(() => import('./features/admin/pages/ManageScheduledJobs'));
 const PlatformSettings = lazy(() => import('./features/admin/pages/PlatformSettings'));
 const ManageTeam = lazy(() => import('./features/admin/pages/ManageTeam'));
@@ -138,6 +140,7 @@ const ManagePricing = lazy(() => import('./features/admin/pages/ManagePricing'))
 const ManageRefunds = lazy(() => import('./features/admin/pages/ManageRefunds'));
 const ManageRevenue = lazy(() => import('./features/admin/pages/ManageRevenue'));
 const ManageSubscriptions = lazy(() => import('./features/admin/pages/ManageSubscriptions'));
+const ManageSubscriptionRevenue = lazy(() => import('./features/admin/pages/ManageSubscriptionRevenue'));
 const LiveDriverMap = lazy(() => import('./features/admin/pages/LiveDriverMap'));
 const ManageKitOrders = lazy(() => import('./features/admin/pages/ManageKitOrders'));
 const KitOrderDetailPage = lazy(() => import('./features/admin/pages/KitOrderDetailPage'));
@@ -184,6 +187,7 @@ function App() {
               <Route path="/user/activity" element={<ActivityPage />} />
               <Route path="/user/trips/:id" element={<TripDetailsPage />} />
               <Route path="/user/account" element={<UserAccountPage />} />
+              <Route path="/user/account/subscription" element={<MySubscriptionPage />} />
               <Route path="/user/subscriptions" element={<SubscriptionsPage />} />
               <Route path="/user/wallet" element={<WalletPage />} />
               {/* Scheduled-ride parking lot: PENDING_ASSIGNMENT (worker hasn't
@@ -321,6 +325,10 @@ function App() {
               path="/admin/bookings/outstation-assignments"
               element={<ManageOutstationAssignments />}
             />
+            <Route
+              path="/admin/bookings/subscription-requests"
+              element={<ManageUserSubscriptions />}
+            />
             {/* Back-compat redirect for the old top-level emergency-pool URL. */}
             <Route
               path="/admin/emergency-pool"
@@ -339,6 +347,7 @@ function App() {
             <Route path="/admin/account" element={<Navigate to="/admin/account/revenue" replace />} />
             <Route path="/admin/account/refunds" element={<ManageRefunds />} />
             <Route path="/admin/account/revenue" element={<ManageRevenue />} />
+            <Route path="/admin/account/subscription-revenue" element={<ManageSubscriptionRevenue />} />
           </Route>
         </Route>
       </Routes>

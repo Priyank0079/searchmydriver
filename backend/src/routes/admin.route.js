@@ -76,8 +76,10 @@ import {
   adminUpdateSubscriptionPlan,
   adminDeleteSubscriptionPlan,
   adminListUserSubscriptions,
+  adminListSubscriptionAvailableDrivers,
   adminAssignDriverToSubscription,
   adminReleaseSubscriptionDriver,
+  adminListSubscriptionRevenue,
 } from '../controllers/pricing.controller.js';
 import {
   getTaskAssignees,
@@ -301,7 +303,19 @@ router.post('/pricing/subscriptions', protectStaff, restrictTo(...OPERATIONS), a
 router.put('/pricing/subscriptions/:id', protectStaff, restrictTo(...OPERATIONS), adminUpdateSubscriptionPlan);
 router.delete('/pricing/subscriptions/:id', protectStaff, restrictTo(...OPERATIONS), adminDeleteSubscriptionPlan);
 
-router.get('/subscriptions/users', protectStaff, restrictTo(...OPERATIONS), adminListUserSubscriptions);
+router.get('/subscriptions/users', protectStaff, restrictTo(...ALL_STAFF), adminListUserSubscriptions);
+router.get(
+  '/subscriptions/revenue',
+  protectStaff,
+  restrictTo(...SUPER_ADMIN),
+  adminListSubscriptionRevenue,
+);
+router.get(
+  '/subscriptions/users/:id/available-drivers',
+  protectStaff,
+  restrictTo(...ALL_STAFF),
+  adminListSubscriptionAvailableDrivers,
+);
 router.post('/subscriptions/users/:id/assign', protectStaff, restrictTo(...OPERATIONS), adminAssignDriverToSubscription);
 router.post('/subscriptions/users/:id/release', protectStaff, restrictTo(...OPERATIONS), adminReleaseSubscriptionDriver);
 

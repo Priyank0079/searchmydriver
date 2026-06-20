@@ -23,6 +23,13 @@ export const SUBSCRIPTION_DISCOUNT_TYPES = Object.freeze({
   FLAT: 'flat',
 });
 
+export const SUBSCRIPTION_STATUS = Object.freeze({
+  PENDING_PAYMENT: 'pending_payment',
+  ACTIVE: 'active',
+  EXPIRED: 'expired',
+  CANCELLED: 'cancelled',
+});
+
 export const SUBSCRIPTION_ASSIGNMENT_STATUS = Object.freeze({
   PENDING: 'pending',
   ASSIGNED: 'assigned',

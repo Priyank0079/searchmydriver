@@ -27,6 +27,16 @@ const subscriptionPlanSchema = new mongoose.Schema(
      * (e.g. when the dedicated driver is unavailable, or extra rides).
      */
     bookingDiscountValue: { type: Number, default: 0, min: 0 },
+    /** Discount applies only when the booking subtotal is at least this amount (₹). */
+    bookingDiscountMinAmount: { type: Number, default: 0, min: 0 },
+
+    // ── Checkout fees (applied on top of base price) ──
+    serviceChargePercent: { type: Number, default: 0, min: 0, max: 100 },
+    gstPercent: { type: Number, default: 18, min: 0, max: 100 },
+
+    // ── Revenue split on the base subscription price (must sum to 100) ──
+    platformSharePercent: { type: Number, default: 50, min: 0, max: 100 },
+    driverSharePercent: { type: Number, default: 50, min: 0, max: 100 },
 
     description: { type: String, default: '', trim: true },
     features: { type: [String], default: [] },

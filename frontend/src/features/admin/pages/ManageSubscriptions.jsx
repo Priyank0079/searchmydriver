@@ -10,17 +10,20 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { buildCacheKey } from '../../../store/lib/buildCacheKey';
 import { useAdminSubscriptionsStore } from '../../../store/admin/useAdminSubscriptionsStore';
 import { SUBSCRIPTION_DISCOUNT_TYPES } from '../../../constants/serviceTypes';
-import { formatCurrency } from '../../../utils/fareCalculator';
+import { formatCurrency, calculateSubscriptionCheckout } from '../../../utils/fareCalculator';
 
 const emptyForm = {
   name: '',
   durationMonths: 1,
   price: 0,
-  // Dedicated driver
   includedHoursPerDay: 0,
-  // Booking discount on extra bookings
   bookingDiscountType: SUBSCRIPTION_DISCOUNT_TYPES.PERCENTAGE,
   bookingDiscountValue: 0,
+  bookingDiscountMinAmount: 0,
+  serviceChargePercent: 0,
+  gstPercent: 18,
+  platformSharePercent: 50,
+  driverSharePercent: 50,
   description: '',
   features: [],
   isActive: true,
@@ -59,6 +62,11 @@ const ManageSubscriptions = () => {
       includedHoursPerDay: plan.includedHoursPerDay || 0,
       bookingDiscountType: plan.bookingDiscountType || SUBSCRIPTION_DISCOUNT_TYPES.PERCENTAGE,
       bookingDiscountValue: plan.bookingDiscountValue || 0,
+      bookingDiscountMinAmount: plan.bookingDiscountMinAmount || 0,
+      serviceChargePercent: plan.serviceChargePercent ?? 0,
+      gstPercent: plan.gstPercent ?? 18,
+      platformSharePercent: plan.platformSharePercent ?? 50,
+      driverSharePercent: plan.driverSharePercent ?? 50,
       description: plan.description || '',
       features: plan.features || [],
       isActive: plan.isActive,
@@ -325,6 +333,78 @@ const ManageSubscriptions = () => {
                 }
               />
             </div>
+            <Input
+              label="Minimum booking amount for discount (₹)"
+              type="number"
+              min={0}
+              value={form.bookingDiscountMinAmount}
+              onChange={(e) =>
+                setForm({ ...form, bookingDiscountMinAmount: Number(e.target.value) })
+              }
+              helper="Discount applies only when the ride subtotal is at least this amount."
+            />
+          </div>
+
+          <div className="p-3 bg-slate-50 rounded-xl space-y-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Checkout fees & revenue split</p>
+              <p className="text-xs text-slate-500">
+                Customer pays base + service charge + GST. Platform and driver shares are calculated on the base price.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Input
+                label="Service charge (%)"
+                type="number"
+                min={0}
+                max={100}
+                value={form.serviceChargePercent}
+                onChange={(e) =>
+                  setForm({ ...form, serviceChargePercent: Number(e.target.value) })
+                }
+              />
+              <Input
+                label="GST (%)"
+                type="number"
+                min={0}
+                max={100}
+                value={form.gstPercent}
+                onChange={(e) => setForm({ ...form, gstPercent: Number(e.target.value) })}
+              />
+              <Input
+                label="Platform share (%)"
+                type="number"
+                min={0}
+                max={100}
+                value={form.platformSharePercent}
+                onChange={(e) => {
+                  const platformSharePercent = Number(e.target.value);
+                  setForm({
+                    ...form,
+                    platformSharePercent,
+                    driverSharePercent: Math.max(0, 100 - platformSharePercent),
+                  });
+                }}
+              />
+              <Input
+                label="Driver share (%)"
+                type="number"
+                min={0}
+                max={100}
+                value={form.driverSharePercent}
+                onChange={(e) => {
+                  const driverSharePercent = Number(e.target.value);
+                  setForm({
+                    ...form,
+                    driverSharePercent,
+                    platformSharePercent: Math.max(0, 100 - driverSharePercent),
+                  });
+                }}
+              />
+            </div>
+            {form.price > 0 && (
+              <CheckoutPreview plan={form} />
+            )}
           </div>
 
           <div className="space-y-2">
@@ -395,5 +475,26 @@ const ManageSubscriptions = () => {
     </div>
   );
 };
+
+function CheckoutPreview({ plan }) {
+  const checkout = calculateSubscriptionCheckout(plan);
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3 text-xs space-y-1.5">
+      <p className="font-semibold text-slate-800">Checkout preview</p>
+      <div className="flex justify-between text-slate-600">
+        <span>Customer pays</span>
+        <span className="font-bold text-slate-900">{formatCurrency(checkout.totalPayable)}</span>
+      </div>
+      <div className="flex justify-between text-slate-500">
+        <span>Platform keeps (base)</span>
+        <span>{formatCurrency(checkout.platformShareRupees)}</span>
+      </div>
+      <div className="flex justify-between text-slate-500">
+        <span>Driver gets on assign (base)</span>
+        <span>{formatCurrency(checkout.driverShareRupees)}</span>
+      </div>
+    </div>
+  );
+}
 
 export default ManageSubscriptions;

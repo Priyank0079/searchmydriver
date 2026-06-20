@@ -17,6 +17,7 @@ export const SUBSCRIPTION_DISCOUNT_TYPES = Object.freeze({
 });
 
 export const SUBSCRIPTION_STATUS = Object.freeze({
+  PENDING_PAYMENT: 'pending_payment',
   ACTIVE: 'active',
   EXPIRED: 'expired',
   CANCELLED: 'cancelled',

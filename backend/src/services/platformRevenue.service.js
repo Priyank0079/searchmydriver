@@ -35,7 +35,8 @@ const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 export async function recordPlatformRevenue({
   source,
   amountRupees,
-  bookingId,
+  bookingId = null,
+  userSubscriptionId = null,
   bookingNumber = '',
   serviceType = '',
   userId = null,
@@ -48,12 +49,19 @@ export async function recordPlatformRevenue({
   }
   const amt = round2(Number(amountRupees) || 0);
   if (amt <= 0) return null;
-  if (!bookingId) throw new ApiError(400, 'bookingId is required');
+  if (source === PLATFORM_REVENUE_SOURCE.SUBSCRIPTION) {
+    if (!userSubscriptionId) {
+      throw new ApiError(400, 'userSubscriptionId is required for subscription revenue');
+    }
+  } else if (!bookingId) {
+    throw new ApiError(400, 'bookingId is required');
+  }
 
   return PlatformRevenue.create({
     source,
     amountRupees: amt,
-    bookingId,
+    bookingId: bookingId || null,
+    userSubscriptionId: userSubscriptionId || null,
     bookingNumber: bookingNumber ? String(bookingNumber).slice(0, 80) : '',
     serviceType: serviceType ? String(serviceType).slice(0, 40) : '',
     userId: userId || null,
@@ -88,9 +96,10 @@ export async function listPlatformRevenueService({
   }
   if (serviceType) filter.serviceType = String(serviceType).trim();
   if (search) {
-    filter.bookingNumber = {
-      $regex: new RegExp(String(search).trim(), 'i'),
-    };
+    filter.$or = [
+      { bookingNumber: { $regex: new RegExp(String(search).trim(), 'i') } },
+      { 'meta.planName': { $regex: new RegExp(String(search).trim(), 'i') } },
+    ];
   }
   if (from || to) {
     filter.occurredAt = {};
