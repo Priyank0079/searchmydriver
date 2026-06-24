@@ -25,8 +25,9 @@ export function getCorsOrigins() {
   const fromEnv = [
     ...parseList(process.env.CLIENT_ORIGIN),
     ...parseList(process.env.FRONTEND_URL),
+    ...DEFAULT_DEV_ORIGINS,
   ];
-  return fromEnv.length ? Array.from(new Set(fromEnv)) : DEFAULT_DEV_ORIGINS;
+  return Array.from(new Set(fromEnv));
 }
 
 /**
