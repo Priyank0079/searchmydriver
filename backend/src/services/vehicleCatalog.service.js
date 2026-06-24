@@ -160,36 +160,36 @@ export const deleteCarModelService = async (id) => {
 
 /** Validate catalog refs for user car registration */
 export async function validateCarCatalogRefs({ carTypeId, brandId, modelId, fuelTypeId }) {
-  if (!mongoose.Types.ObjectId.isValid(carTypeId)) {
+  if (carTypeId && !mongoose.Types.ObjectId.isValid(carTypeId)) {
     throw new ApiError(400, 'Invalid car category');
   }
-  if (!mongoose.Types.ObjectId.isValid(brandId)) {
+  if (brandId && !mongoose.Types.ObjectId.isValid(brandId)) {
     throw new ApiError(400, 'Invalid car brand');
   }
-  if (!mongoose.Types.ObjectId.isValid(modelId)) {
+  if (modelId && !mongoose.Types.ObjectId.isValid(modelId)) {
     throw new ApiError(400, 'Invalid car model');
   }
-  if (!mongoose.Types.ObjectId.isValid(fuelTypeId)) {
+  if (fuelTypeId && !mongoose.Types.ObjectId.isValid(fuelTypeId)) {
     throw new ApiError(400, 'Invalid fuel type');
   }
 
   const [category, brand, model, fuel] = await Promise.all([
-    CarType.findById(carTypeId),
-    CarBrand.findById(brandId),
-    CarModel.findById(modelId),
-    FuelType.findById(fuelTypeId),
+    carTypeId ? CarType.findById(carTypeId) : null,
+    brandId ? CarBrand.findById(brandId) : null,
+    modelId ? CarModel.findById(modelId) : null,
+    fuelTypeId ? FuelType.findById(fuelTypeId) : null,
   ]);
 
-  if (!category?.isActive) throw new ApiError(400, 'Selected car category is not available');
-  if (!brand?.isActive) throw new ApiError(400, 'Selected car brand is not available');
-  if (!model?.isActive) throw new ApiError(400, 'Selected car model is not available');
-  if (!fuel?.isActive) throw new ApiError(400, 'Selected fuel type is not available');
+  if (carTypeId && !category?.isActive) throw new ApiError(400, 'Selected car category is not available');
+  if (brandId && !brand?.isActive) throw new ApiError(400, 'Selected car brand is not available');
+  if (modelId && !model?.isActive) throw new ApiError(400, 'Selected car model is not available');
+  if (fuelTypeId && !fuel?.isActive) throw new ApiError(400, 'Selected fuel type is not available');
 
-  if (String(model.brandId) !== String(brandId)) {
+  if (modelId && brandId && String(model.brandId) !== String(brandId)) {
     throw new ApiError(400, 'Car model does not belong to the selected brand');
   }
 
-  if (model.carTypeId && String(model.carTypeId) !== String(carTypeId)) {
+  if (modelId && carTypeId && model.carTypeId && String(model.carTypeId) !== String(carTypeId)) {
     throw new ApiError(400, 'Car model does not match the selected category');
   }
 

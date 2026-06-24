@@ -61,6 +61,18 @@ export const BOOKING_TYPE_DESCRIPTIONS = Object.freeze({
   [BOOKING_TYPE.OUTSTATION]: 'Multi-day outstation trip with a dedicated driver.',
 });
 
+export const TRIP_TYPE = Object.freeze({
+  ROUND_TRIP: 'round_trip',
+  ONE_WAY: 'one_way',
+});
+
+export const TRIP_TYPE_LIST = Object.freeze(Object.values(TRIP_TYPE));
+
+export const TRIP_TYPE_LABELS = Object.freeze({
+  [TRIP_TYPE.ROUND_TRIP]: 'Round trip',
+  [TRIP_TYPE.ONE_WAY]: 'One way trip',
+});
+
 export const PAYMENT_MODE_LABELS = Object.freeze({
   [PAYMENT_MODE.PRE_RIDE]: 'Pay before ride starts',
   [PAYMENT_MODE.POST_RIDE]: 'Pay after ride completes',

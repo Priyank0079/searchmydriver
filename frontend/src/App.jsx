@@ -62,6 +62,9 @@ const WalletPage = lazy(() => import('./features/user/wallet/pages/WalletPage'))
 const HourlyBookingTypePage = lazy(
   () => import('./features/user/booking/pages/hourly/HourlyBookingTypePage'),
 );
+const OutstationBookingTypePage = lazy(
+  () => import('./features/user/booking/pages/outstation/OutstationBookingTypePage'),
+);
 const HourlyTripDetailsPage = lazy(
   () => import('./features/user/booking/pages/hourly/HourlyTripDetailsPage'),
 );
@@ -199,6 +202,7 @@ function App() {
           {/* ========== User Booking Flow ========== */}
           {/* Legacy / outstation flow */}
           <Route path="/user/book/variants" element={<SelectVariantPage />} />
+          <Route path="/user/book/outstation/variants" element={<SelectVariantPage />} />
           <Route path="/user/book/pickup" element={<SelectPickupPage />} />
           <Route path="/user/book/duration" element={<SelectDurationPage />} />
           {/* Review + Confirm pages have been merged. Old in-app links
@@ -216,6 +220,7 @@ function App() {
           {/* New hourly flow: type → details → slab → searching → assigned */}
           <Route path="/user/book/hourly" element={<Navigate to="/user/book/hourly/type" replace />} />
           <Route path="/user/book/hourly/type" element={<HourlyBookingTypePage />} />
+          <Route path="/user/book/outstation/type" element={<OutstationBookingTypePage />} />
           <Route path="/user/book/hourly/details" element={<HourlyTripDetailsPage />} />
           <Route path="/user/book/hourly/slab" element={<HourlySlabSelectionPage />} />
 

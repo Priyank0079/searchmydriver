@@ -86,6 +86,13 @@ export const BOOKING_TYPE = Object.freeze({
 
 export const BOOKING_TYPE_LIST = Object.freeze(Object.values(BOOKING_TYPE));
 
+export const TRIP_TYPE = Object.freeze({
+  ROUND_TRIP: 'round_trip',
+  ONE_WAY: 'one_way',
+});
+
+export const TRIP_TYPE_LIST = Object.freeze(Object.values(TRIP_TYPE));
+
 /** Payment lifecycle, independent of ride status. */
 export const BOOKING_PAYMENT_STATUS = Object.freeze({
   /** Pre-pay flow before driver accepts; post-pay before ride completes. */

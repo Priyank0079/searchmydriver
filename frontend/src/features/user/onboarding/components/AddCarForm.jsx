@@ -37,10 +37,8 @@ const AddCarForm = ({
   const validate = () => {
     const next = {};
     if (!formData.carTypeId) next.carTypeId = 'Select car category';
-    if (!formData.brandId) next.brandId = 'Select car brand';
-    if (!formData.modelId) next.modelId = 'Select car model';
+    if (!formData.modelName?.trim()) next.modelName = 'Enter car model';
     if (!formData.vehicleNumber?.trim()) next.vehicleNumber = 'Enter vehicle number';
-    if (!formData.fuelTypeId) next.fuelTypeId = 'Select fuel type';
     if (!formData.transmission) next.transmission = 'Select transmission';
     if (!documents.car_image?.url) next.image = 'Car image is required';
     setErrors(next);
@@ -54,9 +52,7 @@ const AddCarForm = ({
     try {
       const res = await api.post('/auth/cars', {
         carTypeId: formData.carTypeId,
-        brandId: formData.brandId,
-        modelId: formData.modelId,
-        fuelTypeId: formData.fuelTypeId,
+        modelName: formData.modelName.trim(),
         vehicleNumber: formData.vehicleNumber.trim(),
         transmission: formData.transmission,
         image: documents.car_image.url,

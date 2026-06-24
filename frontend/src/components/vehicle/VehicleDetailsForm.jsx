@@ -6,9 +6,7 @@ import { TRANSMISSION_OPTIONS } from '../../utils/vehicleCatalog';
 
 const emptyValues = {
   carTypeId: '',
-  brandId: '',
-  modelId: '',
-  fuelTypeId: '',
+  modelName: '',
   vehicleNumber: '',
   transmission: 'manual',
 };
@@ -25,25 +23,14 @@ const VehicleDetailsForm = ({
 }) => {
   const {
     categoryOptions,
-    fuelOptions,
-    brandOptions,
-    modelOptions,
     loading,
-    modelsLoading,
     error: catalogError,
   } = useVehicleCatalog({
-    brandId: values.brandId,
     carTypeId: values.carTypeId,
   });
 
   const setField = (field) => (val) => {
     const next = { ...values, [field]: val };
-    if (field === 'carTypeId') {
-      next.modelId = '';
-    }
-    if (field === 'brandId') {
-      next.modelId = '';
-    }
     onChange(next);
   };
 
@@ -66,34 +53,14 @@ const VehicleDetailsForm = ({
         disabled={disabled || loading}
       />
 
-      <Select
-        label="Car brand"
-        options={brandOptions}
-        value={values.brandId}
-        onChange={setField('brandId')}
-        placeholder={loading ? 'Loading...' : 'Select brand'}
-        error={errors.brandId}
-        searchable
-        disabled={disabled || loading}
-      />
-
-      <Select
+      <Input
         label="Car model"
-        options={modelOptions}
-        value={values.modelId}
-        onChange={setField('modelId')}
-        placeholder={
-          !values.brandId
-            ? 'Select brand first'
-            : modelsLoading
-              ? 'Loading models...'
-              : modelOptions.length
-                ? 'Select model'
-                : 'No models for this brand'
-        }
-        error={errors.modelId}
-        searchable
-        disabled={disabled || !values.brandId || modelsLoading}
+        placeholder="e.g. Toyota Innova Crysta"
+        value={values.modelName}
+        onChange={(e) => setField('modelName')(e.target.value)}
+        error={errors.modelName}
+        icon={Car}
+        disabled={disabled}
       />
 
       {showVehicleNumber && (
@@ -109,16 +76,7 @@ const VehicleDetailsForm = ({
         />
       )}
 
-      <div className="grid grid-cols-2 gap-4">
-        <Select
-          label="Fuel type"
-          options={fuelOptions}
-          value={values.fuelTypeId}
-          onChange={setField('fuelTypeId')}
-          placeholder="Fuel"
-          error={errors.fuelTypeId}
-          disabled={disabled || loading}
-        />
+      <div className="grid grid-cols-1 gap-4">
         <Select
           label="Transmission"
           options={TRANSMISSION_OPTIONS}

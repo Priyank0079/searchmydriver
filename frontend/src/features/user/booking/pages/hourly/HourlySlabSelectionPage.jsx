@@ -63,11 +63,6 @@ const HourlySlabSelectionPage = () => {
     }
   }, [draft.serviceType, draft.pickup, draft.carId, navigate]);
 
-  // Restore prior selection if the user came back from the next step.
-  const initialKey = draft.hourly.isCustomDuration
-    ? CUSTOM_KEY
-    : draft.hourly.slabId || null;
-  const [selectedKey, setSelectedKey] = useState(initialKey);
   const [customHours, setCustomHours] = useState(
     draft.hourly.isCustomDuration && draft.hourly.durationHours
       ? draft.hourly.durationHours
@@ -78,6 +73,20 @@ const HourlySlabSelectionPage = () => {
     const arr = pricing?.slabs ? [...pricing.slabs] : [];
     return arr.sort((a, b) => a.minHours - b.minHours);
   }, [pricing]);
+
+  // Restore prior selection if the user came back from the next step,
+  // otherwise auto-select the first slab so the fare calculates immediately.
+  const initialKey = draft.hourly.isCustomDuration
+    ? CUSTOM_KEY
+    : draft.hourly.slabId || (slabs.length > 0 ? slabs[0]._id : null);
+  const [selectedKey, setSelectedKey] = useState(initialKey);
+
+  // If initialKey was null because slabs weren't loaded yet, set it once they load.
+  useEffect(() => {
+    if (!selectedKey && slabs.length > 0 && !draft.hourly.isCustomDuration) {
+      setSelectedKey(slabs[0]._id);
+    }
+  }, [selectedKey, slabs, draft.hourly.isCustomDuration]);
 
   const customEnabled = !!pricing?.customHours?.enabled;
   const customMaxHours = pricing?.customHours?.maxHours || 0;

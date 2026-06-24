@@ -27,6 +27,7 @@ const DEFAULT_STATE = {
   dropoff: null, // { address, city, lat, lng }
   carId: null,
   hourly: {
+    tripType: null,
     scheduledStartAt: null,
     durationHours: null,
     slabId: null,
@@ -46,6 +47,7 @@ const DEFAULT_STATE = {
     stayProvided: null,
   },
   outstation: {
+    tripType: null,
     destinationAddress: '',
     destinationLat: null,
     destinationLng: null,
@@ -184,6 +186,7 @@ const useBookingDraftStore = create(
 
         if (s.serviceType === SERVICE_TYPES.HOURLY) {
           payload.hourly = {
+            tripType: s.hourly.tripType,
             scheduledStartAt: s.hourly.scheduledStartAt,
             durationHours: s.hourly.durationHours,
             slabId: s.hourly.isCustomDuration ? null : s.hourly.slabId,
@@ -208,6 +211,7 @@ const useBookingDraftStore = create(
           const expectedReturnAt =
             s.outstation.expectedReturnAt || s.outstation.endDate;
           payload.outstation = {
+            tripType: s.outstation.tripType,
             destinationAddress: s.outstation.destinationAddress,
             pickupAt,
             expectedReturnAt,

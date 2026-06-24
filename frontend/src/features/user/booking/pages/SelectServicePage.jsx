@@ -29,7 +29,7 @@ const SelectServicePage = () => {
     if (serviceType === SERVICE_TYPES.HOURLY) {
       navigate('/user/book/hourly/type');
     } else {
-      navigate('/user/book/variants');
+      navigate('/user/book/outstation/type');
     }
   };
 

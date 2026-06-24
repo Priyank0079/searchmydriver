@@ -242,7 +242,7 @@ function buildOfferPayload(booking, driver, { customer, car } = {}) {
           transmission: car.transmission || '',
           carTypeName: car.carTypeId?.name || '',
           brandName: car.brandId?.name || '',
-          modelName: car.modelId?.name || '',
+          modelName: car.modelId?.name || car.modelName || '',
           fuelTypeName: car.fuelTypeId?.name || '',
         }
       : null,

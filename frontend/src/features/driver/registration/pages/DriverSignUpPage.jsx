@@ -23,7 +23,7 @@ const DriverSignUpPage = () => {
     <div className="flex-1 flex flex-col bg-white min-h-dvh relative">
       <div className="flex-1 flex flex-col items-center justify-center px-8 pt-12 pb-6">
         <div className="text-center mb-8 animate-fade-in-up w-full max-w-[400px] mx-auto">
-          <img src="/images/logo-white.png" alt="SpareDriver Logo" className="w-full h-auto object-contain" />
+          <img src="/images/logo-smd.png" alt="SearchMyDrivers Logo" className="w-full h-auto object-contain" />
         </div>
         <p className="text-black text-[20px] font-medium mt-4">Drive. Earn. Grow.</p>
 

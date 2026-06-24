@@ -15,17 +15,18 @@ const carSchema = new mongoose.Schema(
     brandId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'CarBrand',
-      required: true,
     },
     modelId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'CarModel',
-      required: true,
+    },
+    modelName: {
+      type: String,
+      trim: true,
     },
     fuelTypeId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'FuelType',
-      required: true,
     },
     vehicleNumber: {
       type: String,

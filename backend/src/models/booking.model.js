@@ -8,6 +8,8 @@ import {
   PAYMENT_MODE_LIST,
   BOOKING_TYPE,
   BOOKING_TYPE_LIST,
+  TRIP_TYPE,
+  TRIP_TYPE_LIST,
   DISPATCH,
   DISPATCH_RESPONSE,
 } from '../constants/bookingStatus.js';
@@ -37,6 +39,11 @@ const hourlyDetailsSchema = new mongoose.Schema(
     slabId: { type: mongoose.Schema.Types.ObjectId, default: null },
     /** True when the user booked via the custom-hours option (no slab). */
     isCustomDuration: { type: Boolean, default: false },
+    tripType: {
+      type: String,
+      enum: TRIP_TYPE_LIST,
+      default: TRIP_TYPE.ROUND_TRIP,
+    },
   },
   { _id: false },
 );
@@ -58,6 +65,11 @@ const outstationDetailsSchema = new mongoose.Schema(
     needsStay: { type: Boolean, default: true },
     needsFood: { type: Boolean, default: true },
     estimatedKm: { type: Number, default: 0, min: 0 },
+    tripType: {
+      type: String,
+      enum: TRIP_TYPE_LIST,
+      default: TRIP_TYPE.ROUND_TRIP,
+    },
   },
   { _id: false },
 );

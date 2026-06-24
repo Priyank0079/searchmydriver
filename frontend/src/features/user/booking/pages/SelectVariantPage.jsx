@@ -34,7 +34,7 @@ import useBookingDraftStore from '../../../../store/user/useBookingDraftStore';
 import {
   computeOutstationDuration,
 } from '../../../../utils/outstationSchedule';
-import { mergeScheduledDispatchConfig } from '../../../../constants/bookingStatus';
+import { mergeScheduledDispatchConfig, TRIP_TYPE } from '../../../../constants/bookingStatus';
 import toast from 'react-hot-toast';
 import { useGoogleMaps } from '../../../../hooks/useGoogleMaps';
 import { useGeolocation } from '../../../../hooks/useGeolocation';
@@ -280,6 +280,7 @@ function HourlyVariants({ pricing, draft, onPatch, onContinue }) {
  */
 function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
   const navigate = useNavigate();
+  const tripType = draft.tripType || TRIP_TYPE.ROUND_TRIP;
   const dailyRate = Number(pricing?.outstation?.dailyRate) || 0;
   // Split allowance preview for the footer hint. We surface food-per-day
   // since it scales with the trip length the user is currently picking;
@@ -317,89 +318,28 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
       : null),
   );
 
-  // Admin-configured outstation lead time. Backend enforces the same
-  // floor on create (booking.service.js → outstation lead check) so
-  // gating the picker here is purely a UX nicety to surface the
-  // constraint before the user hits Continue.
-  const dispatchConfig = useMemo(
-    () => mergeScheduledDispatchConfig(pricing?.scheduledDispatch),
-    [pricing?.scheduledDispatch],
-  );
-  const minLeadHours = Math.max(
-    0,
-    Number(dispatchConfig.MIN_SCHEDULED_LEAD_HOURS) || 0,
-  );
-  // Read the wall clock ONCE per mount so React's purity lint stays
-  // happy on the derived `minPickupDate` memo. The minor downside —
-  // the floor doesn't visibly advance while the page is open — is
-  // intentional: a moving target between render passes would
-  // re-disable slots the user might be hovering. The backend
-  // re-validates against the live clock on Continue anyway.
-  const [nowAnchorMs] = useState(() => Date.now());
-  const minPickupDate = useMemo(
-    () => new Date(nowAnchorMs + minLeadHours * 60 * 60 * 1000),
-    [nowAnchorMs, minLeadHours],
-  );
 
-  // Blank-by-default: neither pickup nor return is preselected. We do
-  // still rehydrate from the draft (so back-navigation keeps the
-  // previously-chosen times), but if the saved pickup is now before
-  // the lead-time floor we drop it so the user explicitly re-confirms
-  // instead of silently 422-ing on create.
-  const seedFromDraft = (raw) => {
-    if (!raw) return null;
-    const d = new Date(raw);
+  // Pickup time is set on the previous screen (OutstationBookingTypePage).
+  // We read it directly from the draft — no local state needed.
+  const pickupAt = draft.pickupAt || draft.startDate || null;
+
+  const initialReturnIso = (() => {
+    const seed = draft.expectedReturnAt || draft.endDate;
+    if (!seed) return null;
+    const d = new Date(seed);
     if (Number.isNaN(d.getTime())) return null;
     return d.toISOString();
-  };
-  const initialPickupIso = useMemo(() => {
-    const seed = seedFromDraft(draft.pickupAt || draft.startDate);
-    if (!seed) return null;
-    return new Date(seed).getTime() >= minPickupDate.getTime() ? seed : null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const initialReturnIso = useMemo(
-    () => seedFromDraft(draft.expectedReturnAt || draft.endDate),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
-
-  const [pickupRaw, setPickupRaw] = useState(initialPickupIso);
+  })();
   const [expectedReturnAt, setExpectedReturnAt] = useState(initialReturnIso);
-
-  // Derive the effective pickup from the raw draft state + the live
-  // lead-time floor — if pricing finishes loading after the page
-  // mounts and pushes the floor past a stale draft value, we display
-  // "nothing picked" so the user re-confirms instead of submitting an
-  // out-of-window time. Pure derivation, no setState-in-effect.
-  const pickupAt = useMemo(() => {
-    if (!pickupRaw) return null;
-    const ms = new Date(pickupRaw).getTime();
-    if (!Number.isFinite(ms)) return null;
-    if (ms < minPickupDate.getTime()) return null;
-    return pickupRaw;
-  }, [pickupRaw, minPickupDate]);
 
   // Days = number of distinct calendar dates the trip spans (server
   // mirrors this exact formula). Nights = days − 1. Falls back to a
   // 0-day "no trip" placeholder when either endpoint is blank.
   const { days, nights } = useMemo(() => {
+    if (tripType === TRIP_TYPE.ONE_WAY) return { days: 1, nights: 0 };
     if (!pickupAt || !expectedReturnAt) return { days: 0, nights: 0 };
     return computeOutstationDuration(pickupAt, expectedReturnAt);
-  }, [pickupAt, expectedReturnAt]);
-
-  // Auto-clear return when pickup pushes past it; keeps the diff
-  // non-negative without a separate validation toast.
-  const onPickupTimeChange = (iso) => {
-    setPickupRaw(iso);
-    if (
-      iso &&
-      expectedReturnAt &&
-      new Date(iso).getTime() >= new Date(expectedReturnAt).getTime()
-    ) {
-      setExpectedReturnAt(null);
-    }
-  };
+  }, [pickupAt, expectedReturnAt, tripType]);
 
   // Expected return must come AFTER the chosen pickup — feed the
   // picker the pickup moment as its min so the day-strip self-disables
@@ -762,10 +702,11 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
   const canContinue =
     !!localPickup?.lat &&
     !!localPickup?.address &&
-    !!localDestination?.lat &&
-    !!localDestination?.address &&
+    (tripType === TRIP_TYPE.ONE_WAY
+      ? !!localDestination?.lat && !!localDestination?.address
+      : true) &&
     !!pickupAt &&
-    !!expectedReturnAt &&
+    (tripType === TRIP_TYPE.ONE_WAY ? true : !!expectedReturnAt) &&
     days >= 1 &&
     (cars.length === 0 || !!draftCarId);
 
@@ -782,11 +723,15 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
       return;
     }
     setPickupStore(localPickup);
-    // setDropoff also mirrors the address into outstation.destinationAddress.
-    setDropoffStore(localDestination);
+    // setDropoff mirrors address into outstation.destinationAddress.
+    // For round trips, destination = pickup (driver returns to same place).
+    setDropoffStore(tripType === TRIP_TYPE.ROUND_TRIP ? localPickup : localDestination);
     const pickupIso = new Date(pickupAt).toISOString();
-    const returnIso = new Date(expectedReturnAt).toISOString();
+    const returnIso = tripType === TRIP_TYPE.ONE_WAY
+      ? pickupIso
+      : new Date(expectedReturnAt).toISOString();
     onPatch({
+      tripType,
       pickupAt: pickupIso,
       expectedReturnAt: returnIso,
       // Mirror into the legacy date pair so older readers keep working.
@@ -809,8 +754,10 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
 
   return (
     <PageShell
-      title="Plan your round trip"
-      subtitle="Pickup and return are the same place — we drop you back home."
+      title={tripType === TRIP_TYPE.ROUND_TRIP ? 'Plan your round trip' : 'Plan your one way trip'}
+      subtitle={tripType === TRIP_TYPE.ROUND_TRIP
+        ? 'Pickup and return are the same place — we drop you back home.'
+        : "We'll drop you at your destination. The trip ends there."}
       onBack={() => navigate(-1)}
       footer={(
         <Footer
@@ -835,15 +782,19 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
         />
       )}
     >
-      {/* Round-trip explainer. Uses sky tones rather than the brand
+      {/* Trip-type explainer. Uses sky tones rather than the brand
           primary because primary-on-white reads as washed-out
           orange and the user flagged it as unreadable. */}
       <div className="rounded-2xl bg-sky-50 border border-sky-100 px-3 py-2 flex items-start gap-2">
         <RefreshCw className="w-4 h-4 text-sky-700 mt-0.5 shrink-0" />
         <p className="text-[12px] leading-snug text-sky-900">
-          <strong className="font-semibold">Round trip:</strong> your
-          driver stays with you the whole trip and drops you back at the
-          pickup{days >= 1 ? ` on day ${days}` : ''}.
+          {tripType === TRIP_TYPE.ROUND_TRIP ? (
+            <><strong className="font-semibold">Round trip:</strong> your
+            driver stays with you the whole trip and drops you back at the
+            pickup{days >= 1 ? ` on day ${days}` : ''}.</>
+          ) : (
+            <><strong className="font-semibold">One way trip:</strong> your driver drops you at the destination. The trip ends there.</>
+          )}
         </p>
       </div>
 
@@ -854,7 +805,7 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
           fine-tunes the resolved address. */}
       <Card>
         <h3 className="text-base font-bold text-slate-900 mb-3">
-          Pickup &amp; destination
+          {tripType === TRIP_TYPE.ROUND_TRIP ? 'Pickup location' : 'Pickup & destination'}
         </h3>
         <div className="space-y-2">
           <LocationPill
@@ -865,14 +816,16 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
             value={localPickup?.address || ''}
             onClick={() => setPickerOpen('pickup')}
           />
-          <LocationPill
-            tone="red"
-            icon={Navigation}
-            label="Destination"
-            placeholder="Where are you going?"
-            value={localDestination?.address || ''}
-            onClick={() => setPickerOpen('drop')}
-          />
+          {tripType === TRIP_TYPE.ONE_WAY && (
+            <LocationPill
+              tone="red"
+              icon={Navigation}
+              label="Destination"
+              placeholder="Where are you going?"
+              value={localDestination?.address || ''}
+              onClick={() => setPickerOpen('drop')}
+            />
+          )}
         </div>
 
         {/* Inline service-zone verdict for the pickup. We surface the
@@ -906,11 +859,11 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
               <PinMarker
                 position={{ lat: localPickup.lat, lng: localPickup.lng }}
                 color="#10B981"
-                label="Pickup · Return"
+                label={tripType === TRIP_TYPE.ROUND_TRIP ? 'Pickup · Return' : 'Pickup'}
                 onDragEnd={(e) => handleMarkerDragEnd('pickup', e)}
               />
             )}
-            {localDestination?.lat && localDestination?.lng && mapsReady && (
+            {tripType === TRIP_TYPE.ONE_WAY && localDestination?.lat && localDestination?.lng && mapsReady && (
               <PinMarker
                 position={{
                   lat: localDestination.lat,
@@ -951,7 +904,9 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
           <div className="rounded-xl bg-bg px-3 py-2 flex items-center gap-2">
             <RefreshCw className="w-3.5 h-3.5 text-text-muted shrink-0" />
             <span className="text-[11px] text-text-muted">
-              Pickup is also your return — the driver drops you back here.
+              {tripType === TRIP_TYPE.ROUND_TRIP
+                ? 'Pickup is also your return — the driver drops you back here.'
+                : 'Driver drops you at the destination and the trip ends.'}
             </span>
           </div>
           <div className="rounded-xl bg-bg px-3 py-2 flex items-center gap-2">
@@ -965,25 +920,14 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
         </div>
       </Card>
 
-      {/* Pickup + return time. Both pickers stay blank-by-default so
-          the user explicitly commits to a time (no surprise prefill). */}
-      <Card>
-        <h3 className="text-base font-bold text-slate-900 mb-3">When?</h3>
-        <div className="space-y-3">
-          <DateTimePickerField
-            label="Pickup date & time"
-            icon={CalendarClock}
-            value={pickupAt}
-            onChange={onPickupTimeChange}
-            minDate={minPickupDate}
-            placeholder="Tap to choose pickup"
-            helper={
-              minLeadHours > 0
-                ? `We need at least ${formatLeadHours(minLeadHours)} between booking and pickup so a driver can be assigned.`
-                : undefined
-            }
-            sheetTitle="Pickup date & time"
-          />
+      {/* Expected return is only needed for Round Trip.
+          Pickup time was already chosen on the previous screen
+          (OutstationBookingTypePage) — show it read-only here. */}
+      {tripType === TRIP_TYPE.ROUND_TRIP && (
+        <Card>
+          <h3 className="text-base font-bold text-slate-900 mb-3">Return date</h3>
+
+
           <DateTimePickerField
             label="Expected return"
             icon={CalendarClock}
@@ -992,34 +936,35 @@ function OutstationVariants({ pricing, draft, onPatch, onContinue }) {
             minDate={minReturnDate}
             disabled={!pickupAt}
             placeholder={
-              pickupAt ? 'Tap to choose return' : 'Pick a pickup first'
+              pickupAt ? 'Tap to choose return date' : 'Pickup time not set'
             }
             helper={
               pickupAt
-                ? 'Round trip — the driver brings you back here on this date.'
+                ? 'Round trip \u2014 the driver brings you back here on this date.'
                 : undefined
             }
             sheetTitle="Expected return"
           />
-        </div>
-        {pickupAt && expectedReturnAt ? (
-          <div className="mt-3 flex items-center justify-between bg-bg rounded-xl px-3 py-2">
-            <span className="text-xs text-text-muted inline-flex items-center gap-1.5">
-              <CalendarRange className="w-3.5 h-3.5" />
-              Trip length
-            </span>
-            <span className="text-sm font-bold text-text">
-              {days} day{days > 1 ? 's' : ''} · {nights} night
-              {nights === 1 ? '' : 's'}
-            </span>
-          </div>
-        ) : (
-          <p className="mt-3 text-[11px] text-text-muted inline-flex items-center gap-1.5">
-            <AlertCircle className="w-3.5 h-3.5" />
-            Pick both a pickup and return so we can size the trip.
-          </p>
-        )}
-      </Card>
+
+          {pickupAt && expectedReturnAt ? (
+            <div className="mt-3 flex items-center justify-between bg-bg rounded-xl px-3 py-2">
+              <span className="text-xs text-text-muted inline-flex items-center gap-1.5">
+                <CalendarRange className="w-3.5 h-3.5" />
+                Trip length
+              </span>
+              <span className="text-sm font-bold text-text">
+                {days} day{days > 1 ? 's' : ''} &middot; {nights} night
+                {nights === 1 ? '' : 's'}
+              </span>
+            </div>
+          ) : (
+            <p className="mt-3 text-[11px] text-text-muted inline-flex items-center gap-1.5">
+              <AlertCircle className="w-3.5 h-3.5" />
+              Pick a return date so we can size the trip.
+            </p>
+          )}
+        </Card>
+      )}
 
       {/* Car selection. The "Add car" CTA opens an in-place modal
           (same `<AddCarModal>` the hourly trip-details flow uses) so

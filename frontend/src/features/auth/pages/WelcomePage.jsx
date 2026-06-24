@@ -13,7 +13,7 @@ const WelcomePage = () => {
       {/* Content */}
       <div className="flex-1 flex flex-col items-center justify-center px-8  relative z-10">
         <div className="text-center mb-4 animate-fade-in-up w-full max-w-[400px] mx-auto" style={{ animationDelay: '0.1s' }}>
-          <img src="/images/logo-white.png" alt="SpareDriver Logo" className="w-full h-auto object-contain" />
+          <img src="/images/logo-smd.png" alt="SearchMyDrivers Logo" className="w-full h-auto object-contain" />
         </div>
         <p className="text-black text-[28px] font-semibold  text-center"><span>Your Car</span><br /> Our Professional Driver</p>
         <p className="text-black text-md font-semibold mt-4 text-center">Safe . Verified . On-Time</p>

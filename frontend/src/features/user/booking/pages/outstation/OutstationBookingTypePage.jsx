@@ -34,12 +34,12 @@ import { formatPickupDateTime } from '../../../../../utils/datetime';
  * redirect into an existing active booking here — the home page surfaces
  * those as resume tiles instead.
  */
-const HourlyBookingTypePage = () => {
+const OutstationBookingTypePage = () => {
   const navigate = useNavigate();
   const setServiceType = useBookingDraftStore((s) => s.setServiceType);
   const draftBookingType = useBookingDraftStore((s) => s.bookingType);
   const setBookingType = useBookingDraftStore((s) => s.setBookingType);
-  const setHourly = useBookingDraftStore((s) => s.setHourly);
+  const setOutstation = useBookingDraftStore((s) => s.setOutstation);
 
   // Pull the active service-pricing rows so we can use the admin's
   // per-service `scheduledDispatch` knobs (min lead time, etc.) for the
@@ -49,24 +49,24 @@ const HourlyBookingTypePage = () => {
     'user-pricing-services',
   );
   const dispatchConfig = useMemo(() => {
-    const hourly = (pricingRows || []).find(
-      (p) => p.serviceType === SERVICE_TYPES.HOURLY,
+    const outstationPricing = (pricingRows || []).find(
+      (p) => p.serviceType === SERVICE_TYPES.OUTSTATION,
     );
-    return mergeScheduledDispatchConfig(hourly?.scheduledDispatch);
+    return mergeScheduledDispatchConfig(outstationPricing?.scheduledDispatch);
   }, [pricingRows]);
 
   const [selected, setSelected] = useState(draftBookingType || null);
   // Blank-by-default — the scheduled card stays empty until the user
   // taps the picker. No more "tomorrow 9 AM" surprise prefill.
   const [scheduledAt, setScheduledAt] = useState(null);
-  const draftTripType = useBookingDraftStore((s) => s.hourly?.tripType);
+  const draftTripType = useBookingDraftStore((s) => s.outstation?.tripType);
   const [tripType, setTripType] = useState(draftTripType || TRIP_TYPE.ROUND_TRIP);
 
   // Make sure the service is locked to hourly the moment the user opens this
   // screen — keeps the rest of the flow consistent if they arrived via a
   // deep link instead of the home tile.
   useEffect(() => {
-    setServiceType(SERVICE_TYPES.HOURLY);
+    setServiceType(SERVICE_TYPES.OUTSTATION);
   }, [setServiceType]);
 
   const minLeadHours = dispatchConfig.MIN_SCHEDULED_LEAD_HOURS;
@@ -84,12 +84,12 @@ const HourlyBookingTypePage = () => {
     if (selected === BOOKING_TYPE.INSTANT) {
       // 15 min buffer so dispatch has time to find a driver before the
       // "ride starts" countdown is meaningful.
-      setHourly({ scheduledStartAt: new Date(Date.now() + 15 * 60_000).toISOString(), tripType });
+      setOutstation({ pickupAt: new Date(Date.now() + 15 * 60_000).toISOString(), tripType });
     } else {
       const iso = new Date(scheduledAt).toISOString();
-      setHourly({ scheduledStartAt: iso, tripType });
+      setOutstation({ pickupAt: iso, tripType });
     }
-    navigate('/user/book/hourly/details');
+    navigate('/user/book/outstation/variants');
   };
 
   const canContinue =
@@ -101,7 +101,7 @@ const HourlyBookingTypePage = () => {
   return (
     <PageShell
       title="When do you need a driver?"
-      subtitle="Hourly bookings"
+      subtitle="Outstation bookings"
       footer={
         <Button fullWidth disabled={!canContinue} onClick={handleContinue}>
           Continue
@@ -225,4 +225,4 @@ function Option({ icon: Icon, accent, active, title, description, onClick, child
   );
 }
 
-export default HourlyBookingTypePage;
+export default OutstationBookingTypePage;

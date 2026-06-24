@@ -6,6 +6,7 @@ import {
   Loader2,
   MapPin,
   ChevronRight,
+  Navigation,
 } from 'lucide-react';
 import Button from '../../../../../components/Button';
 import OutOfServiceDialog from '../../../../../components/dialogs/OutOfServiceDialog';
@@ -25,6 +26,7 @@ import {
   RAPIDO_MAP_OPTIONS,
   createImageMarkerContent,
 } from '../../../../../constants/mapTheme';
+import { TRIP_TYPE } from '../../../../../constants/bookingStatus';
 import useBookingDraftStore from '../../../../../store/user/useBookingDraftStore';
 import CarPickerSheet from '../../components/CarPickerSheet';
 import LocationPickerSheet from '../../components/LocationPickerSheet';
@@ -51,18 +53,30 @@ const HourlyTripDetailsPage = () => {
   const setPickup = useBookingDraftStore((s) => s.setPickup);
   const setDropoff = useBookingDraftStore((s) => s.setDropoff);
   const setCarId = useBookingDraftStore((s) => s.setCarId);
+  const draftTripType = useBookingDraftStore((s) => s.hourly?.tripType);
+  const draftDropoff = useBookingDraftStore((s) => s.dropoff);
+  const isOneWay = draftTripType === TRIP_TYPE.ONE_WAY;
 
-  const { maps, AdvancedMarkerElement, ready, error } = useGoogleMaps();
+  const { maps, AdvancedMarkerElement, PinElement, ready, error } = useGoogleMaps();
   const { coords, loading: locating, error: geoError, refresh } = useGeolocation();
 
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const [mapInstance, setMapInstance] = useState(null);
   const markerRef = useRef(null);
+  const dropMarkerRef = useRef(null);
   const geocoderRef = useRef(null);
   const autoCenteredRef = useRef(Boolean(draftPickup));
 
   const [pickup, setLocalPickup] = useState(draftPickup);
+  const [dropoff, setLocalDropoff] = useState(draftDropoff);
+  const [activeField, setActiveField] = useState('pickup');
+  const activeFieldRef = useRef(activeField);
+  
+  useEffect(() => {
+    activeFieldRef.current = activeField;
+  }, [activeField]);
+
   const [geocoding, setGeocoding] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [outOfServiceOpen, setOutOfServiceOpen] = useState(false);
@@ -149,6 +163,36 @@ const HourlyTripDetailsPage = () => {
     });
     markerRef.current = marker;
 
+    if (isOneWay && PinElement) {
+      const dropPin = new PinElement({
+        background: '#EF4444',
+        borderColor: '#7F1D1D',
+        glyphColor: '#FFFFFF',
+        scale: 1.2,
+      });
+      const dropStart = draftDropoff
+        ? { lat: draftDropoff.lat, lng: draftDropoff.lng }
+        : { lat: center.lat + 0.005, lng: center.lng + 0.005 };
+      
+      const dropMarker = new AdvancedMarkerElement({
+        map,
+        position: dropStart,
+        gmpDraggable: true,
+        content: dropPin.element,
+        zIndex: 5,
+      });
+      dropMarkerRef.current = dropMarker;
+
+      dropMarker.addListener('dragend', async () => {
+        const pos = dropMarker.position;
+        const lat = typeof pos.lat === 'function' ? pos.lat() : pos.lat;
+        const lng = typeof pos.lng === 'function' ? pos.lng() : pos.lng;
+        const point = await reverseGeocode(maps, { lat, lng }, { geocoder: geocoderRef.current });
+        if (point) setLocalDropoff(point);
+        setActiveField('dropoff');
+      });
+    }
+
     const reverseToPickup = async (lat, lng) => {
       const point = await reverseGeocode(maps, { lat, lng }, { geocoder: geocoderRef.current });
       if (point) setPickupPoint(point);
@@ -165,15 +209,22 @@ const HourlyTripDetailsPage = () => {
       const lat = event.latLng.lat();
       const lng = event.latLng.lng();
       moveMapTo({ lat, lng });
-      if (markerRef.current) markerRef.current.position = { lat, lng };
-      await reverseToPickup(lat, lng);
+      const field = activeFieldRef.current;
+      if (field === 'pickup') {
+        if (markerRef.current) markerRef.current.position = { lat, lng };
+        await reverseToPickup(lat, lng);
+      } else {
+        if (dropMarkerRef.current) dropMarkerRef.current.position = { lat, lng };
+        const point = await reverseGeocode(maps, { lat, lng }, { geocoder: geocoderRef.current });
+        if (point) setLocalDropoff(point);
+      }
     });
 
     // Hydrate the address if the draft was just coordinates.
     if (draftPickup && !draftPickup.address) {
       reverseToPickup(draftPickup.lat, draftPickup.lng);
     }
-  }, [ready, maps, AdvancedMarkerElement, draftPickup, moveMapTo, setPickupPoint]);
+  }, [ready, maps, AdvancedMarkerElement, PinElement, draftPickup, draftDropoff, isOneWay, moveMapTo, setPickupPoint]);
 
   // Once we have the geolocation, snap to it (unless the user already has a
   // pickup or has manually moved the marker).
@@ -195,7 +246,12 @@ const HourlyTripDetailsPage = () => {
   }, [coords, ready, maps, moveMapTo, setPickupPoint]);
 
   const handleSelectFromSheet = (point) => {
-    setPickupPoint(point);
+    if (activeField === 'pickup') {
+      setPickupPoint(point);
+    } else {
+      setLocalDropoff(point);
+      if (dropMarkerRef.current) dropMarkerRef.current.position = { lat: point.lat, lng: point.lng };
+    }
     moveMapTo({ lat: point.lat, lng: point.lng });
   };
 
@@ -217,10 +273,17 @@ const HourlyTripDetailsPage = () => {
     }
     moveMapTo({ lat: coords.lat, lng: coords.lng });
     const point = await resolvePoint({ lat: coords.lat, lng: coords.lng });
-    if (point) setPickupPoint(point);
+    if (point) {
+      if (activeFieldRef.current === 'pickup') setPickupPoint(point);
+      else setLocalDropoff(point);
+    }
   }, [coords, refresh, moveMapTo, resolvePoint, setPickupPoint]);
 
-  const canContinue = useMemo(() => Boolean(pickup?.address && carId), [pickup, carId]);
+  const canContinue = useMemo(() => {
+    if (!pickup?.address || !carId) return false;
+    if (isOneWay && !dropoff?.address) return false;
+    return true;
+  }, [pickup, carId, isOneWay, dropoff]);
 
   const handleConfirm = () => {
     if (!canContinue) return;
@@ -231,9 +294,14 @@ const HourlyTripDetailsPage = () => {
       return;
     }
     setPickup(pickup);
-    // Hourly trips end where they start; mirror dropoff to keep the backend
-    // payload consistent without exposing it to the user.
-    setDropoff(pickup);
+    
+    if (isOneWay) {
+      setDropoff(dropoff);
+    } else {
+      // Hourly trips end where they start; mirror dropoff to keep the backend
+      // payload consistent without exposing it to the user.
+      setDropoff(pickup);
+    }
     navigate('/user/book/hourly/slab');
   };
 
@@ -272,29 +340,60 @@ const HourlyTripDetailsPage = () => {
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setPickerOpen(true)}
-          className="w-full flex items-center gap-3 rounded-2xl bg-white shadow-lg px-3 py-3 text-left hover:bg-gray-50 transition active:scale-[0.99]"
-        >
-          <span className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-            <MapPin className="w-4 h-4" />
-          </span>
-          <span className="flex-1 min-w-0">
-            <span className="block text-[10px] uppercase tracking-wide font-semibold text-text-muted">
-              Pickup location
+        <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+          <button
+            type="button"
+            onClick={() => { setActiveField('pickup'); setPickerOpen(true); }}
+            className={`w-full flex items-center gap-3 px-3 py-3 text-left hover:bg-gray-50 transition active:scale-[0.99] ${activeField === 'pickup' ? 'bg-primary/5' : ''}`}
+          >
+            <span className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+              <MapPin className="w-4 h-4" />
             </span>
-            <span className="flex items-center gap-1.5">
-              <span className="block text-sm font-semibold text-text truncate">
-                {pickupLine}
+            <span className="flex-1 min-w-0">
+              <span className="block text-[10px] uppercase tracking-wide font-semibold text-text-muted">
+                Pickup location
               </span>
-              {(geocoding || locating) && (
-                <Loader2 className="w-3.5 h-3.5 text-text-muted animate-spin shrink-0" />
-              )}
+              <span className="flex items-center gap-1.5">
+                <span className="block text-sm font-semibold text-text truncate">
+                  {pickupLine}
+                </span>
+                {activeField === 'pickup' && (geocoding || locating) && (
+                  <Loader2 className="w-3.5 h-3.5 text-text-muted animate-spin shrink-0" />
+                )}
+              </span>
             </span>
-          </span>
-          <ChevronRight className="w-5 h-5 text-text-muted shrink-0" />
-        </button>
+            <ChevronRight className="w-5 h-5 text-text-muted shrink-0" />
+          </button>
+
+          {isOneWay && (
+            <div className="border-t border-border-light relative">
+              <div className="absolute top-0 left-7 -mt-4 w-px h-8 bg-border-light z-0"></div>
+              <button
+                type="button"
+                onClick={() => { setActiveField('dropoff'); setPickerOpen(true); }}
+                className={`w-full flex items-center gap-3 px-3 py-3 text-left hover:bg-gray-50 transition active:scale-[0.99] relative z-10 ${activeField === 'dropoff' ? 'bg-primary/5' : ''}`}
+              >
+                <span className="w-9 h-9 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+                  <Navigation className="w-4 h-4" />
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-[10px] uppercase tracking-wide font-semibold text-text-muted">
+                    Dropoff location
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="block text-sm font-semibold text-text truncate">
+                      {dropoff?.address || 'Choose dropoff...'}
+                    </span>
+                    {activeField === 'dropoff' && geocoding && (
+                      <Loader2 className="w-3.5 h-3.5 text-text-muted animate-spin shrink-0" />
+                    )}
+                  </span>
+                </span>
+                <ChevronRight className="w-5 h-5 text-text-muted shrink-0" />
+              </button>
+            </div>
+          )}
+        </div>
 
         {geoError && !pickup?.address && (
           <p className="text-[11px] text-text-muted bg-white/80 backdrop-blur rounded-xl px-3 py-2">
@@ -339,12 +438,12 @@ const HourlyTripDetailsPage = () => {
       <LocationPickerSheet
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        title="Pickup location"
+        title={activeField === 'pickup' ? "Pickup location" : "Dropoff location"}
         onSelect={handleSelectFromSheet}
         onRequestCurrentLocation={handleUseCurrentLocation}
         currentLocationLoading={locating}
         currentLocationError={geoError}
-        currentPickup={pickup}
+        currentPickup={activeField === 'pickup' ? pickup : dropoff}
       />
 
       <OutOfServiceDialog

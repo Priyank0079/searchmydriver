@@ -192,8 +192,8 @@ const Sidebar = ({ isOpen, onClose }) => {
       >
         <div className="flex items-center justify-between px-5 h-16 shrink-0 border-b border-white/10">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-              <Car className="w-4.5 h-4.5 text-dark" />
+            <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center overflow-hidden shrink-0">
+              <img src="/images/logo-smd.png" alt="SearchMyDrivers" className="w-full h-full object-contain p-0.5" />
             </div>
             <div>
               <h1 className="text-white text-sm font-bold leading-tight">{APP_NAME}</h1>

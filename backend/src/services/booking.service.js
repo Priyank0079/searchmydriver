@@ -589,7 +589,10 @@ function validateCreateInput(body) {
         'Outstation: pickupAt and expectedReturnAt must be valid datetimes',
       );
     }
-    if (endMs <= startMs) {
+    // One-way trips send expectedReturnAt == pickupAt (same moment).
+    // Round-trip requires return to be strictly after pickup.
+    const isOneWay = outstation?.tripType === 'one_way';
+    if (isOneWay ? endMs < startMs : endMs <= startMs) {
       throw new ApiError(
         400,
         'Outstation: expectedReturnAt must be after pickupAt',
@@ -1015,6 +1018,7 @@ export async function createBookingService(userId, body) {
               needsStay: outstation.needsStay ?? true,
               needsFood: outstation.needsFood ?? true,
               estimatedKm: outstation.estimatedKm || 0,
+              tripType: outstation.tripType || 'round_trip',
             }
           : null,
       fareSnapshot,

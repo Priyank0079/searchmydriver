@@ -216,14 +216,19 @@ export const updateUserOnboardingStepService = async (userId, data) => {
 };
 
 export const addCarService = async (userId, carData) => {
-  const { carTypeId, brandId, modelId, fuelTypeId, vehicleNumber, transmission, image } =
+  const { carTypeId, brandId, modelId, modelName, fuelTypeId, vehicleNumber, transmission, image } =
     carData;
 
-  if (!carTypeId || !brandId || !modelId || !fuelTypeId || !vehicleNumber || !transmission) {
-    throw new ApiError(400, 'All vehicle details are required');
+  if (!carTypeId || (!modelId && !modelName) || !vehicleNumber || !transmission) {
+    throw new ApiError(400, 'Car category, model name, vehicle number, and transmission are required');
   }
 
-  await validateCarCatalogRefs({ carTypeId, brandId, modelId, fuelTypeId });
+  const refsToValidate = { carTypeId };
+  if (brandId) refsToValidate.brandId = brandId;
+  if (modelId) refsToValidate.modelId = modelId;
+  if (fuelTypeId) refsToValidate.fuelTypeId = fuelTypeId;
+
+  await validateCarCatalogRefs(refsToValidate);
 
   const existingCount = await Car.countDocuments({ userId, isActive: true });
   if (existingCount >= 5) {
@@ -238,9 +243,10 @@ export const addCarService = async (userId, carData) => {
   const car = await Car.create({
     userId,
     carTypeId,
-    brandId,
-    modelId,
-    fuelTypeId,
+    brandId: brandId || null,
+    modelId: modelId || null,
+    modelName: modelName || null,
+    fuelTypeId: fuelTypeId || null,
     vehicleNumber: vehicleNumber.toUpperCase(),
     transmission: String(transmission).toLowerCase(),
     image: image || '',

@@ -63,7 +63,7 @@ const BookDriverSection = () => {
       // Hourly has its own dedicated flow (instant/scheduled → details → slab).
       navigate('/user/book/hourly/type');
     } else {
-      navigate('/user/book/variants');
+      navigate('/user/book/outstation/type');
     }
   };
 

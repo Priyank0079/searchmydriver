@@ -574,6 +574,7 @@ const ConfirmAndPayPage = () => {
         }
         minPickupDate={minPickupDate}
         minLeadHours={minLeadHours}
+        tripType={draft.outstation?.tripType}
         onClose={() => setOutstationPickupEditOpen(false)}
         onSave={handleOutstationPickupSave}
       />
@@ -1160,6 +1161,7 @@ function OutstationPickupEditDialog({
   initialReturnAt,
   minPickupDate,
   minLeadHours,
+  tripType,
   onClose,
   onSave,
 }) {
@@ -1170,6 +1172,7 @@ function OutstationPickupEditDialog({
       initialReturnAt={initialReturnAt}
       minPickupDate={minPickupDate}
       minLeadHours={minLeadHours}
+      tripType={tripType}
       onClose={onClose}
       onSave={onSave}
     />
@@ -1181,6 +1184,7 @@ function OutstationPickupEditDialogBody({
   initialReturnAt,
   minPickupDate,
   minLeadHours,
+  tripType,
   onClose,
   onSave,
 }) {
@@ -1191,6 +1195,7 @@ function OutstationPickupEditDialogBody({
     sanitisePickup(initialPickupAt, minPickupDate),
   );
   const [expectedReturnAt, setExpectedReturnAt] = useState(() => {
+    if (tripType === 'one_way') return null;
     const safePickup = sanitisePickup(initialPickupAt, minPickupDate);
     return sanitiseReturn(initialReturnAt, safePickup);
   });
@@ -1209,10 +1214,10 @@ function OutstationPickupEditDialogBody({
 
   // Trip preview to give the customer a sense of what the change does
   // before they commit. Mirrors the formula used downstream on save.
-  const previewDuration = useMemo(
-    () => computeOutstationDuration(pickupAt, expectedReturnAt),
-    [pickupAt, expectedReturnAt],
-  );
+  const previewDuration = useMemo(() => {
+    if (tripType === 'one_way') return { days: 1, nights: 0 };
+    return computeOutstationDuration(pickupAt, expectedReturnAt);
+  }, [pickupAt, expectedReturnAt, tripType]);
 
   const handlePickupChange = (iso) => {
     setPickupAt(iso);
@@ -1232,8 +1237,10 @@ function OutstationPickupEditDialogBody({
     }
   };
 
-  const canSave = !!(pickupAt && expectedReturnAt)
-    && new Date(expectedReturnAt).getTime() > new Date(pickupAt).getTime();
+  const canSave =
+    !!pickupAt &&
+    (tripType === 'one_way' ? true : !!expectedReturnAt) &&
+    previewDuration.days >= 1;
 
   // Lead-time banner: surfaces the EXACT earliest pickup the admin's
   // `MIN_SCHEDULED_LEAD_HOURS` allows, so the customer doesn't have to
@@ -1317,25 +1324,28 @@ function OutstationPickupEditDialogBody({
             placeholder="Tap to choose pickup"
             sheetTitle="Pickup date & time"
           />
-          <DateTimePickerField
-            label="Expected return"
-            icon={CalendarClock}
-            value={expectedReturnAt}
-            onChange={setExpectedReturnAt}
-            minDate={minReturnDate}
-            disabled={!pickupAt}
-            placeholder={
-              pickupAt ? 'Tap to choose return' : 'Pick a pickup first'
-            }
-            helper={
-              pickupAt
-                ? 'Round trip \u2014 the driver brings you back here on this date.'
-                : undefined
-            }
-            sheetTitle="Expected return"
-          />
 
-          {pickupAt && expectedReturnAt && (
+          {tripType !== 'one_way' && (
+            <DateTimePickerField
+              label="Expected return"
+              icon={CalendarClock}
+              value={expectedReturnAt}
+              onChange={setExpectedReturnAt}
+              minDate={minReturnDate}
+              disabled={!pickupAt}
+              placeholder={
+                pickupAt ? 'Tap to choose return' : 'Pick a pickup first'
+              }
+              helper={
+                pickupAt
+                  ? 'Round trip \u2014 the driver brings you back here on this date.'
+                  : undefined
+              }
+              sheetTitle="Expected return"
+            />
+          )}
+
+          {pickupAt && (tripType === 'one_way' || expectedReturnAt) && (
             <div className="rounded-xl bg-bg px-3 py-2 flex items-center justify-between">
               <span className="text-xs text-text-muted">New trip length</span>
               <span className="text-sm font-bold text-text">
