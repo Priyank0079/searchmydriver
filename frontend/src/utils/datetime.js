@@ -94,3 +94,34 @@ export function formatDateShort(input, fallback = '—') {
   if (!d) return fallback;
   return d.toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' });
 }
+
+/**
+ * Returns a relative time string.
+ *
+ *   "5m ago", "2h ago", "Just now", etc.
+ */
+export function formatTimeAgo(input, fallback = '—') {
+  const d = toDate(input);
+  if (!d) return fallback;
+
+  const seconds = Math.floor((new Date() - d) / 1000);
+  
+  if (seconds < 60) return 'Just now';
+  
+  const intervals = {
+    y: 31536000,
+    mo: 2592000,
+    d: 86400,
+    h: 3600,
+    m: 60
+  };
+
+  for (const [unit, secondsInUnit] of Object.entries(intervals)) {
+    const count = Math.floor(seconds / secondsInUnit);
+    if (count >= 1) {
+      return `${count}${unit} ago`;
+    }
+  }
+  
+  return 'Just now';
+}
