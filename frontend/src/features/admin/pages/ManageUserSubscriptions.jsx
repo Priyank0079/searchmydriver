@@ -316,7 +316,7 @@ function StatTile({ label, value, desc, icon: Icon, accent }) {
   );
 }
 
-function AssignSubscriptionDrawer({ subscription, onClose, onUpdated }) {
+export function AssignSubscriptionDrawer({ subscription, onClose, onUpdated }) {
   const [drivers, setDrivers] = useState([]);
   const [driversLoading, setDriversLoading] = useState(true);
   const [driversError, setDriversError] = useState(null);
@@ -481,7 +481,12 @@ function AssignSubscriptionDrawer({ subscription, onClose, onUpdated }) {
               <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
             </div>
           ) : drivers.length === 0 ? (
-            <p className="text-sm text-slate-500 text-center py-6">No drivers found.</p>
+            <div className="text-center py-8 px-4 rounded-xl border border-slate-100 bg-slate-50/50">
+              <p className="text-sm font-medium text-slate-700">No drivers available</p>
+              <p className="text-xs text-slate-500 mt-1">
+                {debouncedSearch ? 'Try a different search term.' : 'There are no approved drivers in the system to assign.'}
+              </p>
+            </div>
           ) : (
             drivers.map((driver) => {
               const active = String(selectedDriverId) === String(driver._id);

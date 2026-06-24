@@ -10,8 +10,11 @@ import {
 } from 'lucide-react';
 import Badge from '../../../components/Badge';
 import Card from '../../../components/Card';
+import Button from '../../../components/Button';
 import ServerPaginatedTable from '../components/ServerPaginatedTable';
 import api from '../../../utils/api';
+import useAdminAuthStore from '../../../store/useAdminAuthStore';
+import { AssignSubscriptionDrawer } from './ManageUserSubscriptions';
 import { formatCurrency } from '../../../utils/fareCalculator';
 import { formatDateTime12 } from '../../../utils/datetime';
 
@@ -25,6 +28,9 @@ function formatDate(d) {
 }
 
 const ManageSubscriptionRevenue = () => {
+  const admin = useAdminAuthStore((s) => s.admin);
+  const canAssign = ['admin', 'sub_admin'].includes(admin?.role);
+
   const [page, setPage] = useState(1);
   const [limit] = useState(15);
   const [search, setSearch] = useState('');
@@ -34,6 +40,7 @@ const ManageSubscriptionRevenue = () => {
   const [totals, setTotals] = useState(null);
   const [pagination, setPagination] = useState({ total: 0, pages: 1 });
   const [loading, setLoading] = useState(true);
+  const [assignRow, setAssignRow] = useState(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -66,47 +73,47 @@ const ManageSubscriptionRevenue = () => {
       {
         key: 'customer',
         header: 'Customer',
-        render: (row) => (
-          <div>
-            <p className="font-semibold text-slate-800">{row.userId?.name || '—'}</p>
-            <p className="text-xs text-slate-500">{row.userId?.phone_no || '—'}</p>
+        render: (_, row) => (
+          <div className="whitespace-nowrap">
+            <p className="font-semibold text-slate-800">{row?.userId?.name || '—'}</p>
+            <p className="text-xs text-slate-500">{row?.userId?.phone_no || '—'}</p>
           </div>
         ),
       },
       {
         key: 'plan',
         header: 'Plan',
-        render: (row) => (
-          <div>
-            <p className="font-medium">{row.planNameSnapshot || '—'}</p>
-            <p className="text-xs text-slate-500">{row.zoneId?.name || '—'}</p>
+        render: (_, row) => (
+          <div className="whitespace-nowrap">
+            <p className="font-medium">{row?.planNameSnapshot || '—'}</p>
+            <p className="text-xs text-slate-500">{row?.zoneId?.name || '—'}</p>
           </div>
         ),
       },
       {
         key: 'paid',
         header: 'Paid at',
-        render: (row) => (
-          <span className="text-xs text-slate-600">{formatDateTime12(row.paidAt)}</span>
+        render: (_, row) => (
+          <span className="text-xs text-slate-600 whitespace-nowrap">{formatDateTime12(row?.paidAt)}</span>
         ),
       },
       {
         key: 'collected',
         header: 'Collected',
-        render: (row) => <span className="font-semibold">{formatCurrency(row.amount)}</span>,
+        render: (_, row) => <span className="font-semibold whitespace-nowrap">{formatCurrency(row?.amount)}</span>,
       },
       {
         key: 'platform',
         header: 'Platform',
-        render: (row) => formatCurrency(row.platformShareRupees),
+        render: (_, row) => <span className="whitespace-nowrap">{formatCurrency(row?.platformShareRupees)}</span>,
       },
       {
         key: 'driver',
         header: 'Driver share',
-        render: (row) => (
-          <div>
-            <p>{formatCurrency(row.driverShareRupees)}</p>
-            {row.driverSharePaidAt ? (
+        render: (_, row) => (
+          <div className="whitespace-nowrap flex flex-col items-start gap-1">
+            <p>{formatCurrency(row?.driverShareRupees)}</p>
+            {row?.driverSharePaidAt ? (
               <Badge variant="success">Paid to driver</Badge>
             ) : (
               <Badge variant="warning">Pending assign</Badge>
@@ -117,10 +124,32 @@ const ManageSubscriptionRevenue = () => {
       {
         key: 'driverName',
         header: 'Assigned driver',
-        render: (row) => row.assignedDriverId?.name || row.driverSharePaidTo?.name || '—',
+        render: (_, row) => (
+          <span className="whitespace-nowrap">
+            {row?.assignedDriverId?.name || row?.driverSharePaidTo?.name || '—'}
+          </span>
+        ),
+      },
+      {
+        key: 'actions',
+        header: '',
+        render: (_, row) => (
+          canAssign ? (
+            <Button
+              size="sm"
+              variant={row?.assignedDriverId ? 'outline' : 'primary'}
+              onClick={(e) => {
+                e.stopPropagation();
+                setAssignRow(row);
+              }}
+            >
+              {row?.assignedDriverId ? 'Reassign' : 'Assign'}
+            </Button>
+          ) : null
+        ),
       },
     ],
-    [],
+    [canAssign],
   );
 
   const summary = [
@@ -185,9 +214,21 @@ const ManageSubscriptionRevenue = () => {
         limit={limit}
         pagination={pagination}
         onPageChange={setPage}
+        onRowClick={canAssign ? (row) => setAssignRow(row) : undefined}
         entityLabel="subscriptions"
         emptyMessage="No paid subscriptions in this range."
       />
+
+      {assignRow && (
+        <AssignSubscriptionDrawer
+          subscription={assignRow}
+          onClose={() => setAssignRow(null)}
+          onUpdated={() => {
+            setAssignRow(null);
+            fetchData();
+          }}
+        />
+      )}
     </div>
   );
 };
