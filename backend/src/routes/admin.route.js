@@ -1,4 +1,5 @@
 import express from 'express';
+import notificationRouter from './notification.route.js';
 import {
   loginAdmin,
   getStaffMe,
@@ -125,6 +126,7 @@ const { ALL_STAFF, OPERATIONS, SUPER_ADMIN } = ROUTE_ROLES;
 
 router.post('/auth/login', loginAdmin);
 router.get('/auth/me', protectStaff, restrictTo(...ALL_STAFF), getStaffMe);
+router.use('/notifications', protectStaff, notificationRouter);
 
 router.get('/users', protectStaff, restrictTo(...ALL_STAFF), getCustomers);
 

@@ -1,5 +1,6 @@
-import { Bell, Menu, Search } from 'lucide-react';
+import { Menu, Search } from 'lucide-react';
 import AdminUserMenu from './AdminUserMenu';
+import NotificationBell from '../../../components/common/NotificationBell';
 
 const AdminHeader = ({ onMenuToggle, title = 'Dashboard' }) => {
   return (
@@ -31,10 +32,7 @@ const AdminHeader = ({ onMenuToggle, title = 'Dashboard' }) => {
           </div>
 
           {/* Notifications */}
-          <button className="relative p-2.5 rounded-xl hover:bg-gray-100 text-text-secondary transition-colors">
-            <Bell className="w-5 h-5" />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-danger rounded-full ring-2 ring-white" />
-          </button>
+          <NotificationBell prefix="/admin" />
 
           <AdminUserMenu />
         </div>

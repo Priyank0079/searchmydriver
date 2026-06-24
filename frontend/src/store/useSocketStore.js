@@ -5,6 +5,7 @@ import { CONNECTION_EVENTS, S2C_EVENTS } from '../constants/socketEvents';
 import useDriverAuthStore from './useDriverAuthStore';
 import useUserAuthStore from './useUserAuthStore';
 import useAdminAuthStore from './useAdminAuthStore';
+import useNotificationStore from './useNotificationStore';
 
 /**
  * Singleton Socket.IO connection.
@@ -130,6 +131,10 @@ const useSocketStore = create((set, get) => ({
     socket.on(S2C_EVENTS.AUTH_ERROR, (payload) => {
       if (debug) console.warn('[socket] auth error', payload);
       set({ connectError: payload?.message || 'Authentication error' });
+    });
+
+    socket.on(S2C_EVENTS.NOTIFICATION, (payload) => {
+      useNotificationStore.getState().handleNewNotification(payload);
     });
   },
 }));

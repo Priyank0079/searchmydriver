@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Flag,
 } from 'lucide-react';
+import NotificationBell from '../../../../components/common/NotificationBell';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
 import { useDriverOnlineStore } from '../../../../store/driver/useDriverOnlineStore';
@@ -124,9 +125,7 @@ const DriverHomePage = () => {
       <div className="bg-dark px-4 pt-4 pb-6 rounded-b-3xl">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-lg font-bold text-white">Home</h1>
-          <button type="button" className="relative p-2.5 rounded-xl bg-white/10">
-            <Bell className="w-5 h-5 text-white" />
-          </button>
+          <NotificationBell prefix="/driver" />
         </div>
         <Card className="!bg-white/10 backdrop-blur-sm !shadow-none">
           <div className="flex items-center justify-between">

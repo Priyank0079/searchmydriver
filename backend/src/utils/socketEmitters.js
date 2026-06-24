@@ -6,6 +6,7 @@ import {
   ADMIN_ROOM,
 } from '../config/socket.js';
 import { S2C_EVENTS } from '../constants/socketEvents.js';
+import { Notification } from '../models/notification.model.js';
 
 /**
  * Thin wrappers around `io.to(room).emit(...)` so feature code never imports
@@ -80,14 +81,45 @@ export function emitToAdminRole(role, event, payload) {
  * @param {object} target
  * @param {{ title: string; body?: string; severity?: 'info'|'success'|'warn'|'error'; data?: object }} notification
  */
-export function emitNotification(target, notification) {
+export async function emitNotification(target, notification) {
   const payload = {
     title: notification.title,
     body: notification.body || '',
     severity: notification.severity || 'info',
     data: notification.data || {},
-    sentAt: Date.now(),
+    isRead: false,
+    createdAt: new Date(),
   };
+
+  try {
+    let recipientModel = null;
+    let recipientId = null;
+
+    if (target.userId) {
+      recipientModel = 'User';
+      recipientId = target.userId;
+    } else if (target.driverId) {
+      recipientModel = 'Driver';
+      recipientId = target.driverId;
+    } else if (target.admin || target.adminRole) {
+      recipientModel = 'Admin';
+    }
+
+    if (recipientModel) {
+      const doc = await Notification.create({
+        recipientId,
+        recipientModel,
+        title: payload.title,
+        body: payload.body,
+        severity: payload.severity,
+        data: payload.data,
+      });
+      payload._id = doc._id;
+    }
+  } catch (err) {
+    console.error('[Notification] Failed to save to DB:', err);
+  }
+
   if (target.userId) return emitToUser(target.userId, S2C_EVENTS.NOTIFICATION, payload);
   if (target.driverId) return emitToDriver(target.driverId, S2C_EVENTS.NOTIFICATION, payload);
   if (target.adminRole) return emitToAdminRole(target.adminRole, S2C_EVENTS.NOTIFICATION, payload);

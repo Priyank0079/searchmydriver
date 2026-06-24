@@ -1,5 +1,6 @@
 import express from 'express';
 import { refreshAccessToken, logout } from '../controllers/common.controller.js';
+import notificationRouter from './notification.route.js';
 import {
   loginUser,
   sendUserOtp,
@@ -72,6 +73,8 @@ router.get('/users/:userId/profile', protectProfileViewer, getUserProfile);
 
 // Protected Onboarding & Cars
 router.use(protectUser);
+
+router.use('/notifications', notificationRouter);
 
 // Fare estimate (auth required so we can apply the user's subscription discount)
 router.post('/bookings/estimate', estimateFare);

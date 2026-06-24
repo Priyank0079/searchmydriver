@@ -1,4 +1,5 @@
 import express from 'express';
+import notificationRouter from './notification.route.js';
 import {
   sendOtp,
   verifyOtpAndRegister,
@@ -61,6 +62,7 @@ router.post('/auth/login', loginDriver);
 router.post('/auth/google', googleSignInDriver);
 
 router.put('/onboarding/step', protectDriver, updateOnboardingStep);
+router.use('/notifications', protectDriver, notificationRouter);
 router.post(
   '/onboarding/live-verification',
   protectDriver,
