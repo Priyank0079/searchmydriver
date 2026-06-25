@@ -4,11 +4,12 @@ import {
   LayoutDashboard, Users, Car, CalendarCheck, DollarSign, Settings,
   LogOut, X, ChevronRight, ChevronDown, ShieldCheck, Monitor, Package,
   CheckSquare, MapPin, Receipt, Sparkles, Navigation, Wallet, Banknote,
-  LifeBuoy, ClipboardList, Timer, Megaphone, Compass, LayoutTemplate,
+  LifeBuoy, ClipboardList, Timer, Megaphone, Compass, LayoutTemplate, Headset,
 } from 'lucide-react';
 import { APP_NAME } from '../../../utils/constants';
 import useAdminAuthStore from '../../../store/useAdminAuthStore';
 import { roleCanAccess } from '../../../constants/staffRoles';
+import { STAFF_PERMISSIONS } from '../../../constants/permissions';
 
 const navItems = [
   {
@@ -18,17 +19,16 @@ const navItems = [
     end: true,
     roles: ['admin'],
   },
-  { path: '/admin/users', label: 'Users', icon: Users, roles: ['admin', 'sub_admin'] },
-  { path: '/admin/incoming-registrations', label: 'Incoming Registrations', icon: LifeBuoy, roles: ['admin', 'sub_admin'] },
-  { path: '/admin/tasks', label: 'Team Tasks', icon: CheckSquare },
-  { path: '/admin/drivers', label: 'Drivers', icon: Car },
-  { path: '/admin/driver-wallet', label: 'Driver Wallet', icon: Wallet, roles: ['admin', 'sub_admin'] },
-  { path: '/admin/drivers/live', label: 'Live Map', icon: Navigation },
-  { path: '/admin/kit-orders', label: 'Kit Orders', icon: Package },
+  { path: '/admin/users', label: 'Users', icon: Users, roles: ['admin', 'sub_admin'], permission: STAFF_PERMISSIONS.USERS },
+  { path: '/admin/incoming-registrations', label: 'Incoming Registrations', icon: LifeBuoy, roles: ['admin', 'sub_admin'], permission: STAFF_PERMISSIONS.INCOMING_REGISTRATIONS },
+  { path: '/admin/tasks', label: 'Team Tasks', icon: CheckSquare, permission: STAFF_PERMISSIONS.TEAM_TASKS },
+  { path: '/admin/drivers', label: 'Drivers', icon: Car, permission: STAFF_PERMISSIONS.DRIVERS },
+  { path: '/admin/drivers/live', label: 'Live Map', icon: Navigation, permission: STAFF_PERMISSIONS.LIVE_MAP },
+  { path: '/admin/kit-orders', label: 'Kit Orders', icon: Package, permission: STAFF_PERMISSIONS.KIT_ORDERS },
   // Ads management — admin + sub_admin can publish promotional images
   // and short videos that surface on the user home screen.
-  { path: '/admin/banners', label: 'Top Banners', icon: LayoutTemplate, roles: ['admin', 'sub_admin'] },
-  { path: '/admin/ads', label: 'Ads', icon: Megaphone, roles: ['admin', 'sub_admin'] },
+  { path: '/admin/banners', label: 'Top Banners', icon: LayoutTemplate, roles: ['admin', 'sub_admin'], permission: STAFF_PERMISSIONS.BANNERS },
+  { path: '/admin/ads', label: 'Ads', icon: Megaphone, roles: ['admin', 'sub_admin'], permission: STAFF_PERMISSIONS.ADS },
   {
     label: 'Bookings',
     icon: CalendarCheck,
@@ -38,38 +38,37 @@ const navItems = [
         path: '/admin/bookings',
         label: 'All Bookings',
         icon: ClipboardList,
-        // `end` so this child doesn't stay highlighted while you're on
-        // a deeper /admin/bookings/* page (scheduled-jobs / emergency-pool).
         end: true,
         roles: ['admin'],
+        permission: STAFF_PERMISSIONS.BOOKINGS_ALL,
       },
       {
         path: '/admin/bookings/scheduled-jobs',
         label: 'Scheduled Jobs',
         icon: Timer,
         roles: ['admin', 'sub_admin'],
+        permission: STAFF_PERMISSIONS.BOOKINGS_SCHEDULED,
       },
       {
         path: '/admin/bookings/emergency-pool',
         label: 'Schedule Pool',
         icon: LifeBuoy,
-        // All staff can view; the page itself scopes team_members to
-        // their assigned zones and hides the "assign driver" CTA.
         roles: ['admin', 'sub_admin', 'team_member'],
+        permission: STAFF_PERMISSIONS.BOOKINGS_EMERGENCY,
       },
       {
         path: '/admin/bookings/outstation-assignments',
         label: 'Outstation Pool',
         icon: Compass,
-        // Outstation rides skip auto-dispatch entirely; staff assign
-        // here. Team members see read-only rows in their zones.
         roles: ['admin', 'sub_admin', 'team_member'],
+        permission: STAFF_PERMISSIONS.BOOKINGS_OUTSTATION,
       },
       {
         path: '/admin/bookings/subscription-requests',
         label: 'Subscription Requests',
         icon: Sparkles,
         roles: ['admin', 'sub_admin', 'team_member'],
+        permission: STAFF_PERMISSIONS.BOOKINGS_SUBSCRIPTION,
       },
     ],
   },
@@ -83,18 +82,21 @@ const navItems = [
         label: 'Revenue',
         icon: DollarSign,
         roles: ['admin'],
+        permission: STAFF_PERMISSIONS.ACCOUNT_REVENUE,
       },
       {
         path: '/admin/account/subscription-revenue',
         label: 'Subscription Revenue',
         icon: Sparkles,
         roles: ['admin'],
+        permission: STAFF_PERMISSIONS.ACCOUNT_SUB_REVENUE,
       },
       {
         path: '/admin/account/refunds',
         label: 'Refunds',
         icon: Banknote,
         roles: ['admin'],
+        permission: STAFF_PERMISSIONS.ACCOUNT_REFUNDS,
       },
     ],
   },
@@ -103,6 +105,7 @@ const navItems = [
     label: 'Fare Management',
     icon: Receipt,
     roles: ['admin', 'sub_admin'],
+    permission: STAFF_PERMISSIONS.FARE_MANAGEMENT,
   },
   {
     label: 'Settings',
@@ -114,35 +117,71 @@ const navItems = [
         label: 'Platform Settings',
         icon: Monitor,
         roles: ['admin', 'sub_admin'],
+        permission: STAFF_PERMISSIONS.SETTINGS_PLATFORM,
       },
       {
         path: '/admin/settings/kits',
         label: 'Driver Kits',
         icon: Package,
         roles: ['admin', 'sub_admin'],
+        permission: STAFF_PERMISSIONS.SETTINGS_KITS,
       },
       {
         path: '/admin/settings/zones',
         label: 'Service Zones',
         icon: MapPin,
         roles: ['admin', 'sub_admin'],
+        permission: STAFF_PERMISSIONS.SETTINGS_ZONES,
       },
       {
         path: '/admin/settings/team',
         label: 'Team Management',
         icon: ShieldCheck,
         roles: ['admin'],
+        permission: STAFF_PERMISSIONS.SETTINGS_TEAM,
       },
     ],
   },
+  {
+    path: '/admin/driver-wallet',
+    label: 'Driver Wallet',
+    icon: Wallet,
+    roles: ['admin', 'sub_admin'],
+    permission: STAFF_PERMISSIONS.DRIVER_WALLET,
+  },
+  {
+    path: '/admin/help-desk',
+    label: 'Help Desk',
+    icon: Headset,
+    roles: ['admin', 'sub_admin'],
+    // Fallback to SUPPORT permission, or you can create one if needed
+    permission: STAFF_PERMISSIONS.SUPPORT || 'SUPPORT',
+  },
 ];
 
-function filterNavByRole(items, userRole) {
+function checkAccess(item, admin) {
+  if (admin.role === 'admin') return true;
+  
+  // If user has a permissions array, strictly use PBAC.
+  if (admin.permissions && Array.isArray(admin.permissions) && admin.permissions.length > 0) {
+    // If the item doesn't require any explicit permission (like Dashboard), allow it.
+    if (!item.permission) return true;
+    return admin.permissions.includes(item.permission);
+  }
+
+  // Fallback to role-based access for legacy users
+  if (item.roles) return roleCanAccess(item.roles, admin.role);
+  
+  // Items without roles/permissions are public to all staff
+  return true;
+}
+
+function filterNavByRole(items, admin) {
   return items
-    .filter((item) => roleCanAccess(item.roles, userRole))
+    .filter((item) => checkAccess(item, admin))
     .map((item) => {
       if (!item.children) return item;
-      const children = item.children.filter((child) => roleCanAccess(child.roles, userRole));
+      const children = item.children.filter((child) => checkAccess(child, admin));
       if (!children.length) return null;
       return { ...item, children };
     })
@@ -159,7 +198,7 @@ const Sidebar = ({ isOpen, onClose }) => {
     'Bookings',
   ]);
 
-  const filteredNavItems = filterNavByRole(navItems, admin?.role);
+  const filteredNavItems = filterNavByRole(navItems, admin);
 
   const handleLogout = () => {
     logout();

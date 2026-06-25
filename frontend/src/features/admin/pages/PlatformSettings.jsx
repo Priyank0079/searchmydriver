@@ -30,6 +30,7 @@ const PlatformSettings = () => {
   const [carTypes, setCarTypes] = useState([]);
   const [conditions, setConditions] = useState([]);
   const [trainingVideos, setTrainingVideos] = useState([]);
+  const [platformSettings, setPlatformSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('vehicles');
 
@@ -42,18 +43,32 @@ const PlatformSettings = () => {
   // Form States
   const [carForm, setCarForm] = useState({ name: '', description: '', image: '', isActive: true });
   const [conditionForm, setConditionForm] = useState({ question: '', key: '', isRequired: false, isActive: true });
+  const [policyForm, setPolicyForm] = useState({
+    cashCancelFeeThresholdMinutes: 30,
+    cashCancelFeeAmount: 50,
+    driverCancelFeeAmount: 50,
+  });
 
   const fetchData = useCallback(async ({ silent = false } = {}) => {
     try {
       if (!silent) setLoading(true);
-      const [carsRes, condRes, trainingRes] = await Promise.all([
+      const [carsRes, condRes, trainingRes, platformSettingsRes] = await Promise.all([
         api.get('/admin/settings/car-types'),
         api.get('/admin/settings/conditions'),
         api.get('/admin/settings/training-videos'),
+        api.get('/admin/platform-settings').catch(() => ({ data: { data: null } })),
       ]);
       setCarTypes(carsRes.data.data);
       setConditions(condRes.data.data);
       setTrainingVideos(trainingRes.data.data);
+      if (platformSettingsRes.data?.data) {
+        setPlatformSettings(platformSettingsRes.data.data);
+        setPolicyForm({
+          cashCancelFeeThresholdMinutes: platformSettingsRes.data.data.cashCancelFeeThresholdMinutes ?? 30,
+          cashCancelFeeAmount: platformSettingsRes.data.data.cashCancelFeeAmount ?? 50,
+          driverCancelFeeAmount: platformSettingsRes.data.data.driverCancelFeeAmount ?? 50,
+        });
+      }
     } catch (err) {
       console.error('Failed to fetch platform data', err);
       if (!silent) {
@@ -70,6 +85,20 @@ const PlatformSettings = () => {
 
   const handleSystemToggle = (field) => (val) => {
     setSystemConfig(prev => ({ ...prev, [field]: val }));
+  };
+
+  const handlePolicySubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      await api.put('/admin/platform-settings', policyForm);
+      await fetchData({ silent: true });
+      alert('Policies updated successfully');
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to update policies');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleCarSubmit = async (e) => {
@@ -155,6 +184,7 @@ const PlatformSettings = () => {
             { id: 'vehicles', label: 'Vehicle Catalog', icon: Car },
             { id: 'conditions', label: 'Registration Checklist', icon: CheckSquare },
             { id: 'training', label: 'Driver Training', icon: Video },
+            { id: 'policies', label: 'Policies', icon: Edit2 },
           ].map(tab => (
             <button
               key={tab.id}
@@ -179,6 +209,59 @@ const PlatformSettings = () => {
         </div>
       ) : (
         <div className="space-y-8">
+          {activeTab === 'policies' && (
+            <div className="space-y-6 max-w-2xl">
+              <form onSubmit={handlePolicySubmit} className="space-y-6 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                
+                {/* User Cancellation Policy */}
+                <div>
+                  <h3 className="text-xl font-bold text-slate-800">User Cancellation Policy</h3>
+                  <p className="text-sm text-slate-500 mt-1 mb-4">Configure cancellation fees and time threshold limits for users.</p>
+                  <div className="space-y-4">
+                    <Input
+                      label="Cancellation Time Threshold (Minutes)"
+                      type="number"
+                      min="0"
+                      value={policyForm.cashCancelFeeThresholdMinutes}
+                      onChange={(e) => setPolicyForm({ ...policyForm, cashCancelFeeThresholdMinutes: Number(e.target.value) })}
+                      required
+                    />
+                    <Input
+                      label="Cancellation Fee Amount (₹)"
+                      type="number"
+                      min="0"
+                      value={policyForm.cashCancelFeeAmount}
+                      onChange={(e) => setPolicyForm({ ...policyForm, cashCancelFeeAmount: Number(e.target.value) })}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <hr className="border-slate-200" />
+
+                {/* Driver Cancellation Policy */}
+                <div>
+                  <h3 className="text-xl font-bold text-slate-800">Driver Cancellation Policy</h3>
+                  <p className="text-sm text-slate-500 mt-1 mb-4">Configure the penalty deducted from a driver's wallet if they cancel after accepting a ride.</p>
+                  <div className="space-y-4">
+                    <Input
+                      label="Driver Cancellation Penalty (₹)"
+                      type="number"
+                      min="0"
+                      value={policyForm.driverCancelFeeAmount}
+                      onChange={(e) => setPolicyForm({ ...policyForm, driverCancelFeeAmount: Number(e.target.value) })}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <Button type="submit" loading={submitting} className="mt-4">
+                  Save Policies
+                </Button>
+              </form>
+            </div>
+          )}
+
           {activeTab === 'vehicles' && (
             <VehicleCatalogSettings
               carTypes={carTypes}

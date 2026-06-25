@@ -311,6 +311,8 @@ const paymentLedgerSchema = new mongoose.Schema(
 export const BOOKING_PAYMENT_METHOD = Object.freeze({
   WALLET: 'wallet',
   RAZORPAY: 'razorpay',
+  CASH: 'cash',
+  ONLINE: 'online',
 });
 const BOOKING_PAYMENT_METHOD_LIST = Object.values(BOOKING_PAYMENT_METHOD);
 

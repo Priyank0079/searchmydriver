@@ -1,7 +1,8 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { Upload, Loader2, CheckCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { validateImageFile, MAX_IMAGE_LABEL } from '../utils/fileLimits';
+import CameraCaptureModal from './CameraCaptureModal';
 
 const inputClassName =
   'absolute inset-0 w-full h-full opacity-0 z-10 cursor-pointer disabled:cursor-not-allowed';
@@ -14,11 +15,14 @@ const DocumentUploadField = ({
   doc = { url: null, publicId: null, loading: false },
   onUpload,
   accept = 'image/*',
+  capture,
+  useLiveCamera = false,
   variant = 'card',
   hint,
   disabled = false,
 }) => {
   const inputRef = useRef(null);
+  const [showCamera, setShowCamera] = useState(false);
   const isBusy = disabled || doc.loading;
 
   const handleChange = async (e) => {
@@ -42,18 +46,52 @@ const DocumentUploadField = ({
     }
   };
 
+  const handleCameraCapture = async (file) => {
+    if (isBusy) return;
+    try {
+      await onUpload(file);
+    } catch (err) {
+      toast.error(err.message || 'Upload failed');
+    }
+  };
+
+  const renderOverlayControl = () => {
+    if (useLiveCamera) {
+      return (
+        <button
+          type="button"
+          disabled={isBusy}
+          className={inputClassName}
+          onClick={() => setShowCamera(true)}
+        />
+      );
+    }
+    return (
+      <input
+        ref={inputRef}
+        type="file"
+        accept={accept}
+        capture={capture}
+        onChange={handleChange}
+        disabled={isBusy}
+        className={inputClassName}
+      />
+    );
+  };
+
   if (variant === 'grid') {
     return (
       <div className="relative">
-        <input
-          ref={inputRef}
-          type="file"
-          accept={accept}
-          onChange={handleChange}
-          disabled={isBusy}
-          className={inputClassName}
-        />
+        {renderOverlayControl()}
         <GridPreview label={label} doc={doc} isBusy={isBusy} />
+        {useLiveCamera && (
+          <CameraCaptureModal
+            isOpen={showCamera}
+            onClose={() => setShowCamera(false)}
+            onCapture={handleCameraCapture}
+            title={`Take ${label || 'Photo'}`}
+          />
+        )}
       </div>
     );
   }
@@ -62,14 +100,7 @@ const DocumentUploadField = ({
     <div>
       {label && <label className="text-sm font-medium text-text mb-3 block">{label}</label>}
       <div className="relative">
-        <input
-          ref={inputRef}
-          type="file"
-          accept={accept}
-          onChange={handleChange}
-          disabled={isBusy}
-          className={inputClassName}
-        />
+        {renderOverlayControl()}
         <div
           className={`w-full border-2 rounded-2xl p-6 flex flex-col items-center justify-center gap-2 transition-colors overflow-hidden relative min-h-[140px]
             ${doc.url ? 'border-primary border-solid' : 'border-dashed border-border'}
@@ -87,14 +118,22 @@ const DocumentUploadField = ({
           ) : (
             <>
               <Upload className="w-8 h-8 text-text-muted" />
-              <span className="text-sm text-text-secondary">Tap to upload</span>
+              <span className="text-sm text-text-secondary">Tap to {useLiveCamera ? 'capture' : 'upload'}</span>
               {hint && <span className="text-xs text-text-muted">{hint}</span>}
-              {(!accept || accept.includes('image')) && (
+              {(!accept || accept.includes('image')) && !useLiveCamera && (
                 <span className="text-xs text-text-muted">Max {MAX_IMAGE_LABEL}</span>
               )}
             </>
           )}
         </div>
+        {useLiveCamera && (
+          <CameraCaptureModal
+            isOpen={showCamera}
+            onClose={() => setShowCamera(false)}
+            onCapture={handleCameraCapture}
+            title={`Take ${label || 'Photo'}`}
+          />
+        )}
       </div>
     </div>
   );

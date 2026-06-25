@@ -125,21 +125,35 @@ export function normaliseHourlyPolicy(raw) {
  * the schema defaults if no `ServicePricing` doc is configured yet
  * (otherwise a missing config silently turns every cancel into "free").
  */
+import PlatformSettings from '../models/platformSettings.model.js';
+
 export async function loadCancellationPolicy(serviceType) {
-  if (!serviceType) return { ...DEFAULT_POLICY };
+  const defaultSettings = { cashCancelFeeThresholdMinutes: 30, cashCancelFeeAmount: 50 };
+  if (!serviceType) return { ...DEFAULT_POLICY, platformSettings: defaultSettings };
   const pricing = await ServicePricing.findOne({
     serviceType,
     isActive: true,
   }).lean();
   const cfg = pricing?.cancellation || {};
-  return {
+  const settings = await PlatformSettings.findOne().lean() || defaultSettings;
+  const policy = {
     ...normaliseHourlyPolicy(cfg),
-    // Outstation has its own TIME-driven policy. Always present (filled
-    // with the schema defaults when the admin hasn't customised it) so
-    // every downstream caller can read `policy.outstation.<knob>`
-    // without a presence check.
     outstation: normaliseOutstationPolicy(cfg.outstation),
+    platformSettings: {
+      cashCancelFeeThresholdMinutes: settings.cashCancelFeeThresholdMinutes ?? defaultSettings.cashCancelFeeThresholdMinutes,
+      cashCancelFeeAmount: settings.cashCancelFeeAmount ?? defaultSettings.cashCancelFeeAmount,
+      driverCancelFeeAmount: settings.driverCancelFeeAmount ?? 50,
+    },
   };
+
+  // Override service-specific driver penalties to enforce the global platform setting
+  policy.driverCancellationPenalty = policy.platformSettings.driverCancelFeeAmount;
+  policy.outstation.driverPenaltyType = 'flat';
+  policy.outstation.driverPenaltyAmount = policy.platformSettings.driverCancelFeeAmount;
+  policy.outstation.driverMidPenaltyType = 'flat';
+  policy.outstation.driverMidPenaltyAmount = policy.platformSettings.driverCancelFeeAmount;
+
+  return policy;
 }
 
 /**
@@ -204,6 +218,29 @@ export function computeUserCancellation(booking, policy) {
   const driverArrived =
     status === BOOKING_STATUS.ARRIVED || status === BOOKING_STATUS.STARTED;
 
+  if (booking?.paymentMethod === 'cash') {
+    const targetTime = booking?.timeline?.scheduledAt || booking?.timeline?.createdAt || new Date();
+    const minutesToPickup = (new Date(targetTime).getTime() - Date.now()) / 60000;
+    const threshold = policy?.platformSettings?.cashCancelFeeThresholdMinutes ?? 30;
+    let fee = 0;
+    
+    // If they cancel less than threshold minutes before pickup, or after pickup time
+    if (minutesToPickup < threshold && ASSIGNED_PRE_ARRIVAL_STATUSES.has(status)) {
+      fee = policy?.platformSettings?.cashCancelFeeAmount ?? 50;
+    } else if (ARRIVED_OR_LATER_STATUSES.has(status)) {
+      fee = policy?.platformSettings?.cashCancelFeeAmount ?? 50;
+    }
+
+    const { driverShare, companyShare } = splitCancellationFee(fee, policy);
+    return {
+      feeCharged: fee,
+      refundAmount: 0,
+      driverShare,
+      companyShare,
+      tripStarted,
+      driverArrived,
+    };
+  }
   if (paid <= 0) {
     return {
       feeCharged: 0,

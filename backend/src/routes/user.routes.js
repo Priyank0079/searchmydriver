@@ -52,11 +52,14 @@ import {
   createWalletTopupOrder,
   verifyWalletTopupPayment,
 } from '../controllers/wallet.controller.js';
+import { createSupportTicket, createPublicSupportTicket } from '../controllers/support.controller.js';
 import { protectUser, protectProfileViewer } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
 // Auth Public
+router.post('/support/ticket', protectUser, createSupportTicket);
+router.post('/support/public-ticket', createPublicSupportTicket);
 router.post('/send-otp', sendUserOtp);
 router.post('/verify-otp', verifyUserOtpAndRegister);
 router.post('/login', loginUser);

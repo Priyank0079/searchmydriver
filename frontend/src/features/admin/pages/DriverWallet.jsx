@@ -5,6 +5,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { buildCacheKey } from '../../../store/lib/buildCacheKey';
 import { useAdminDriverWalletStore } from '../../../store/admin/useAdminDriverWalletStore';
 import ServerPaginatedTable from '../components/ServerPaginatedTable';
+import AdjustDriverWalletModal from '../components/AdjustDriverWalletModal';
 
 const DriverWallet = () => {
   const [activeTab, setActiveTab] = useState('transactions'); // 'transactions' | 'withdrawals'
@@ -12,6 +13,7 @@ const DriverWallet = () => {
   const [limit] = useState(10);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 300);
@@ -54,6 +56,7 @@ const DriverWallet = () => {
           <div className="flex flex-col py-1">
             <span className="font-semibold text-sm text-slate-900">{val?.name || 'Unknown'}</span>
             <span className="text-xs text-slate-500 mt-0.5">{val?.phone || 'No Phone'}</span>
+            <span className="text-[10px] font-medium text-emerald-600 mt-1">Wallet: ₹{val?.walletBalance || 0}</span>
           </div>
         ),
       },
@@ -106,14 +109,22 @@ const DriverWallet = () => {
             Manage driver wallet history and withdrawal requests
           </p>
         </div>
-        <button
-          onClick={() => refetch()}
-          disabled={loading}
-          className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => refetch()}
+            disabled={loading}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+          <button
+            onClick={() => setIsAdjustModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl text-sm font-medium hover:bg-emerald-700 transition-colors"
+          >
+            Adjust Balance
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -178,9 +189,15 @@ const DriverWallet = () => {
           pagination={pagination}
           onPageChange={setPage}
           entityLabel={activeTab === 'transactions' ? 'transactions' : 'withdrawals'}
-          emptyMessage={`No ${activeTab} found.`}
+          emptyMessage="No wallet history found"
         />
       </div>
+
+      <AdjustDriverWalletModal 
+        isOpen={isAdjustModalOpen} 
+        onClose={() => setIsAdjustModalOpen(false)} 
+        onSuccess={() => refetch()}
+      />
     </div>
   );
 };

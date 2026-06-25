@@ -15,7 +15,7 @@ import useDriverAuthStore from '../../../../store/useDriverAuthStore';
 import { useDocumentsManager } from '../../../../hooks/useDocumentsManager';
 
 import { DRIVER_ONBOARDING_STEPS } from '../../../../utils/driverOnboarding';
-const CREDENTIAL_DOC_TYPES = ['driving_license', 'selfie'];
+const CREDENTIAL_DOC_TYPES = ['driving_license', 'live_selfie', 'address_proof', 'police_verification', 'driver_registration'];
 
 const CREDENTIAL_DOCUMENTS = [
   {
@@ -24,9 +24,24 @@ const CREDENTIAL_DOCUMENTS = [
     hint: 'Clear photo of the front of your valid driving licence',
   },
   {
-    type: 'selfie',
-    title: 'Profile photo (selfie)',
+    type: 'live_selfie',
+    title: 'Live Selfie',
     hint: 'Recent photo of your face, good lighting, no sunglasses or mask',
+  },
+  {
+    type: 'address_proof',
+    title: 'Address Proof',
+    hint: 'Upload an electric bill or rent agreement',
+  },
+  {
+    type: 'police_verification',
+    title: 'Police Verification',
+    hint: 'Clear photo of your police verification certificate',
+  },
+  {
+    type: 'driver_registration',
+    title: 'Driver Registration',
+    hint: 'Clear photo of your driver registration document',
   },
 ];
 
@@ -82,7 +97,7 @@ const DrivingCredentialsPage = () => {
 
   const handleContinue = async () => {
     if (!allRequiredUploaded(CREDENTIAL_DOC_TYPES)) {
-      alert('Please upload both required documents');
+      alert('Please upload all required documents');
       return;
     }
 
@@ -182,8 +197,8 @@ const DrivingCredentialsPage = () => {
   return (
     <div className="flex-1 flex flex-col bg-white min-h-dvh">
       <div className="px-4 pt-4">
-        <button type="button" onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-xl hover:bg-gray-100">
-          <ArrowLeft className="w-5 h-5" />
+        <button type="button" onClick={() => navigate('/driver/register/identity')} className="p-2 -ml-2 rounded-xl hover:bg-gray-100">
+          <ArrowLeft className="w-6 h-6 text-text" />
         </button>
       </div>
       <div className="px-6 pt-2 pb-4">
@@ -239,7 +254,7 @@ const DrivingCredentialsPage = () => {
           <div>
             <h3 className="text-sm font-semibold text-text">Verification documents</h3>
             <p className="text-xs text-text-muted mt-1 mb-4 leading-relaxed">
-              Upload both documents below. They are required before you can continue.
+              Upload all documents below. They are required before you can continue.
             </p>
             <div className="space-y-4">
               {CREDENTIAL_DOCUMENTS.map(({ type, title, hint }) => (
@@ -251,6 +266,8 @@ const DrivingCredentialsPage = () => {
                   doc={documents[type]}
                   onUpload={(file) => uploadDocument(type, file)}
                   disabled={isAnyUploading}
+                  capture={type === 'live_selfie' ? 'user' : undefined}
+                  useLiveCamera={type === 'live_selfie'}
                 />
               ))}
             </div>

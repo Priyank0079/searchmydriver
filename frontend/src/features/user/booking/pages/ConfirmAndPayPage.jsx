@@ -20,6 +20,7 @@ import {
   CalendarClock,
   HandCoins,
   AlertCircle,
+  CreditCard,
 } from 'lucide-react';
 import Card from '../../../../components/Card';
 import Button from '../../../../components/Button';
@@ -42,6 +43,7 @@ import DateTimePickerField from '../../../../components/inputs/DateTimePickerFie
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
 import { useUserServicePricingsStore } from '../../../../store/user/useUserPricingStore';
+import { useRazorpayCheckout } from '../../../../hooks/useRazorpayCheckout';
 
 /**
  * Combined Review + Confirm & pay screen.
@@ -79,6 +81,7 @@ const ConfirmAndPayPage = () => {
   const setFareEstimate = useBookingDraftStore((s) => s.setFareEstimate);
   const setOutstation = useBookingDraftStore((s) => s.setOutstation);
   const createBooking = useUserActiveBookingStore((s) => s.createBooking);
+  const verifyPayment = useUserActiveBookingStore((s) => s.verifyPayment);
 
   const wallet = useUserWalletStore((s) => s.wallet);
   const fetchWallet = useUserWalletStore((s) => s.fetchWallet);
@@ -100,6 +103,8 @@ const ConfirmAndPayPage = () => {
   const [outstationPickupEditOpen, setOutstationPickupEditOpen] = useState(false);
   const [conflictError, setConflictError] = useState(null); // { title, message, type: 'car'|'time' }
   const [tollAckOpen, setTollAckOpen] = useState(false);
+
+  const { openCheckout } = useRazorpayCheckout();
 
   // Guard: bounce back to the start of the flow if state is incomplete.
   useEffect(() => {
@@ -297,41 +302,77 @@ const ConfirmAndPayPage = () => {
   const legacyAllowancePerNight =
     Number(estimate?.fareBreakdown?.allowancePerNight) || 0;
 
+  const [paymentMethod, setPaymentMethod] = useState('wallet');
+
   // Actual booking creation. Split out from `handlePay` so the
   // toll/parking acknowledgement dialog can call it after the customer
   // accepts.
   const submitBooking = useCallback(async () => {
     if (submitting || !total) return;
 
-    const freshWallet = useUserWalletStore.getState().wallet || {};
-    const freshBalance = Number(freshWallet.balance || 0);
-    const freshHeld = Number(freshWallet.heldRupees || 0);
-    const freshAvailable = Math.max(0, freshBalance - freshHeld);
-    if (freshAvailable < total) {
-      setShortfall(Math.max(0, Math.round((total - freshAvailable) * 100) / 100));
-      setTopupOpen(true);
-      return;
+    // Only block on wallet shortfall if paying via wallet
+    if (paymentMethod === 'wallet') {
+      const freshWallet = useUserWalletStore.getState().wallet || {};
+      const freshBalance = Number(freshWallet.balance || 0);
+      const freshHeld = Number(freshWallet.heldRupees || 0);
+      const freshAvailable = Math.max(0, freshBalance - freshHeld);
+      if (freshAvailable < total) {
+        setShortfall(Math.max(0, Math.round((total - freshAvailable) * 100) / 100));
+        setTopupOpen(true);
+        return;
+      }
     }
 
     setSubmitting(true);
+
     try {
       const payload = useBookingDraftStore.getState().buildCreatePayload();
-      const { booking } = await createBooking(payload);
-      if (booking) {
-        // Optimistically pull a fresh wallet snapshot — the debit
-        // already happened server-side; this keeps the bottom-nav badge
-        // and the wallet page in sync without a manual refresh.
-        fetchWallet().catch(() => { });
-        // Long-lead scheduled bookings (`PENDING_ASSIGNMENT`) go to a
-        // dedicated "ride scheduled" screen — the worker hasn't even
-        // started searching yet, so the spinner page would be misleading.
-        // Morning + short-window scheduled bookings come back as
-        // SEARCHING and use the existing flow.
-        if (booking.status === BOOKING_STATUS.PENDING_ASSIGNMENT) {
-          navigate('/user/book/scheduled');
-        } else {
-          navigate('/user/book/searching');
+      payload.paymentMethod = paymentMethod;
+      const { booking, razorpayOrder } = await createBooking(payload);
+
+      if (!booking) return;
+
+      // --- Online payment: open real Razorpay modal and verify ---
+      if (paymentMethod === 'online') {
+        if (!razorpayOrder?.orderId) {
+          toast.error('Could not initialise payment gateway. Please try again.');
+          return;
         }
+        try {
+          await openCheckout({
+            razorpay: razorpayOrder,
+            onSuccess: async (response) => {
+              await verifyPayment({
+                orderId: response.razorpay_order_id,
+                paymentId: response.razorpay_payment_id,
+                signature: response.razorpay_signature,
+              });
+            },
+            onDismiss: () => {
+              toast.error('Payment cancelled. Your booking is on hold — pay within the time limit.');
+            },
+            onFailed: () => {
+              toast.error('Payment failed. You can retry from the booking page.');
+            },
+          });
+        } catch (rzpErr) {
+          // openCheckout rejects on dismiss/failure — booking still exists
+          // in SEARCHING+PENDING state; user can retry.
+          console.warn('[pay] Razorpay checkout:', rzpErr?.message);
+          setSubmitting(false);
+          return;
+        }
+        fetchWallet().catch(() => {});
+        navigate('/user/book/searching');
+        return;
+      }
+
+      // --- Wallet / Cash: immediate navigation ---
+      fetchWallet().catch(() => {});
+      if (booking.status === BOOKING_STATUS.PENDING_ASSIGNMENT) {
+        navigate('/user/book/scheduled');
+      } else {
+        navigate('/user/book/searching');
       }
     } catch (err) {
       // The wallet service throws ApiError(402) with `{ shortBy, ... }`
@@ -372,7 +413,8 @@ const ConfirmAndPayPage = () => {
     } finally {
       setSubmitting(false);
     }
-  }, [submitting, total, createBooking, fetchWallet, navigate]);
+  }, [submitting, total, createBooking, verifyPayment, fetchWallet, navigate, paymentMethod, openCheckout]);
+
 
   // Pay CTA entry point. Hourly is straight-through; outstation must
   // first acknowledge the toll & parking disclosure (since those are
@@ -482,24 +524,90 @@ const ConfirmAndPayPage = () => {
             onChange={(v) => setHourly({ foodAcknowledged: v })}
           />
         )}
-        <WalletBalanceCard
-          balance={balance}
-          available={available}
-          heldElsewhere={heldElsewhere}
-          fareTotal={fareTotal}
-          bufferRupees={bufferRupees}
-          total={total}
-          shortBy={Math.max(0, total - available)}
-          loading={estimating}
-          onAddMoney={() => {
-            setShortfall(Math.max(0, total - available));
-            setTopupOpen(true);
-          }}
-        />
-        <p className="text-[11px] text-text-muted text-center">
-          The fare is held in your wallet. If no driver is found you get a
-          full refund right back to your wallet.
-        </p>
+        <div className="rounded-3xl border border-border-light bg-white p-4 shadow-sm">
+          <p className="text-sm font-bold text-text mb-3">Payment Method</p>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { id: 'wallet', label: 'Wallet', icon: WalletIcon },
+              { id: 'cash', label: 'Cash', icon: HandCoins },
+              { id: 'online', label: 'Online', icon: CreditCard },
+            ].map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setPaymentMethod(id)}
+                className={`relative flex flex-col items-center justify-center p-3 rounded-2xl border transition-all ${
+                  paymentMethod === id
+                    ? 'border-primary bg-primary/5 text-primary'
+                    : 'border-border bg-bg text-text-muted hover:border-primary/30 hover:bg-bg/50'
+                }`}
+              >
+                <Icon className="w-5 h-5 mb-1.5" />
+                <span className="text-xs font-semibold">{label}</span>
+                {paymentMethod === id && (
+                  <div className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-primary" />
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {paymentMethod === 'wallet' && (
+          <WalletBalanceCard
+            balance={balance}
+            available={available}
+            heldElsewhere={heldElsewhere}
+            fareTotal={fareTotal}
+            bufferRupees={bufferRupees}
+            total={total}
+            shortBy={Math.max(0, total - available)}
+            loading={estimating}
+            onAddMoney={() => {
+              setShortfall(Math.max(0, total - available));
+              setTopupOpen(true);
+            }}
+          />
+        )}
+
+        {paymentMethod === 'online' && (
+          <div className="rounded-3xl border border-border-light bg-white p-5 shadow-sm space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-primary/10 flex items-center justify-center">
+                <ShieldCheck className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-text">Secure Online Payment</p>
+                <p className="text-[11px] text-text-muted">Powered by Razorpay</p>
+              </div>
+            </div>
+            <div className="space-y-2 text-xs text-text-muted">
+              {[
+                { icon: '📱', label: 'UPI', sub: 'Google Pay, PhonePe, Paytm & more' },
+                { icon: '💳', label: 'Credit / Debit Card', sub: 'Visa, Mastercard, RuPay' },
+                { icon: '🏦', label: 'Bank Account', sub: 'Netbanking, IMPS, NEFT' },
+              ].map(({ icon, label, sub }) => (
+                <div key={label} className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-slate-50 border border-border-light">
+                  <span className="text-base">{icon}</span>
+                  <div>
+                    <p className="text-xs font-semibold text-text">{label}</p>
+                    <p className="text-[10px] text-text-muted">{sub}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-center gap-2 text-[11px] text-emerald-600 font-medium border-t border-border-light pt-3">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              256-bit SSL encrypted. Razorpay certified.
+            </div>
+          </div>
+        )}
+
+        {paymentMethod === 'wallet' && (
+          <p className="text-[11px] text-text-muted text-center">
+            The fare is held in your wallet. If no driver is found you get a
+            full refund right back to your wallet.
+          </p>
+        )}
       </div>
 
       {/* Sticky footer — pay CTA (with the running total) is always
@@ -507,18 +615,18 @@ const ConfirmAndPayPage = () => {
       <div className="sticky bottom-0 z-30 bg-white border-t border-border-light px-4 py-3 shadow-[0_-4px_12px_-8px_rgba(0,0,0,0.15)]">
         <Button
           fullWidth
-          icon={WalletIcon}
+          icon={paymentMethod === 'wallet' ? WalletIcon : paymentMethod === 'cash' ? HandCoins : CreditCard}
           loading={submitting}
-          disabled={!estimate || estimating || total <= 0 || foodGateUnmet}
+          disabled={!estimate || estimating || total <= 0 || foodGateUnmet || (paymentMethod === 'wallet' && !canPay)}
           onClick={handlePay}
         >
           {!total
             ? 'Calculating fare\u2026'
             : foodGateUnmet
               ? 'Confirm driver\u2019s meal to continue'
-              : canPay
-                ? `Pay \u20B9${total} from wallet`
-                : `Add \u20B9${Math.max(0, total - balance).toFixed(2)} & pay`}
+              : paymentMethod === 'wallet' && !canPay
+                ? `Add \u20B9${Math.max(0, total - balance).toFixed(2)} & pay`
+                : `Pay \u20B9${total} with ${paymentMethod === 'wallet' ? 'Wallet' : paymentMethod === 'cash' ? 'Cash' : 'Online'}`}
         </Button>
       </div>
 

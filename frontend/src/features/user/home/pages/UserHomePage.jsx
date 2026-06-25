@@ -8,6 +8,7 @@ import {
   X,
   Loader2,
   RefreshCw,
+  Headset,
 } from 'lucide-react';
 import NotificationBell from '../../../../components/common/NotificationBell';
 import Badge from '../../../../components/Badge';
@@ -20,6 +21,7 @@ import { reverseGeocode } from '../../../../utils/geocoding';
 import NearbyDriversMap from '../../../../components/maps/NearbyDriversMap';
 import NearbyDriversList from '../../../../components/maps/NearbyDriversList';
 import AdsCarousel from '../../../../components/AdsCarousel';
+import HelpDeskModal from '../../../../components/HelpDeskModal';
 
 const NEARBY_RADIUS_METERS = 2000;
 const NEARBY_LIMIT = 8;
@@ -29,6 +31,7 @@ const UserHomePage = () => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [showDriverSheet, setShowDriverSheet] = useState(false);
+  const [isHelpDeskOpen, setIsHelpDeskOpen] = useState(false);
   const [selectedDriverId, setSelectedDriverId] = useState(null);
 
   const mapRef = useRef(null);
@@ -121,7 +124,15 @@ const UserHomePage = () => {
               )}
             </div>
           </div>
-          <NotificationBell prefix="/auth" />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsHelpDeskOpen(true)}
+              className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+            >
+              <Headset className="w-5 h-5" />
+            </button>
+            <NotificationBell prefix="/auth" />
+          </div>
         </div>
 
         <div className="relative">
@@ -267,6 +278,12 @@ const UserHomePage = () => {
           </div>
         </div>
       )}
+
+      <HelpDeskModal
+        isOpen={isHelpDeskOpen}
+        onClose={() => setIsHelpDeskOpen(false)}
+        userType="user"
+      />
     </div>
   );
 };

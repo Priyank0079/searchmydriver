@@ -176,6 +176,10 @@ export async function debitWalletService({
    * Defaults to false so all other paths honour the hold.
    */
   bypassHeld = false,
+  /**
+   * If true, allows the wallet balance to go negative without failing.
+   */
+  allowNegative = false,
 }) {
   const amt = ensurePositive(amount, 'amount');
   if (!Object.values(WALLET_TXN_SOURCE).includes(source)) {
@@ -192,7 +196,13 @@ export async function debitWalletService({
   // we support, so we use a small server-side guard re-read on the
   // bypassHeld=false path.
   let updated = null;
-  if (bypassHeld) {
+  if (allowNegative) {
+    updated = await User.findOneAndUpdate(
+      { _id: userId, isDeleted: false },
+      { $inc: { 'wallet.balance': -amt, 'wallet.totalSpent': amt } },
+      { new: true, projection: { wallet: 1 } },
+    );
+  } else if (bypassHeld) {
     updated = await User.findOneAndUpdate(
       { _id: userId, isDeleted: false, 'wallet.balance': { $gte: amt } },
       { $inc: { 'wallet.balance': -amt, 'wallet.totalSpent': amt } },

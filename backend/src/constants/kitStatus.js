@@ -51,4 +51,6 @@ export const PAYMENT_PURPOSE = Object.freeze({
    */
   TRIP_WAITING: 'trip_waiting',
   WITHDRAWAL: 'withdrawal',
+  ADMIN_ADJUSTMENT_CREDIT: 'admin_adjustment_credit',
+  ADMIN_ADJUSTMENT_DEBIT: 'admin_adjustment_debit',
 });

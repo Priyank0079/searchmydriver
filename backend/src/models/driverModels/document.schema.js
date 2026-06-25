@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 
 const DOCUMENT_TYPES = [
   'driving_license', 'selfie', 'aadhaar_front', 'aadhaar_back', 'police_verification',
+  'address_proof', 'driver_registration', 'live_selfie'
 ];
 
 const documentSchema = new mongoose.Schema(

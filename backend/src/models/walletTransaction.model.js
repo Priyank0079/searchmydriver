@@ -52,6 +52,8 @@ export const WALLET_TXN_SOURCE = Object.freeze({
   BOOKING_EXTENSION_PAYMENT: 'booking_extension_payment',
   /** Credit for a cancellation fee being waived (rare; admin-driven). */
   CANCELLATION_FEE_WAIVED: 'cancellation_fee_waived',
+  /** Debit for cancellation fee. */
+  CANCELLATION_FEE: 'cancellation_fee',
 });
 
 export const WALLET_TXN_STATUS = Object.freeze({
@@ -75,7 +77,7 @@ const walletTransactionSchema = new mongoose.Schema(
       required: true,
     },
     amountRupees: { type: Number, required: true, min: 0 },
-    balanceAfter: { type: Number, required: true, min: 0 },
+    balanceAfter: { type: Number, required: true },
 
     source: {
       type: String,

@@ -133,7 +133,7 @@ const userSchema = new mongoose.Schema(
      *   currency       — kept for forward-compat; INR is the only value today
      */
     wallet: {
-      balance: { type: Number, default: 0, min: 0 },
+      balance: { type: Number, default: 0 },
       totalCredited: { type: Number, default: 0, min: 0 },
       totalSpent: { type: Number, default: 0, min: 0 },
       /**
@@ -161,6 +161,10 @@ const userSchema = new mongoose.Schema(
      */
     assignedZones: {
       type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Zone' }],
+      default: [],
+    },
+    permissions: {
+      type: [String],
       default: [],
     },
   },

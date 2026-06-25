@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Button from '../../../../components/Button';
-import { Shield, CheckCircle, Clock } from 'lucide-react';
+import { Headset } from 'lucide-react';
+import HelpDeskModal from '../../../../components/HelpDeskModal';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
 
 import { navigateDriverAfterAuth } from '../../../auth/utils/authNavigation';
@@ -9,6 +10,7 @@ import { navigateDriverAfterAuth } from '../../../auth/utils/authNavigation';
 const DriverSignUpPage = () => {
   const navigate = useNavigate();
   const { isAuthenticated, driver } = useDriverAuthStore();
+  const [isHelpDeskOpen, setIsHelpDeskOpen] = useState(false);
 
 
   useEffect(() => {
@@ -19,6 +21,16 @@ const DriverSignUpPage = () => {
 
   return (
     <div className="flex-1 flex flex-col bg-white min-h-dvh relative">
+      <div className="absolute top-4 right-4 z-10">
+        <button
+          type="button"
+          onClick={() => setIsHelpDeskOpen(true)}
+          className="p-3 bg-white shadow-md rounded-full text-primary hover:bg-gray-50 transition-colors"
+        >
+          <Headset className="w-6 h-6" />
+        </button>
+      </div>
+
       <div className="flex-1 flex flex-col items-center justify-center px-8 pt-12 pb-6">
         <div className="text-center mb-8 animate-fade-in-up w-full max-w-[400px] mx-auto">
           <img src="/images/logo-smd.png" alt="SearchMyDrivers Logo" className="w-full h-auto object-contain" />
@@ -42,6 +54,13 @@ const DriverSignUpPage = () => {
           Already have an account? <button onClick={() => navigate('/driver/login')} className="text-primary font-semibold hover:underline">Sign in</button>
         </p>
       </div>
+
+      <HelpDeskModal
+        isOpen={isHelpDeskOpen}
+        onClose={() => setIsHelpDeskOpen(false)}
+        userType="driver"
+        isPublic
+      />
     </div>
   );
 };

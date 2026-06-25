@@ -53,9 +53,12 @@ import {
   driverDismissBookingExtension,
   rateCustomerByDriver,
 } from '../controllers/booking.controller.js';
+import { createSupportTicket, createPublicSupportTicket } from '../controllers/support.controller.js';
 
 const router = express.Router();
 
+router.post('/support/ticket', protectDriver, createSupportTicket);
+router.post('/support/public-ticket', createPublicSupportTicket);
 router.post('/auth/send-otp', sendOtp);
 router.post('/auth/verify-otp', verifyOtpAndRegister);
 router.post('/auth/login', loginDriver);

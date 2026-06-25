@@ -154,6 +154,7 @@ const ManageBanners = lazy(() => import('./features/admin/pages/ManageBanners'))
 const ManageAds = lazy(() => import('./features/admin/pages/ManageAds'));
 const IncomingRegistrations = lazy(() => import('./features/admin/pages/IncomingRegistrations'));
 const DriverWallet = lazy(() => import('./features/admin/pages/DriverWallet'));
+const HelpDesk = lazy(() => import('./features/admin/pages/HelpDesk'));
 const FareManagement = lazy(() => import('./features/admin/pages/FareManagement'));
 
 function PageLoader() {
@@ -314,6 +315,7 @@ function App() {
 
             <Route path="/admin/drivers" element={<ManageDrivers />} />
             <Route path="/admin/driver-wallet" element={<DriverWallet />} />
+            <Route path="/admin/help-desk" element={<HelpDesk />} />
             <Route path="/admin/fare-management" element={<FareManagement />} />
             <Route path="/admin/tasks" element={<ManageTasks />} />
             <Route element={<SuperAdminOnlyGuard />}>

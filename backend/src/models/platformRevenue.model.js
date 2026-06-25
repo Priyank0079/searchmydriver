@@ -34,6 +34,8 @@ export const PLATFORM_REVENUE_SOURCE = Object.freeze({
   DRIVER_PENALTY: 'driver_penalty',
   /** Platform share of a subscription purchase. */
   SUBSCRIPTION: 'subscription',
+  /** Manual deduction taken by an admin. */
+  ADMIN_ADJUSTMENT: 'admin_adjustment',
 });
 
 const platformRevenueSchema = new mongoose.Schema(

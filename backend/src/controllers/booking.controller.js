@@ -76,7 +76,7 @@ import Booking from '../models/booking.model.js';
  * frontend can pop a specific toast.
  */
 export const createBooking = asyncHandler(async (req, res) => {
-  const { booking, shouldDispatchNow } = await createBookingService(
+  const { booking, shouldDispatchNow, razorpayOrder } = await createBookingService(
     req.user._id,
     req.body,
   );
@@ -84,6 +84,7 @@ export const createBooking = asyncHandler(async (req, res) => {
   // queue's `assign` job fires (rideTime − LONG_LEAD_HOURS). Instant
   // bookings + immediate-tier scheduled bookings (morning / ≤6h)
   // dispatch right now exactly like before.
+  // Online payment bookings hold dispatch until payment verified.
   if (shouldDispatchNow !== false) {
     dispatchNextDriverService(booking._id).catch((err) => {
       console.warn('[booking] initial dispatch failed:', err.message);
@@ -91,7 +92,7 @@ export const createBooking = asyncHandler(async (req, res) => {
   }
   return res
     .status(201)
-    .json(new ApiResponse(201, { booking, reused: false }, 'Booking created'));
+    .json(new ApiResponse(201, { booking, reused: false, razorpayOrder }, 'Booking created'));
 });
 
 export const getMyActiveBooking = asyncHandler(async (req, res) => {

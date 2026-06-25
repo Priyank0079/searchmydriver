@@ -12,6 +12,7 @@ import {
   Car as CarIcon,
   CalendarClock,
   Zap,
+  AlertTriangle,
 } from 'lucide-react';
 import useDriverIncomingOfferStore from '../../../../store/driver/useDriverIncomingOfferStore';
 import { useSocketEvent } from '../../../../hooks/useSocket';
@@ -335,6 +336,27 @@ const BookingOfferModal = () => {
               />
             )}
           </div>
+
+          {offer.upcomingScheduledTripStartMs && (
+            <div className="flex items-start gap-2.5 bg-amber-50 rounded-2xl p-3 border border-amber-200">
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-[13px] font-bold text-amber-900 leading-snug">
+                  Upcoming Scheduled Trip
+                </p>
+                <p className="text-xs text-amber-700 mt-1 leading-snug">
+                  You have a scheduled trip starting at{' '}
+                  <span className="font-bold">
+                    {new Date(offer.upcomingScheduledTripStartMs).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                  . You must complete this instant ride beforehand.
+                </p>
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="text-xs text-danger bg-danger/10 rounded-xl px-3 py-2">{error}</div>

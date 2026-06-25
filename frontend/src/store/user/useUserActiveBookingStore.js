@@ -214,8 +214,9 @@ const useUserActiveBookingStore = create((set, get) => ({
       const res = await api.post('/auth/bookings', payload);
       const booking = res?.data?.data?.booking || null;
       const reused = !!res?.data?.data?.reused;
+      const razorpayOrder = res?.data?.data?.razorpayOrder || null;
       set({ booking, loading: false });
-      return { booking, reused };
+      return { booking, reused, razorpayOrder };
     } catch (err) {
       const message = err?.response?.data?.message || err?.message || 'Booking failed';
       set({ error: message, loading: false });

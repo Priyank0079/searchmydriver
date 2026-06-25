@@ -88,3 +88,17 @@ export const deleteTrainingVideo = asyncHandler(async (req, res) => {
   await platformService.deleteTrainingVideoService(req.params.id);
   return res.status(200).json(new ApiResponse(200, null, 'Training video deleted successfully'));
 });
+
+// ─── Platform Settings ────────────────────────────────────────────────────────
+
+export const getPlatformSettings = asyncHandler(async (req, res) => {
+  const settings = await platformService.getPlatformSettingsService();
+  return res.status(200).json(new ApiResponse(200, settings, 'Platform settings fetched successfully'));
+});
+
+export const updatePlatformSettings = asyncHandler(async (req, res) => {
+  const updatedBy = req.staff?._id || req.admin?._id || null;
+  const settings = await platformService.updatePlatformSettingsService(req.body, updatedBy);
+  return res.status(200).json(new ApiResponse(200, settings, 'Platform settings updated successfully'));
+});
+

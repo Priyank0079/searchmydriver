@@ -15,6 +15,7 @@ import {
   deleteAdminMember,
   getIncomingRegistrations,
   getDriverWalletHistory,
+  adjustDriverWallet,
 } from '../controllers/admin.controller.js';
 import { protectStaff, restrictTo } from '../middlewares/authMiddleware.js';
 import { ROUTE_ROLES } from '../constants/staffPermissions.js';
@@ -31,6 +32,8 @@ import {
   getAdminTrainingVideos,
   updateTrainingVideo,
   deleteTrainingVideo,
+  getPlatformSettings,
+  updatePlatformSettings,
 } from '../controllers/platform.controller.js';
 import {
   getAdminFuelTypes,
@@ -129,6 +132,10 @@ import {
 } from '../controllers/banner.controller.js';
 import { downloadDriverProfilePdf } from '../controllers/driverPdf.controller.js';
 import { uploadAdMedia } from '../middlewares/multer.js';
+import {
+  getAdminSupportTickets,
+  resolveSupportTicket,
+} from '../controllers/support.controller.js';
 
 const router = express.Router();
 const { ALL_STAFF, OPERATIONS, SUPER_ADMIN } = ROUTE_ROLES;
@@ -140,6 +147,13 @@ router.use('/notifications', protectStaff, notificationRouter);
 router.get('/users', protectStaff, restrictTo(...ALL_STAFF), getCustomers);
 router.get('/incoming-registrations', protectStaff, restrictTo(...ALL_STAFF), getIncomingRegistrations);
 router.get('/driver-wallet-history', protectStaff, restrictTo(...ALL_STAFF), getDriverWalletHistory);
+
+router.post('/driver-wallet/adjust', protectStaff, restrictTo(...OPERATIONS), adjustDriverWallet);
+
+// ----- Help Desk / Support Tickets -----
+// Only SUPER_ADMIN (or others if you assign them the permission, defaulting to SUPER_ADMIN here)
+router.get('/support/tickets', protectStaff, restrictTo(...SUPER_ADMIN), getAdminSupportTickets);
+router.patch('/support/tickets/:id/status', protectStaff, restrictTo(...SUPER_ADMIN), resolveSupportTicket);
 
 router.get('/tasks/assignees', protectStaff, restrictTo(...OPERATIONS), getTaskAssignees);
 router.get('/tasks/activity', protectStaff, restrictTo(...SUPER_ADMIN), listTaskActivity);
@@ -277,6 +291,9 @@ router.get('/team', protectStaff, restrictTo(...SUPER_ADMIN), getAdminTeam);
 router.put('/team/:id', protectStaff, restrictTo(...SUPER_ADMIN), updateAdminMember);
 router.delete('/team/:id', protectStaff, restrictTo(...SUPER_ADMIN), deleteAdminMember);
 
+router.get('/settings/platform', protectStaff, restrictTo(...OPERATIONS), getPlatformSettings);
+router.put('/settings/platform', protectStaff, restrictTo(...OPERATIONS), updatePlatformSettings);
+
 router.get('/settings/car-types', protectStaff, restrictTo(...OPERATIONS), getAdminCarTypes);
 router.post('/settings/car-types', protectStaff, restrictTo(...OPERATIONS), createCarType);
 router.put('/settings/car-types/:id', protectStaff, restrictTo(...OPERATIONS), updateCarType);
@@ -359,6 +376,9 @@ router.patch('/kit-orders/:id/deliver', protectStaff, restrictTo(...ALL_STAFF), 
 // driven and the PATCH is the authoritative state-transition.
 router.get('/refunds', protectStaff, restrictTo(...SUPER_ADMIN), listRefunds);
 router.patch('/refunds/:id', protectStaff, restrictTo(...SUPER_ADMIN), updateRefundStatus);
+
+router.get('/platform-settings', protectStaff, restrictTo(...OPERATIONS), getPlatformSettings);
+router.put('/platform-settings', protectStaff, restrictTo(...OPERATIONS), updatePlatformSettings);
 
 /* ---- Account → Revenue ----------------------------------------------- */
 // Read-only paginated view over the `PlatformRevenue` ledger. Each row

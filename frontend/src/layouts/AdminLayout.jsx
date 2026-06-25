@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import Sidebar from '../features/admin/components/Sidebar';
 import AdminHeader from '../features/admin/components/AdminHeader';
+import { useSocketEvent } from '../hooks/useSocket';
+import { S2C_EVENTS } from '../constants/socketEvents';
 
 const routeTitles = {
   '/admin': 'Dashboard',
@@ -22,6 +25,13 @@ const routeTitles = {
 const AdminLayout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
+
+  useSocketEvent(S2C_EVENTS.ADMIN_ALERT, (payload) => {
+    toast.success(payload.message || 'New Help Desk Ticket', { duration: 5000 });
+    const audio = new Audio('/audio/alert_.mp3');
+    audio.play().catch(console.error);
+  });
+
   const pageTitle =
     location.pathname.includes('/admin/users/') && location.pathname.endsWith('/profile')
       ? 'User Profile'

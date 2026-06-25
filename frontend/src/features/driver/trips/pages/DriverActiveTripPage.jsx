@@ -422,6 +422,13 @@ const DriverActiveTripPage = () => {
     }
     try {
       await useDriverActiveTripStore.getState()[action]();
+      if (action === 'markEnRoute') {
+        const pickup = useDriverActiveTripStore.getState().booking?.pickup?.coordinates;
+        if (pickup) {
+          const [lng, lat] = pickup;
+          window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, '_blank');
+        }
+      }
     } catch (err) {
       toast.error(err?.response?.data?.message || err?.message || 'Something went wrong');
     }
@@ -435,7 +442,14 @@ const DriverActiveTripPage = () => {
   ]);
 
   const handleStartWithOtp = useCallback(
-    (otp) => useDriverActiveTripStore.getState().startTrip(otp),
+    async (otp) => {
+      await useDriverActiveTripStore.getState().startTrip(otp);
+      const dropoff = useDriverActiveTripStore.getState().booking?.dropoff?.coordinates;
+      if (dropoff) {
+        const [lng, lat] = dropoff;
+        window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, '_blank');
+      }
+    },
     [],
   );
 

@@ -13,6 +13,7 @@ import TeamStats from '../components/ManageTeam/TeamStats';
 import TeamFilters from '../components/ManageTeam/TeamFilters';
 import { STAFF_ROLE_LABELS } from '../../../constants/staffRoles';
 import { useAdminZonesStore } from '../../../store/admin/useAdminZonesStore';
+import { STAFF_PERMISSIONS, PERMISSION_LABELS } from '../../../constants/permissions';
 
 const ASSIGNABLE_ROLES = ['team_member', 'sub_admin'];
 
@@ -37,6 +38,7 @@ const ManageTeam = () => {
     role: 'team_member',
     isActive: true,
     assignedZones: [],
+    permissions: [],
   });
   // Lazy-loaded admin zones for the team_member zone picker. We only
   // need them when the add/edit modal opens — fetching on mount would
@@ -96,6 +98,7 @@ const ManageTeam = () => {
       assignedZones: (member.assignedZones || []).map((z) =>
         typeof z === 'string' ? z : z?._id,
       ).filter(Boolean),
+      permissions: member.permissions || [],
     });
     setShowAddModal(true);
   };
@@ -135,6 +138,7 @@ const ManageTeam = () => {
           role: formData.role,
           isActive: formData.isActive,
           assignedZones: zonesForPayload,
+          permissions: formData.permissions,
         });
       } else {
         await api.post('/admin/team', { ...formData, assignedZones: zonesForPayload });
@@ -150,6 +154,7 @@ const ManageTeam = () => {
         role: 'team_member',
         isActive: true,
         assignedZones: [],
+        permissions: [],
       });
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to save member');
@@ -400,6 +405,19 @@ const ManageTeam = () => {
             />
           )}
 
+          {formData.role !== 'admin' && (
+            <PermissionsPicker
+              selectedIds={formData.permissions}
+              onToggle={(permId) => {
+                const set = new Set(formData.permissions || []);
+                if (set.has(permId)) set.delete(permId);
+                else set.add(permId);
+                setFormData({ ...formData, permissions: [...set] });
+              }}
+              onClear={() => setFormData({ ...formData, permissions: [] })}
+            />
+          )}
+
           <div className="pt-4 flex gap-3">
             <Button variant="outline" fullWidth type="button" onClick={() => setShowAddModal(false)} disabled={submitting}>Cancel</Button>
             <Button fullWidth type="submit" loading={submitting}>{selectedMember ? 'Save Changes' : 'Create Account'}</Button>
@@ -524,6 +542,66 @@ function AssignedZonesPicker({ zones, loading, selectedIds, onToggle, onClear })
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function PermissionsPicker({ selectedIds, onToggle, onClear }) {
+  const selectedSet = new Set(selectedIds || []);
+  const permissionsList = Object.values(STAFF_PERMISSIONS);
+
+  return (
+    <div className="mt-4 border-t pt-4">
+      <div className="flex items-end justify-between mb-3">
+        <div>
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">
+            Module Permissions
+          </label>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            Select which platform modules this staff member can access.
+          </p>
+        </div>
+        {(selectedSet.size > 0) && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="text-[11px] font-semibold text-rose-600 hover:text-rose-700"
+          >
+            Clear all
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
+        {permissionsList.map((perm) => {
+          const isSelected = selectedSet.has(perm);
+          return (
+            <button
+              key={perm}
+              type="button"
+              onClick={() => onToggle(perm)}
+              className={`flex items-center gap-2 p-2 rounded-lg border text-left transition-all ${
+                isSelected 
+                  ? 'border-indigo-500 bg-indigo-50/50' 
+                  : 'border-slate-200 bg-white hover:border-slate-300'
+              }`}
+            >
+              <div className={`w-4 h-4 rounded-[4px] border flex-shrink-0 flex items-center justify-center ${
+                isSelected 
+                  ? 'bg-indigo-600 border-indigo-600 text-white' 
+                  : 'bg-white border-slate-300'
+              }`}>
+                {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+              </div>
+              <span className={`text-xs font-medium truncate ${
+                isSelected ? 'text-indigo-900' : 'text-slate-600'
+              }`}>
+                {PERMISSION_LABELS[perm]}
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

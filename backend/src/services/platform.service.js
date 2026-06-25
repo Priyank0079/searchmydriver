@@ -118,3 +118,30 @@ export const deleteTrainingVideoService = async (id) => {
   await TrainingVideo.findByIdAndDelete(id);
   return { id };
 };
+
+// ─── Platform Settings ────────────────────────────────────────────────────────
+
+import PlatformSettings from '../models/platformSettings.model.js';
+
+export const getPlatformSettingsService = async () => {
+  let settings = await PlatformSettings.findOne();
+  if (!settings) {
+    settings = await PlatformSettings.create({});
+  }
+  return settings;
+};
+
+export const updatePlatformSettingsService = async (data, updatedBy) => {
+  let settings = await PlatformSettings.findOne();
+  if (!settings) {
+    settings = await PlatformSettings.create({ ...data, updatedBy });
+  } else {
+    settings.cashCancelFeeThresholdMinutes = data.cashCancelFeeThresholdMinutes ?? settings.cashCancelFeeThresholdMinutes;
+    settings.cashCancelFeeAmount = data.cashCancelFeeAmount ?? settings.cashCancelFeeAmount;
+    settings.driverCancelFeeAmount = data.driverCancelFeeAmount ?? settings.driverCancelFeeAmount;
+    settings.updatedBy = updatedBy;
+    await settings.save();
+  }
+  return settings;
+};
+

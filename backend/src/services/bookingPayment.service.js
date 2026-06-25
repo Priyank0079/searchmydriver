@@ -26,6 +26,7 @@ import {
   cancelPaymentTimeout,
   schedulePaymentTimeout,
 } from './bookingPaymentTimeout.service.js';
+import { dispatchNextDriverService } from './bookingDispatch.service.js';
 
 /**
  * Razorpay integration for bookings.
@@ -61,9 +62,15 @@ export async function createBookingPaymentOrderService(userId, bookingId) {
   //   1. Pre-pay during AWAITING_PAYMENT (initial Pay Now flow).
   //   2. Post-pay after COMPLETED (settle the bill).
   //   3. Mid-ride extension delta if the user has already pre-paid the base.
+  //   4. Online upfront payment for a SEARCHING booking (paymentMethod=online, paymentStatus=pending).
+  const isOnlineUpfront =
+    booking.paymentMethod === 'online' &&
+    booking.paymentStatus === BOOKING_PAYMENT_STATUS.PENDING &&
+    booking.status === BOOKING_STATUS.SEARCHING;
   const isPrePayWindow =
-    booking.paymentMode === PAYMENT_MODE.PRE_RIDE &&
-    booking.status === BOOKING_STATUS.AWAITING_PAYMENT;
+    isOnlineUpfront ||
+    (booking.paymentMode === PAYMENT_MODE.PRE_RIDE &&
+      booking.status === BOOKING_STATUS.AWAITING_PAYMENT);
   const isPostPayWindow = booking.status === BOOKING_STATUS.COMPLETED;
   if (!isPrePayWindow && !isPostPayWindow) {
     throw new ApiError(400, 'Payment is not due at this stage');
@@ -204,15 +211,31 @@ export async function verifyBookingPaymentService(userId, bookingId, { orderId, 
   booking.paymentStatus =
     remaining <= 0 ? BOOKING_PAYMENT_STATUS.PAID : BOOKING_PAYMENT_STATUS.PENDING;
 
-  // Pre-pay window → unlock the ride for the driver only once fully cleared.
+  // Pre-pay window: AWAITING_PAYMENT → DRIVER_ASSIGNED once fully cleared.
+  // Online upfront: SEARCHING → keep SEARCHING; dispatch will start after save.
   if (wasPrePay && remaining <= 0) {
-    booking.status = BOOKING_STATUS.DRIVER_ASSIGNED;
-    // Settled within the deadline — kill the auto-cancel timer so the
-    // booking can proceed to the trip flow without interruption.
-    cancelPaymentTimeout(booking._id);
+    if (booking.paymentMethod === 'online' && wasPrePay &&
+        booking.status === BOOKING_STATUS.SEARCHING) {
+      // Do nothing to status — dispatch will be triggered below.
+    } else {
+      booking.status = BOOKING_STATUS.DRIVER_ASSIGNED;
+      // Settled within the deadline — kill the auto-cancel timer.
+      cancelPaymentTimeout(booking._id);
+    }
   }
 
   await booking.save();
+
+  // If this was an online upfront payment, now start searching for a driver.
+  if (
+    booking.paymentMethod === 'online' &&
+    remaining <= 0 &&
+    booking.status === BOOKING_STATUS.SEARCHING
+  ) {
+    dispatchNextDriverService(booking._id).catch((err) => {
+      console.warn('[booking] online payment: initial dispatch failed:', err.message);
+    });
+  }
 
   const userPayload = {
     bookingId: String(booking._id),

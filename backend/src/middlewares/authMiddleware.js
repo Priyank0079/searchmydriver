@@ -148,3 +148,31 @@ export const restrictTo = (...roles) => {
     next();
   };
 };
+
+/**
+ * 5. Permission Restriction Middleware (PBAC)
+ * Use this after protectStaff
+ */
+export const requirePermission = (permission) => {
+  return (req, res, next) => {
+    const staff = req.staff;
+    if (!staff) {
+      return res.status(403).json({ status: 403, message: 'Not authorized' });
+    }
+
+    // Super Admin always has access to everything
+    if (staff.role === USER_ROLES.ADMIN) {
+      return next();
+    }
+
+    // Check if the staff member has the required permission
+    if (!staff.permissions || !staff.permissions.includes(permission)) {
+      return res.status(403).json({ 
+        status: 403, 
+        message: `You lack the required permission (${permission}) for this action.` 
+      });
+    }
+
+    next();
+  };
+};

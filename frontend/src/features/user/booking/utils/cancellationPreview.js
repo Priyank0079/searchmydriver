@@ -190,11 +190,33 @@ export function previewUserCancellation(booking) {
     status === BOOKING_STATUS.ARRIVED || status === BOOKING_STATUS.STARTED;
   const paid = round2(Number(booking?.payment?.amountPaidRupees) || 0);
 
+  const policy = readPolicy(booking);
+
+  if (booking.paymentMethod === 'cash') {
+    const targetTime = booking?.timeline?.scheduledAt || booking?.timeline?.createdAt || new Date();
+    const minutesToPickup = (new Date(targetTime).getTime() - Date.now()) / 60000;
+    const threshold = policy?.platformSettings?.cashCancelFeeThresholdMinutes ?? 30;
+    let fee = 0;
+    
+    // If they cancel less than threshold minutes before pickup, or after pickup time
+    if (minutesToPickup < threshold && ASSIGNED_PRE_ARRIVAL_STATUSES.has(status)) {
+      fee = policy?.platformSettings?.cashCancelFeeAmount ?? 50;
+    } else if (ARRIVED_OR_LATER_STATUSES.has(status)) {
+      fee = policy?.platformSettings?.cashCancelFeeAmount ?? 50;
+    }
+
+    return {
+      feeCharged: fee,
+      refundAmount: 0,
+      tripStarted,
+      driverArrived,
+    };
+  }
+
   if (paid <= 0) {
     return { feeCharged: 0, refundAmount: 0, tripStarted, driverArrived };
   }
 
-  const policy = readPolicy(booking);
   let rawFee = 0;
   if (ARRIVED_OR_LATER_STATUSES.has(status)) {
     const amount = Math.max(0, Number(policy.arrivedFeeAmount) || 0);

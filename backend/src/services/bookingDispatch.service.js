@@ -207,7 +207,7 @@ async function selfHealDriverLockState() {
   }
 }
 
-function buildOfferPayload(booking, driver, { customer, car } = {}) {
+function buildOfferPayload(booking, driver, { customer, car, upcomingScheduledTripStartMs } = {}) {
   return {
     bookingId: String(booking._id),
     bookingNumber: booking.bookingNumber,
@@ -249,6 +249,7 @@ function buildOfferPayload(booking, driver, { customer, car } = {}) {
     offerExpiresAt: booking.dispatch.currentExpiresAt,
     distanceMeters: driver.distanceMeters ?? null,
     waveSize: booking.dispatch.pendingOfferIds.length,
+    upcomingScheduledTripStartMs: upcomingScheduledTripStartMs || null,
   };
 }
 
@@ -391,12 +392,30 @@ export async function dispatchNextDriverService(bookingId) {
   }
   await booking.save();
 
+  // Find any upcoming scheduled trips for these drivers later today
+  const upcomingTrips = await Booking.find({
+    driverId: { $in: drivers.map((d) => d._id) },
+    bookingType: BOOKING_TYPE.SCHEDULED,
+    status: { $in: [BOOKING_STATUS.DRIVER_ASSIGNED] },
+    'hourly.scheduledStartAt': { $gte: new Date() },
+    isDeleted: false,
+  }).sort({ 'hourly.scheduledStartAt': 1 }).lean();
+
+  const driverUpcomingTrips = {};
+  for (const trip of upcomingTrips) {
+    if (!driverUpcomingTrips[trip.driverId]) {
+      // Store the earliest upcoming trip for each driver
+      driverUpcomingTrips[trip.driverId] = new Date(trip.hourly.scheduledStartAt).getTime();
+    }
+  }
+
   // Emit to every driver in the wave in parallel.
   for (const driver of drivers) {
+    const upcomingScheduledTripStartMs = driverUpcomingTrips[driver._id] || null;
     emitToDriver(
       driver._id,
       S2C_EVENTS.BOOKING_OFFERED,
-      buildOfferPayload(booking, driver, { customer, car }),
+      buildOfferPayload(booking, driver, { customer, car, upcomingScheduledTripStartMs }),
     );
   }
   emitUserDispatchUpdate(booking);

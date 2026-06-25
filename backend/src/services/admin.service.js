@@ -3,6 +3,7 @@ import { Driver } from '../models/driverModels/driver.model.js';
 import User from '../models/user.model.js';
 import Car from '../models/user/car.model.js';
 import Payment from '../models/payment.model.js';
+import PlatformRevenue, { PLATFORM_REVENUE_SOURCE } from '../models/platformRevenue.model.js';
 import bcrypt from 'bcryptjs';
 import { ApiError } from '../utils/apiError.js';
 import { USER_ROLES } from '../constants/roles.js';
@@ -332,6 +333,7 @@ export const addAdminMemberService = async (data) => {
     password,
     role: requestedRole,
     assignedZones,
+    permissions = [],
   } = data;
 
   if (!name || !email || !phone_no || !password) {
@@ -363,6 +365,7 @@ export const addAdminMemberService = async (data) => {
     // zones regardless. Empty array for other roles keeps schemas tidy.
     assignedZones:
       role === USER_ROLES.TEAM_MEMBER ? normalizeAssignedZones(assignedZones) : [],
+    permissions: Array.isArray(permissions) ? permissions : [],
   });
 
   await newAdmin.save();
@@ -404,7 +407,7 @@ export const getAdminTeamService = async (query) => {
 };
 
 export const updateAdminMemberService = async (id, data) => {
-  const { name, email, phone_no, role, isActive, assignedZones } = data;
+  const { name, email, phone_no, role, isActive, assignedZones, permissions } = data;
   const staff = await User.findById(id);
   
   if (!staff || !STAFF_ROLES.includes(staff.role)) {
@@ -434,6 +437,10 @@ export const updateAdminMemberService = async (id, data) => {
         : [];
   } else if (staff.role !== USER_ROLES.TEAM_MEMBER && staff.assignedZones?.length) {
     staff.assignedZones = [];
+  }
+  
+  if (permissions !== undefined && Array.isArray(permissions)) {
+    staff.permissions = permissions;
   }
 
   await staff.save();
@@ -552,7 +559,7 @@ export const getDriverWalletHistoryService = async (query) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parsedLimit)
-      .populate('driverId', 'name phone profilePicture')
+      .populate('driverId', 'name phone profilePicture wallet')
       .lean(),
   ]);
 
@@ -560,12 +567,17 @@ export const getDriverWalletHistoryService = async (query) => {
     let description = '';
     let isCredit = false;
 
-    if (p.purpose === 'trip_fare' || p.purpose === 'trip_allowance' || p.purpose === 'trip_waiting') {
+    if (['trip_fare', 'trip_allowance', 'trip_waiting', 'admin_adjustment_credit'].includes(p.purpose)) {
       isCredit = true;
-      description = `Credit for ${p.purpose.replace('_', ' ')}`;
+      description = p.purpose === 'admin_adjustment_credit' 
+        ? `Manual Credit: ${p.meta?.reason || 'Admin adjustment'}`
+        : `Credit for ${p.purpose.replace('_', ' ')}`;
     } else if (p.purpose === 'withdrawal') {
       isCredit = false;
       description = `Withdrawal Request (${p.status})`;
+    } else if (p.purpose === 'admin_adjustment_debit') {
+      isCredit = false;
+      description = `Manual Debit: ${p.meta?.reason || 'Admin adjustment'}`;
     } else {
       isCredit = false;
       description = `Payment for ${p.purpose}`;
@@ -581,6 +593,7 @@ export const getDriverWalletHistoryService = async (query) => {
         name: p.driverId?.name || 'Unknown',
         phone: p.driverId?.phone || '',
         profilePicture: p.driverId?.profilePicture || '',
+        walletBalance: p.driverId?.wallet?.balance || 0,
       },
       type: isCredit ? 'CREDIT' : 'DEBIT',
       amount: p.amount,
@@ -598,4 +611,54 @@ export const getDriverWalletHistoryService = async (query) => {
       pages: Math.ceil(total / parsedLimit) || 1,
     },
   };
+};
+
+export const adjustDriverWalletService = async (driverId, amount, action, reason) => {
+  const driver = await Driver.findById(driverId);
+  if (!driver) throw new ApiError(404, 'Driver not found');
+
+  const adjustAmount = Math.abs(Number(amount));
+  if (isNaN(adjustAmount) || adjustAmount <= 0) {
+    throw new ApiError(400, 'Invalid adjustment amount');
+  }
+
+  const isCredit = action === 'CREDIT';
+  
+  // 1. Update wallet balance
+  const updateAmount = isCredit ? adjustAmount : -adjustAmount;
+  await Driver.updateOne(
+    { _id: driverId },
+    { $inc: { 'wallet.balance': updateAmount } }
+  );
+
+  // 2. Create ledger payment record
+  const paymentId = new mongoose.Types.ObjectId();
+  const payment = await Payment.create({
+    _id: paymentId,
+    driverId,
+    amount: adjustAmount,
+    currency: 'INR',
+    purpose: isCredit ? 'admin_adjustment_credit' : 'admin_adjustment_debit',
+    status: 'captured', // valid enum for completed internal settlement
+    provider: 'wallet', // from PAYMENT_PROVIDER.WALLET
+    referenceId: paymentId, // satisfies required field without breaking unique index
+    referenceModel: 'Payment',
+    meta: {
+      reason: reason || 'Manual admin adjustment',
+    },
+  });
+
+  // 3. If DEBIT, route the deducted amount to PlatformRevenue
+  if (!isCredit) {
+    await PlatformRevenue.create({
+      source: PLATFORM_REVENUE_SOURCE.ADMIN_ADJUSTMENT,
+      amountRupees: adjustAmount,
+      driverId,
+      meta: {
+        reason: reason || 'Manual admin deduction',
+      },
+    });
+  }
+
+  return { payment };
 };

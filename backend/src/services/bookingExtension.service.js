@@ -381,6 +381,9 @@ export async function settleDriverEarning(booking) {
   const driverEarning = round2(Number(breakdown.driverEarning) || 0);
   if (driverEarning <= 0) return;
 
+  const isCash = booking.paymentMethod === 'cash';
+  const platformCommission = round2(Number(breakdown.platformCommission) || 0);
+
   // Prefer the explicit `driverFareEarning` / `driverAllowanceEarning`
   // fields the pricing engine stamps when the booking was created
   // under the "commission only on the daily rate" policy. For legacy
@@ -417,12 +420,18 @@ export async function settleDriverEarning(booking) {
     .catch(() => null);
   const sameDay = driverDoc?.todaySummary?.dateKey === todayDateKey;
 
+  // If the user paid in cash, the driver has the full amount in hand.
+  // We deduct only the platform commission from the driver's wallet.
+  // Their displayed totalEarnings and todaySummary.earnings still 
+  // increase by driverEarning, as they did earn that money.
+  const balanceDelta = isCash ? -platformCommission : driverEarning;
+
   if (sameDay) {
     await Driver.updateOne(
       { _id: driverId },
       {
         $inc: {
-          'wallet.balance': driverEarning,
+          'wallet.balance': balanceDelta,
           'wallet.totalEarnings': driverEarning,
           'todaySummary.trips': 1,
           'todaySummary.earnings': driverEarning,
@@ -437,7 +446,7 @@ export async function settleDriverEarning(booking) {
       { _id: driverId },
       {
         $inc: {
-          'wallet.balance': driverEarning,
+          'wallet.balance': balanceDelta,
           'wallet.totalEarnings': driverEarning,
         },
         $set: {

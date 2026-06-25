@@ -79,3 +79,12 @@ export const getDriverWalletHistory = asyncHandler(async (req, res) => {
   const result = await adminService.getDriverWalletHistoryService(req.query);
   return res.status(200).json(new ApiResponse(200, result, "Driver wallet history fetched successfully"));
 });
+
+export const adjustDriverWallet = asyncHandler(async (req, res) => {
+  const { driverId, amount, action, reason } = req.body;
+  if (!driverId || !amount || !action) {
+    throw new ApiError(400, "Missing required fields");
+  }
+  const result = await adminService.adjustDriverWalletService(driverId, amount, action, reason);
+  return res.status(200).json(new ApiResponse(200, result, "Driver wallet adjusted successfully"));
+});

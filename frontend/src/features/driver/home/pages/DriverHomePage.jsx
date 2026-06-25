@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Card from '../../../../components/Card';
 import Toggle from '../../../../components/Toggle';
@@ -8,11 +8,11 @@ import {
   Bell,
   MapPin,
   AlertCircle,
-  ShieldAlert,
   ChevronRight,
   Car,
   ShieldCheck,
   Flag,
+  Headset,
 } from 'lucide-react';
 import NotificationBell from '../../../../components/common/NotificationBell';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
@@ -32,6 +32,7 @@ import OnlineBlockedDialog from '../../kit/components/OnlineBlockedDialog';
 import DriverKitHomeCard from '../../kit/components/DriverKitHomeCard';
 import OutstationOptInCard from '../components/OutstationOptInCard';
 import { useDriverProfileStore } from '../../../../store/driver/useDriverProfileStore';
+import HelpDeskModal from '../../../../components/HelpDeskModal';
 
 const ACTIVE_STATUS_COPY = {
   [BOOKING_STATUS.DRIVER_ASSIGNED]: 'Heading to customer',
@@ -43,6 +44,7 @@ const ACTIVE_STATUS_COPY = {
 
 const DriverHomePage = () => {
   const navigate = useNavigate();
+  const [isHelpDeskOpen, setIsHelpDeskOpen] = useState(false);
   const updateDriver = useDriverAuthStore((s) => s.updateDriver);
   const onlineKey = buildCacheKey('driver-online-status', {});
   const activeKey = buildCacheKey('driver-kit-active', {});
@@ -125,7 +127,15 @@ const DriverHomePage = () => {
       <div className="bg-dark px-4 pt-4 pb-6 rounded-b-3xl">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-lg font-bold text-white">Home</h1>
-          <NotificationBell prefix="/driver" />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsHelpDeskOpen(true)}
+              className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+            >
+              <Headset className="w-5 h-5" />
+            </button>
+            <NotificationBell prefix="/driver" />
+          </div>
         </div>
         <Card className="!bg-white/10 backdrop-blur-sm !shadow-none">
           <div className="flex items-center justify-between">
@@ -260,6 +270,12 @@ const DriverHomePage = () => {
         onClose={clearBlocked}
         blocked={blocked}
         onGoToKit={goToKitPage}
+      />
+
+      <HelpDeskModal
+        isOpen={isHelpDeskOpen}
+        onClose={() => setIsHelpDeskOpen(false)}
+        userType="driver"
       />
     </div>
   );

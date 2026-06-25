@@ -3,7 +3,8 @@ import { useNavigate, Link } from 'react-router-dom';
 import Button from '../../../components/Button';
 import Input from '../../../components/Input';
 import Modal from '../../../components/Modal';
-import { User, Phone, Lock, ArrowLeft } from 'lucide-react';
+import { User, Phone, Lock, ArrowLeft, Headset } from 'lucide-react';
+import HelpDeskModal from '../../../components/HelpDeskModal';
 import api from '../../../utils/api';
 import useUserAuthStore from '../../../store/useUserAuthStore';
 import { navigateUserAfterAuth } from '../utils/authNavigation';
@@ -20,6 +21,7 @@ const RegisterPage = () => {
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [isHelpDeskOpen, setIsHelpDeskOpen] = useState(false);
 
   const handleChange = (field) => (e) => {
     setFormData((prev) => ({ ...prev, [field]: e.target.value }));
@@ -67,9 +69,16 @@ const RegisterPage = () => {
 
   return (
     <div className="flex-1 flex flex-col bg-white min-h-dvh">
-      <div className="px-4 pt-4">
+      <div className="px-4 pt-4 flex items-center justify-between">
         <button type="button" onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-xl hover:bg-gray-100">
           <ArrowLeft className="w-5 h-5 text-text" />
+        </button>
+        <button
+          type="button"
+          onClick={() => setIsHelpDeskOpen(true)}
+          className="p-2 -mr-2 rounded-xl hover:bg-gray-100 text-primary"
+        >
+          <Headset className="w-5 h-5" />
         </button>
       </div>
 
@@ -168,6 +177,13 @@ const RegisterPage = () => {
           </button>
         </div>
       </Modal>
+
+      <HelpDeskModal
+        isOpen={isHelpDeskOpen}
+        onClose={() => setIsHelpDeskOpen(false)}
+        userType="user"
+        isPublic
+      />
     </div>
   );
 };

@@ -233,7 +233,7 @@ export const SCHEDULED_BOOKING = Object.freeze({
    * RIDE_BUFFER_MINUTES]`. Lets drivers stack future scheduled
    * bookings safely without back-to-back overlaps.
    */
-  RIDE_BUFFER_MINUTES: 30,
+  RIDE_BUFFER_MINUTES: 120,
   REMINDER_OFFSETS_MINUTES: Object.freeze([60, 15]),
   /**
    * Hard floor on how far in advance a scheduled booking can be created.

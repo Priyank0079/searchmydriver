@@ -160,7 +160,22 @@ export async function findConflictingDriverIds({
   const newEnd = window.endMs;
   const conflicted = new Set();
 
+  const BUSY_STATUSES = [
+    BOOKING_STATUS.EN_ROUTE,
+    BOOKING_STATUS.ARRIVED,
+    BOOKING_STATUS.STARTED,
+    BOOKING_STATUS.AWAITING_PAYMENT,
+  ];
+
   for (const candidate of candidates) {
+    // 1. If the driver is physically busy right now, they cannot take new instant trips,
+    // regardless of mathematical time window overlaps.
+    if (BUSY_STATUSES.includes(candidate.status)) {
+      conflicted.add(String(candidate.driverId));
+      continue;
+    }
+
+    // 2. Otherwise check mathematical time window overlap (with buffer)
     const baseWindow = estimateBookingWindow(candidate);
     if (!baseWindow) continue;
     const paddedStart = baseWindow.startMs - bufferMs;

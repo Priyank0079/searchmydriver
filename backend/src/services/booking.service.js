@@ -64,6 +64,10 @@ import {
   cancelScheduledBookingJobs,
   loadScheduledDispatchConfig,
 } from './bookingScheduled.service.js';
+import {
+  createRazorpayOrder,
+  getRazorpayKeyId,
+} from '../utils/razorpay.js';
 
 /**
  * Business rules:
@@ -531,6 +535,7 @@ function validateCreateInput(body) {
     serviceType,
     bookingType,
     paymentMode,
+    paymentMethod,
     carId,
     pickup,
     dropoff,
@@ -548,6 +553,11 @@ function validateCreateInput(body) {
   // it must still be in the enum.
   if (paymentMode != null && !PAYMENT_MODE_LIST.includes(paymentMode)) {
     throw new ApiError(400, 'paymentMode must be pre_ride or post_ride');
+  }
+  // Check valid paymentMethod if provided
+  const validMethods = ['wallet', 'cash', 'online'];
+  if (paymentMethod != null && !validMethods.includes(paymentMethod)) {
+    throw new ApiError(400, 'paymentMethod must be wallet, cash, or online');
   }
   if (!carId) throw new ApiError(400, 'carId is required');
   validatePlace('Pickup', pickup);
@@ -911,59 +921,67 @@ export async function createBookingService(userId, body) {
   const fareTotal = round2(fareSnapshot.total);
   const bufferRupees = round2(waitingSnapshot.bufferRupees);
   const requiredAmount = round2(fareTotal + bufferRupees);
+  const reqPaymentMethod = body.paymentMethod || 'wallet';
+  const isCash = reqPaymentMethod === 'cash';
+  const isOnline = reqPaymentMethod === 'online';
+  const isWallet = reqPaymentMethod === 'wallet';
 
-  const walletSnapshot = await getWalletService(userId);
-  if ((walletSnapshot?.availableRupees ?? 0) < requiredAmount) {
-    const available = walletSnapshot?.availableRupees ?? 0;
-    const heldRupees = walletSnapshot?.heldRupees ?? 0;
-    const message =
-      bufferRupees > 0
-        ? `You need \u20B9${requiredAmount} in your wallet to book this ride (\u20B9${fareTotal} fare + \u20B9${bufferRupees} refundable waiting reserve).`
-        : `You need \u20B9${requiredAmount} in your wallet to book this ride.`;
-    throw new ApiError(402, message, {
-      requiredAmount,
-      fareAmount: fareTotal,
-      bufferAmount: bufferRupees,
-      walletBalance: walletSnapshot?.balance || 0,
-      heldRupees,
-      availableRupees: available,
-      shortBy: round2(Math.max(0, requiredAmount - available)),
+  let walletTx = null;
+
+  if (isWallet) {
+    const walletSnapshot = await getWalletService(userId);
+    if ((walletSnapshot?.availableRupees ?? 0) < requiredAmount) {
+      const available = walletSnapshot?.availableRupees ?? 0;
+      const heldRupees = walletSnapshot?.heldRupees ?? 0;
+      const message =
+        bufferRupees > 0
+          ? `You need \u20B9${requiredAmount} in your wallet to book this ride (\u20B9${fareTotal} fare + \u20B9${bufferRupees} refundable waiting reserve).`
+          : `You need \u20B9${requiredAmount} in your wallet to book this ride.`;
+      throw new ApiError(402, message, {
+        requiredAmount,
+        fareAmount: fareTotal,
+        bufferAmount: bufferRupees,
+        walletBalance: walletSnapshot?.balance || 0,
+        heldRupees,
+        availableRupees: available,
+        shortBy: round2(Math.max(0, requiredAmount - available)),
+      });
+    }
+
+    walletTx = await debitWalletService({
+      userId,
+      amount: fareTotal,
+      source: WALLET_TXN_SOURCE.BOOKING_PAYMENT,
+      description: `Booking ${bookingNumber} \u2014 ${serviceType}`,
+      refType: 'Booking',
+      refId: bookingNumber, // _id isn't known yet; we patch refId below.
     });
-  }
 
-  const walletTx = await debitWalletService({
-    userId,
-    amount: fareTotal,
-    source: WALLET_TXN_SOURCE.BOOKING_PAYMENT,
-    description: `Booking ${bookingNumber} \u2014 ${serviceType}`,
-    refType: 'Booking',
-    refId: bookingNumber, // _id isn't known yet; we patch refId below.
-  });
-
-  // Hold the buffer. If this fails (e.g. another concurrent booking
-  // grabbed the available wallet between our pre-check and now), undo
-  // the fare debit so the user isn't left with money missing AND no
-  // booking.
-  if (bufferRupees > 0) {
-    try {
-      await holdWalletService({ userId, amount: bufferRupees });
-    } catch (holdErr) {
+    // Hold the buffer. If this fails (e.g. another concurrent booking
+    // grabbed the available wallet between our pre-check and now), undo
+    // the fare debit so the user isn't left with money missing AND no
+    // booking.
+    if (bufferRupees > 0) {
       try {
-        await creditWalletService({
-          userId,
-          amount: fareTotal,
-          source: WALLET_TXN_SOURCE.BOOKING_REFUND,
-          description: `Refund \u2014 booking ${bookingNumber} hold failed`,
-          refType: 'Booking',
-          refId: bookingNumber,
-        });
-      } catch (refundErr) {
-        console.error(
-          '[booking] CRITICAL: failed to credit wallet after hold-failure rollback:',
-          refundErr,
-        );
+        await holdWalletService({ userId, amount: bufferRupees });
+      } catch (holdErr) {
+        try {
+          await creditWalletService({
+            userId,
+            amount: fareTotal,
+            source: WALLET_TXN_SOURCE.BOOKING_REFUND,
+            description: `Refund \u2014 booking ${bookingNumber} hold failed`,
+            refType: 'Booking',
+            refId: bookingNumber,
+          });
+        } catch (refundErr) {
+          console.error(
+            '[booking] CRITICAL: failed to credit wallet after hold-failure rollback:',
+            refundErr,
+          );
+        }
+        throw holdErr;
       }
-      throw holdErr;
     }
   }
 
@@ -1023,22 +1041,22 @@ export async function createBookingService(userId, body) {
           : null,
       fareSnapshot,
       waiting: waitingSnapshot,
-      // Booking is already paid up-front via the wallet. Only the fare
-      // total was debited; the waiting buffer is held against
-      // `wallet.heldRupees` (no money has left the wallet for it).
-      // The settle path debits the actual waiting charge at trip-end
-      // and releases the rest of the hold.
-      paymentMode: PAYMENT_MODE.PRE_RIDE,
-      paymentMethod: BOOKING_PAYMENT_METHOD.WALLET,
-      paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
+      paymentMode: isCash ? PAYMENT_MODE.POST_RIDE : PAYMENT_MODE.PRE_RIDE,
+      paymentMethod: isCash ? 'cash' : (isOnline ? 'online' : 'wallet'),
+      // Online: PENDING until Razorpay payment verified. Cash: not due yet. Wallet: already paid.
+      paymentStatus: isCash
+        ? BOOKING_PAYMENT_STATUS.NOT_DUE_YET
+        : isOnline
+          ? BOOKING_PAYMENT_STATUS.PENDING
+          : BOOKING_PAYMENT_STATUS.PAID,
       payment: {
-        amountPaidRupees: fareTotal,
+        amountPaidRupees: isCash || isOnline ? 0 : fareTotal,
         attempts: 0,
-        walletTxId: walletTx._id,
+        walletTxId: walletTx ? walletTx._id : null,
       },
       timeline: {
         createdAt: new Date(),
-        paymentReceivedAt: new Date(),
+        paymentReceivedAt: isCash ? null : new Date(),
       },
       // Outstation rides skip the wave dispatcher entirely — they sit in
       // PENDING_ASSIGNMENT until an admin/sub_admin (or zone-scoped
@@ -1054,35 +1072,39 @@ export async function createBookingService(userId, body) {
     // Compensating credit if booking creation fails after we've already
     // debited the wallet — we never want money silently stuck in the
     // ledger without a booking to back it up.
-    try {
-      // Roll back the fare debit AND release the buffer hold so the
-      // user is whole again.
-      await creditWalletService({
-        userId,
-        amount: fareTotal,
-        source: WALLET_TXN_SOURCE.BOOKING_REFUND,
-        description: `Refund \u2014 booking ${bookingNumber} failed to create`,
-        refType: 'Booking',
-        refId: bookingNumber,
-      });
-      if (bufferRupees > 0) {
-        await releaseWalletHoldService({ userId, amount: bufferRupees });
+    if (isWallet) {
+      try {
+        // Roll back the fare debit AND release the buffer hold so the
+        // user is whole again.
+        await creditWalletService({
+          userId,
+          amount: fareTotal,
+          source: WALLET_TXN_SOURCE.BOOKING_REFUND,
+          description: `Refund \u2014 booking ${bookingNumber} failed to create`,
+          refType: 'Booking',
+          refId: bookingNumber,
+        });
+        if (bufferRupees > 0) {
+          await releaseWalletHoldService({ userId, amount: bufferRupees });
+        }
+      } catch (refundErr) {
+        console.error(
+          '[booking] CRITICAL: failed to credit wallet after booking-create rollback:',
+          refundErr,
+        );
       }
-    } catch (refundErr) {
-      console.error(
-        '[booking] CRITICAL: failed to credit wallet after booking-create rollback:',
-        refundErr,
-      );
     }
     throw err;
   }
 
   // Backfill the refId on the wallet txn now that we know the booking id.
-  try {
-    walletTx.refId = String(booking._id);
-    await walletTx.save();
-  } catch (linkErr) {
-    console.warn('[booking] failed to link wallet txn to booking:', linkErr?.message);
+  if (walletTx) {
+    try {
+      walletTx.refId = String(booking._id);
+      await walletTx.save();
+    } catch (linkErr) {
+      console.warn('[booking] failed to link wallet txn to booking:', linkErr?.message);
+    }
   }
 
   // Scheduled hourly bookings branch through the scheduled-ride
@@ -1094,8 +1116,10 @@ export async function createBookingService(userId, body) {
   // Outstation bookings are always manually assigned (no auto-dispatch).
   // The booking lives in PENDING_ASSIGNMENT until an admin picks a
   // driver from the outstation-assignment queue.
-  let shouldDispatchNow = serviceType !== SERVICE_TYPES.OUTSTATION;
+  // Online payments: hold dispatch until Razorpay payment is verified.
+  let shouldDispatchNow = !isOnline && serviceType !== SERVICE_TYPES.OUTSTATION;
   if (
+    !isOnline &&
     bookingType === BOOKING_TYPE.SCHEDULED &&
     serviceType === SERVICE_TYPES.HOURLY &&
     booking.hourly?.scheduledStartAt
@@ -1108,9 +1132,44 @@ export async function createBookingService(userId, body) {
         '[booking] scheduled setup failed — falling back to immediate dispatch:',
         scheduleErr?.message,
       );
-      // Best-effort fallback: behave like an instant booking so the
-      // user isn't stuck with a booking that never searches.
       shouldDispatchNow = true;
+    }
+  }
+
+  // For online payment: create the Razorpay order right here so the
+  // frontend can open the checkout modal immediately after booking creation.
+  let razorpayOrder = null;
+  if (isOnline) {
+    try {
+      const amountPaise = Math.round(fareTotal * 100);
+      const rzpOrder = await createRazorpayOrder({
+        amountPaise,
+        receipt: `bk_${booking._id.toString().slice(-12)}_${Date.now().toString(36).slice(-4)}`,
+        notes: { bookingId: String(booking._id), bookingNumber: booking.bookingNumber },
+      });
+      booking.razorpay = {
+        orderId: rzpOrder.id,
+        amountPaise,
+        paymentId: null,
+        signature: null,
+      };
+      booking.payment = {
+        ...(booking.payment?.toObject?.() || booking.payment || {}),
+        attempts: 1,
+      };
+      await booking.save();
+      razorpayOrder = {
+        keyId: getRazorpayKeyId(),
+        orderId: rzpOrder.id,
+        amount: amountPaise,
+        currency: 'INR',
+        name: 'SpareDriver',
+        description: `Booking ${booking.bookingNumber}`,
+        bookingId: String(booking._id),
+      };
+    } catch (rzpErr) {
+      console.error('[booking] failed to create Razorpay order for online booking:', rzpErr?.message);
+      // Don't throw — let the booking exist; frontend can retry via /pay endpoint.
     }
   }
 
@@ -1118,6 +1177,7 @@ export async function createBookingService(userId, body) {
     booking: booking.toObject(),
     reused: false,
     shouldDispatchNow,
+    razorpayOrder,
   };
 }
 
@@ -1226,6 +1286,25 @@ export async function cancelBookingByUserService(userId, bookingId, reason = '')
           grossPaidRupees: Number(booking.payment?.amountPaidRupees) || 0,
         },
       });
+    }
+  } else if (!wasPaid && booking.paymentMethod === 'cash' && feeCharged > 0) {
+    // Debit the wallet directly for cash cancellations
+    try {
+      await debitWalletService({
+        userId: booking.userId,
+        amount: feeCharged,
+        source: WALLET_TXN_SOURCE.CANCELLATION_FEE,
+        description: `Cancellation fee \u2014 booking ${booking.bookingNumber} cancelled`,
+        refType: 'Booking',
+        refId: String(booking._id),
+        allowNegative: true,
+      });
+    } catch (debitErr) {
+      console.error(
+        '[booking] failed to debit wallet for cash cancellation fee',
+        String(booking._id),
+        debitErr?.message,
+      );
     }
   }
 

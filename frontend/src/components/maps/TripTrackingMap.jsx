@@ -237,7 +237,7 @@ function TripTrackingMap({
           <RoutePolyline
             path={routePath}
             animate={false}
-            showOutline={false}
+            showOutline={showOutline}
             strokeOptions={strokeOptions}
             outlineOptions={outlineOptions}
           />
