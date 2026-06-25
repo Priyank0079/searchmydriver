@@ -75,7 +75,7 @@ export function useDriverMarkers(
           title: d.name || `Driver ${id.slice(-4)}`,
           zIndex: isSelected ? zIndexBase + 2 : zIndexBase,
         });
-        marker.addListener('click', () => handlerRef.current?.(d));
+        marker.addListener('gmp-click', () => handlerRef.current?.(d));
         markersRef.current.set(id, marker);
       } else {
         marker.position = { lat: d.lat, lng: d.lng };

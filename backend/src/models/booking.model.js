@@ -325,7 +325,7 @@ const bookingSchema = new mongoose.Schema(
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     driverId: { type: mongoose.Schema.Types.ObjectId, ref: 'Driver', default: null, index: true },
     /** The user's own car the assigned driver will drive on this booking. */
-    carId: { type: mongoose.Schema.Types.ObjectId, ref: 'Car', required: true },
+    carId: { type: mongoose.Schema.Types.ObjectId, ref: 'Car' },
 
     serviceType: { type: String, enum: SERVICE_TYPE_LIST, required: true },
     /** Whether this is an instant ("now") or a future-scheduled booking. */

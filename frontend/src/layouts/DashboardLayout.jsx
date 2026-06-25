@@ -1,6 +1,6 @@
 import { Outlet } from 'react-router-dom';
 import BottomNav from '../components/BottomNav';
-import { Home, MapPin, User, Car, DollarSign } from 'lucide-react';
+import { Home, MapPin, User, Car, DollarSign, Wallet } from 'lucide-react';
 import BookingOfferModal from '../features/driver/trips/components/BookingOfferModal';
 
 const userNavItems = [
@@ -10,6 +10,7 @@ const userNavItems = [
   // label + icon mirror the driver-side "Trips" tab so the user mental
   // model matches.
   { path: '/user/activity', label: 'Trips', icon: Car },
+  { path: '/user/wallet', label: 'Wallet', icon: Wallet },
   { path: '/user/account', label: 'Account', icon: User },
 ];
 

@@ -11,17 +11,14 @@ const vehicleExperienceSchema = new mongoose.Schema(
     brandId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'CarBrand',
-      required: true,
     },
     modelId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'CarModel',
-      required: true,
     },
     fuelTypeId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'FuelType',
-      required: true,
     },
     transmission: {
       type: String,

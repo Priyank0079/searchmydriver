@@ -5,9 +5,7 @@ import Input from '../../../../components/Input';
 import { Phone, Lock, ArrowLeft } from 'lucide-react';
 import api from '../../../../utils/api';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
-import GoogleSignInButton from '../../../auth/components/GoogleSignInButton';
-import AuthDivider from '../../../auth/components/AuthDivider';
-import useGoogleAuth from '../../../auth/hooks/useGoogleAuth';
+
 import { navigateDriverAfterAuth } from '../../../auth/utils/authNavigation';
 
 const DriverLoginPage = () => {
@@ -22,7 +20,7 @@ const DriverLoginPage = () => {
   const [formData, setFormData] = useState({ phone: '', password: '' });
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
-  const { handleGoogleSuccess, handleGoogleError, loading: googleLoading } = useGoogleAuth('driver');
+
 
   const handleChange = (field) => (e) => {
     setFormData((prev) => ({ ...prev, [field]: e.target.value }));
@@ -109,13 +107,7 @@ const DriverLoginPage = () => {
           </Button>
         </form>
 
-        <AuthDivider />
-        <GoogleSignInButton
-          onSuccess={handleGoogleSuccess}
-          onError={handleGoogleError}
-          text="signin_with"
-          disabled={loading || googleLoading}
-        />
+
 
         {/* Register Link */}
         <p className="text-center text-sm text-text-secondary mt-8 mb-6 animate-fade-in-up" style={{ animationDelay: '0.2s' }}>

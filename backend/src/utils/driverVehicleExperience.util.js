@@ -30,17 +30,22 @@ export async function normalizeDriverVehicleExperience(entries) {
       transmission,
     } = entry || {};
 
-    if (!carTypeId || !brandId || !modelId || !fuelTypeId || !transmission) {
-      throw new ApiError(400, `Vehicle ${i + 1}: all fields are required`);
+    if (!carTypeId || !transmission) {
+      throw new ApiError(400, `Vehicle ${i + 1}: Category and transmission are required`);
     }
 
-    await validateCarCatalogRefs({ carTypeId, brandId, modelId, fuelTypeId });
+    const refsToValidate = { carTypeId };
+    if (brandId) refsToValidate.brandId = brandId;
+    if (modelId) refsToValidate.modelId = modelId;
+    if (fuelTypeId) refsToValidate.fuelTypeId = fuelTypeId;
+
+    await validateCarCatalogRefs(refsToValidate);
 
     normalized.push({
       carTypeId,
-      brandId,
-      modelId,
-      fuelTypeId,
+      brandId: brandId || null,
+      modelId: modelId || null,
+      fuelTypeId: fuelTypeId || null,
       transmission: String(transmission).toLowerCase(),
     });
   }

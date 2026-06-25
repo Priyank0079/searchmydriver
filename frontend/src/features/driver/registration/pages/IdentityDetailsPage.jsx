@@ -7,9 +7,7 @@ import Modal from '../../../../components/Modal';
 import { ArrowLeft, User, Phone, Lock } from 'lucide-react';
 import api from '../../../../utils/api';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
-import GoogleSignInButton from '../../../auth/components/GoogleSignInButton';
-import AuthDivider from '../../../auth/components/AuthDivider';
-import useGoogleAuth from '../../../auth/hooks/useGoogleAuth';
+
 import { driverNeedsPhone, navigateDriverAfterAuth } from '../../../auth/utils/authNavigation';
 
 import { DRIVER_ONBOARDING_STEPS } from '../../../../utils/driverOnboarding';
@@ -30,7 +28,7 @@ const IdentityDetailsPage = () => {
   }, [isAuthenticated, driver?.id, driver?.phone, driver?.onboardingStep, driver?.approvalStatus, navigate]);
 
   const [form, setForm] = useState({ name: '', phone: '', password: '' });
-  const { handleGoogleSuccess, handleGoogleError, loading: googleLoading } = useGoogleAuth('driver');
+
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [otp, setOtp] = useState('');
@@ -101,13 +99,7 @@ const IdentityDetailsPage = () => {
       
       <div className="flex-1 flex flex-col px-6 pb-8">
         <div className="flex-1 space-y-4 animate-fade-in-up">
-          <GoogleSignInButton
-            onSuccess={handleGoogleSuccess}
-            onError={handleGoogleError}
-            text="signup_with"
-            disabled={googleLoading || isPhoneVerified}
-          />
-          <AuthDivider label="or register with phone" />
+
           <Input label="Full name" placeholder="As per Govt. ID" value={form.name} onChange={handleChange('name')} icon={User} />
           <Input label="Password" type="password" placeholder="Min 6 characters" value={form.password} onChange={handleChange('password')} icon={Lock} />
           

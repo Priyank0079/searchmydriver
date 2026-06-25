@@ -1,0 +1,474 @@
+import { useCallback, useEffect, useState } from 'react';
+import toast from 'react-hot-toast';
+import {
+  Plus,
+  Image as ImageIcon,
+  Pencil,
+  Trash2,
+  ExternalLink,
+  Loader2,
+  RefreshCw,
+  LayoutTemplate,
+  X,
+  UploadCloud,
+} from 'lucide-react';
+import Card from '../../../components/Card';
+import Button from '../../../components/Button';
+import Input from '../../../components/Input';
+import Drawer from '../../../components/Drawer';
+import api from '../../../utils/api';
+import ConfirmDialog from '../../../components/ConfirmDialog';
+
+/**
+ * Admin → Manage Top Banners.
+ *
+ * Admins can publish top banner images that surface right below the
+ * search bar on the user home screen.
+ */
+const ManageBanners = () => {
+  const [banners, setBanners] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [editingBanner, setEditingBanner] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const fetchBanners = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/admin/banners');
+      setBanners(res?.data?.data || []);
+      setError('');
+    } catch (err) {
+      setError(err?.response?.data?.message || 'Failed to load banners');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get('/admin/banners')
+      .then((res) => {
+        if (cancelled) return;
+        setBanners(res?.data?.data || []);
+        setError('');
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err?.response?.data?.message || 'Failed to load banners');
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleNew = () => {
+    setEditingBanner(null);
+    setShowForm(true);
+  };
+
+  const handleEdit = (banner) => {
+    setEditingBanner(banner);
+    setShowForm(true);
+  };
+
+  const handleSaved = () => {
+    setShowForm(false);
+    setEditingBanner(null);
+    fetchBanners();
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete?._id) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/admin/banners/${confirmDelete._id}`);
+      toast.success('Banner deleted');
+      setConfirmDelete(null);
+      fetchBanners();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Could not delete banner');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5 animate-fade-in-up pb-10">
+      <div className="bg-gradient-to-br from-blue-500 to-cyan-600 text-white rounded-3xl p-5 shadow-sm flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3 min-w-0">
+          <div className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center shrink-0">
+            <LayoutTemplate className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-lg font-bold">Manage Top Banners</h1>
+            <p className="text-[12px] text-white/80 mt-0.5 leading-snug">
+              Upload promotional banners (16:9 images) that appear directly below the search bar on the user home screen.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={fetchBanners}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/10 text-white text-xs font-semibold hover:bg-white/15 disabled:opacity-60"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+          <Button size="sm" icon={Plus} onClick={handleNew}>
+            New banner
+          </Button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl text-rose-600 text-sm">
+          {error}
+        </div>
+      )}
+
+      {loading && banners.length === 0 ? (
+        <Card className="flex items-center justify-center py-12">
+          <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+        </Card>
+      ) : banners.length === 0 ? (
+        <Card className="py-16 text-center">
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mb-3">
+            <LayoutTemplate className="w-7 h-7" />
+          </div>
+          <p className="text-sm font-semibold text-slate-700">No banners yet</p>
+          <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+            Create your first top banner — upload a 16:9 image and optionally attach a link.
+          </p>
+          <Button className="mt-4" icon={Plus} onClick={handleNew}>
+            Create your first banner
+          </Button>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {banners.map((banner) => (
+            <BannerRowCard
+              key={banner._id}
+              banner={banner}
+              onEdit={() => handleEdit(banner)}
+              onDelete={() => setConfirmDelete(banner)}
+            />
+          ))}
+        </div>
+      )}
+
+      {showForm && (
+        <BannerFormModal
+          banner={editingBanner}
+          onClose={() => {
+            setShowForm(false);
+            setEditingBanner(null);
+          }}
+          onSaved={handleSaved}
+        />
+      )}
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        onClose={() => !deleting && setConfirmDelete(null)}
+        onConfirm={handleDelete}
+        title="Delete this banner?"
+        description={`This will remove "${confirmDelete?.title || 'this banner'}" from the user home screen. This cannot be undone.`}
+        confirmLabel="Delete"
+        cancelLabel="Keep"
+        variant="danger"
+        loading={deleting}
+      />
+    </div>
+  );
+};
+
+/* ------------------------------------------------------------------ */
+
+function BannerRowCard({ banner, onEdit, onDelete }) {
+  return (
+    <Card className="!p-0 overflow-hidden flex flex-col">
+      <div className="relative aspect-[16/9] bg-slate-900">
+        <img
+          src={banner.imageUrl}
+          alt={banner.title || 'Banner creative'}
+          className="w-full h-full object-cover"
+          loading="lazy"
+        />
+        <span className="absolute top-2 left-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700">
+          <ImageIcon className="w-3 h-3" /> Image
+        </span>
+        <span
+          className={`absolute top-2 right-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+            banner.isActive ? 'bg-emerald-500 text-white' : 'bg-slate-600 text-white'
+          }`}
+        >
+          {banner.isActive ? 'Active' : 'Hidden'}
+        </span>
+      </div>
+      <div className="p-4 flex-1 flex flex-col gap-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-slate-900 truncate">
+            {banner.title || <span className="text-slate-400 italic">Untitled</span>}
+          </p>
+          {banner.linkUrl ? (
+            <a
+              href={banner.linkUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-[11px] text-blue-600 hover:underline mt-0.5 truncate max-w-full"
+            >
+              <ExternalLink className="w-3 h-3" />
+              <span className="truncate">{banner.linkUrl}</span>
+            </a>
+          ) : (
+            <p className="text-[11px] text-slate-400 mt-0.5">No click-through link</p>
+          )}
+          <p className="text-[10px] text-slate-400 mt-1">Sort order: {banner.sortOrder || 0}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" icon={Pencil} onClick={onEdit}>
+            Edit
+          </Button>
+          <Button size="sm" variant="ghost" icon={Trash2} onClick={onDelete}>
+            Delete
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+function BannerFormModal({ banner, onClose, onSaved }) {
+  const isEdit = !!banner?._id;
+  const [title, setTitle] = useState(banner?.title || '');
+  const [linkUrl, setLinkUrl] = useState(banner?.linkUrl || '');
+  const [isActive, setIsActive] = useState(banner?.isActive ?? true);
+  const [sortOrder, setSortOrder] = useState(banner?.sortOrder ?? 0);
+  const [imageUrl, setImageUrl] = useState(banner?.imageUrl || '');
+  const [imagePublicId, setImagePublicId] = useState(banner?.imagePublicId || '');
+  const [uploading, setUploading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('media', file); // using 'media' to match backend middleware
+      if (imagePublicId) {
+        formData.append('oldPublicId', imagePublicId);
+      }
+      const res = await api.post('/admin/banners/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const payload = res?.data?.data;
+      if (!payload?.url || !payload?.publicId) {
+        throw new Error('Upload failed');
+      }
+      setImageUrl(payload.url);
+      setImagePublicId(payload.publicId);
+      toast.success('Image uploaded');
+    } catch (err) {
+      toast.error(err?.response?.data?.message || err?.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e?.preventDefault?.();
+    if (!imageUrl || !imagePublicId) {
+      toast.error('Upload an image for this banner first');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const payload = {
+        title: title.trim(),
+        linkUrl: linkUrl.trim(),
+        isActive,
+        sortOrder: Number(sortOrder) || 0,
+        imageUrl,
+        imagePublicId,
+      };
+      if (isEdit) {
+        await api.put(`/admin/banners/${banner._id}`, payload);
+        toast.success('Banner updated');
+      } else {
+        await api.post('/admin/banners', payload);
+        toast.success('Banner created');
+      }
+      onSaved();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Could not save banner');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const hasMedia = !!imageUrl;
+
+  const drawerHeader = (
+    <div className="px-5 py-4 flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <p className="text-[11px] uppercase tracking-wide text-slate-500">
+          {isEdit ? 'Edit banner' : 'New banner'}
+        </p>
+        <h2 className="text-base font-bold text-slate-900 truncate">
+          {isEdit ? title || 'Untitled banner' : 'Create top banner'}
+        </h2>
+      </div>
+      <button
+        type="button"
+        onClick={onClose}
+        className="p-2 rounded-xl hover:bg-slate-100"
+        aria-label="Close"
+      >
+        <X className="w-5 h-5 text-slate-600" />
+      </button>
+    </div>
+  );
+
+  const drawerFooter = (
+    <div className="px-5 py-3 flex gap-3">
+      <Button variant="outline" fullWidth onClick={onClose} disabled={submitting}>
+        Cancel
+      </Button>
+      <Button
+        fullWidth
+        loading={submitting}
+        disabled={uploading || !imageUrl}
+        onClick={handleSubmit}
+      >
+        {isEdit ? 'Save changes' : 'Publish banner'}
+      </Button>
+    </div>
+  );
+
+  return (
+    <Drawer isOpen onClose={onClose} header={drawerHeader} footer={drawerFooter} width="max-w-xl">
+      <form onSubmit={handleSubmit} className="p-5 space-y-5">
+        <div>
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+            Banner Image (16:9 ratio)
+          </p>
+          <label
+            className={`flex flex-col items-center justify-center gap-2 px-4 py-6 rounded-2xl border-2 border-dashed cursor-pointer transition ${
+              hasMedia
+                ? 'border-emerald-300 bg-emerald-50/40'
+                : 'border-slate-300 hover:border-primary hover:bg-primary/5'
+            } ${uploading ? 'opacity-60 pointer-events-none' : ''}`}
+          >
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/jpg,image/webp"
+              className="hidden"
+              onChange={(e) => handleFile(e.target.files?.[0])}
+              disabled={uploading}
+            />
+            {uploading ? (
+              <Loader2 className="w-6 h-6 text-primary animate-spin" />
+            ) : hasMedia ? (
+              <>
+                <ImageIcon className="w-6 h-6 text-emerald-600" />
+                <p className="text-sm font-semibold text-slate-800">
+                  Click to replace image
+                </p>
+              </>
+            ) : (
+              <>
+                <UploadCloud className="w-7 h-7 text-slate-400" />
+                <p className="text-sm font-semibold text-slate-700">
+                  Click to upload
+                </p>
+                <p className="text-[11px] text-slate-500 text-center">
+                  Image up to 5 MB (JPG/PNG/WEBP). Recommended 16:9.
+                </p>
+              </>
+            )}
+          </label>
+          {hasMedia && (
+            <div className="mt-3 rounded-2xl overflow-hidden border border-slate-200 bg-slate-100">
+              <img
+                src={imageUrl}
+                alt="Banner creative preview"
+                className="w-full object-cover aspect-[16/9]"
+              />
+            </div>
+          )}
+        </div>
+
+        <div>
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+            Title (shown internally)
+          </p>
+          <Input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="e.g. App Update Banner"
+            maxLength={120}
+          />
+        </div>
+
+        <div>
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+            Click-through link (optional)
+          </p>
+          <Input
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+            placeholder="https://yourpartner.com/landing"
+            icon={ExternalLink}
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+              Sort order
+            </p>
+            <Input
+              type="number"
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value)}
+              placeholder="0"
+            />
+            <p className="text-[11px] text-slate-500 mt-1.5">
+              Lower numbers appear first.
+            </p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+              Visibility
+            </p>
+            <label className="flex items-center gap-2 mt-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isActive}
+                onChange={(e) => setIsActive(e.target.checked)}
+                className="w-4 h-4"
+              />
+              <span className="text-sm text-slate-700 font-medium">
+                Show on user home
+              </span>
+            </label>
+          </div>
+        </div>
+      </form>
+    </Drawer>
+  );
+}
+
+export default ManageBanners;

@@ -49,9 +49,6 @@ const validateVehicles = (vehicles) => {
   vehicles.forEach((v, index) => {
     const err = {};
     if (!v.carTypeId) err.carTypeId = 'Required';
-    if (!v.brandId) err.brandId = 'Required';
-    if (!v.modelId) err.modelId = 'Required';
-    if (!v.fuelTypeId) err.fuelTypeId = 'Required';
     if (!v.transmission) err.transmission = 'Required';
     if (Object.keys(err).length) {
       fieldErrors[index] = err;
@@ -96,13 +93,16 @@ const DrivingCredentialsPage = () => {
     try {
       setIsSubmitting(true);
 
-      const payloadVehicles = vehicles.map((v) => ({
-        carTypeId: v.carTypeId,
-        brandId: v.brandId,
-        modelId: v.modelId,
-        fuelTypeId: v.fuelTypeId,
-        transmission: v.transmission,
-      }));
+      const payloadVehicles = vehicles.map((v) => {
+        const payload = {
+          carTypeId: v.carTypeId,
+          transmission: v.transmission,
+        };
+        if (v.brandId) payload.brandId = v.brandId;
+        if (v.modelId) payload.modelId = v.modelId;
+        if (v.fuelTypeId) payload.fuelTypeId = v.fuelTypeId;
+        return payload;
+      });
 
       await api.put('/driver/onboarding/step', {
         stepNumber: 2,

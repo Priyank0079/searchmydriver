@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Car, CalendarCheck, DollarSign, Settings,
   LogOut, X, ChevronRight, ChevronDown, ShieldCheck, Monitor, Package,
   CheckSquare, MapPin, Receipt, Sparkles, Navigation, Wallet, Banknote,
-  LifeBuoy, ClipboardList, Timer, Megaphone, Compass,
+  LifeBuoy, ClipboardList, Timer, Megaphone, Compass, LayoutTemplate,
 } from 'lucide-react';
 import { APP_NAME } from '../../../utils/constants';
 import useAdminAuthStore from '../../../store/useAdminAuthStore';
@@ -19,12 +19,15 @@ const navItems = [
     roles: ['admin'],
   },
   { path: '/admin/users', label: 'Users', icon: Users, roles: ['admin', 'sub_admin'] },
+  { path: '/admin/incoming-registrations', label: 'Incoming Registrations', icon: LifeBuoy, roles: ['admin', 'sub_admin'] },
   { path: '/admin/tasks', label: 'Team Tasks', icon: CheckSquare },
   { path: '/admin/drivers', label: 'Drivers', icon: Car },
+  { path: '/admin/driver-wallet', label: 'Driver Wallet', icon: Wallet, roles: ['admin', 'sub_admin'] },
   { path: '/admin/drivers/live', label: 'Live Map', icon: Navigation },
   { path: '/admin/kit-orders', label: 'Kit Orders', icon: Package },
   // Ads management — admin + sub_admin can publish promotional images
   // and short videos that surface on the user home screen.
+  { path: '/admin/banners', label: 'Top Banners', icon: LayoutTemplate, roles: ['admin', 'sub_admin'] },
   { path: '/admin/ads', label: 'Ads', icon: Megaphone, roles: ['admin', 'sub_admin'] },
   {
     label: 'Bookings',
@@ -96,6 +99,12 @@ const navItems = [
     ],
   },
   {
+    path: '/admin/fare-management',
+    label: 'Fare Management',
+    icon: Receipt,
+    roles: ['admin', 'sub_admin'],
+  },
+  {
     label: 'Settings',
     icon: Settings,
     roles: ['admin', 'sub_admin'],
@@ -116,18 +125,6 @@ const navItems = [
         path: '/admin/settings/zones',
         label: 'Service Zones',
         icon: MapPin,
-        roles: ['admin', 'sub_admin'],
-      },
-      {
-        path: '/admin/settings/pricing',
-        label: 'Service Pricing',
-        icon: Receipt,
-        roles: ['admin', 'sub_admin'],
-      },
-      {
-        path: '/admin/settings/subscriptions',
-        label: 'Subscription Plans',
-        icon: Sparkles,
         roles: ['admin', 'sub_admin'],
       },
       {

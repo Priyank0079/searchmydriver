@@ -6,17 +6,15 @@ import Modal from '../../../components/Modal';
 import { User, Phone, Lock, ArrowLeft } from 'lucide-react';
 import api from '../../../utils/api';
 import useUserAuthStore from '../../../store/useUserAuthStore';
-import GoogleSignInButton from '../components/GoogleSignInButton';
-import AuthDivider from '../components/AuthDivider';
-import useGoogleAuth from '../hooks/useGoogleAuth';
 import { navigateUserAfterAuth } from '../utils/authNavigation';
+
 
 const RegisterPage = () => {
   const navigate = useNavigate();
   const setAuth = useUserAuthStore((state) => state.setAuth);
   
   const [formData, setFormData] = useState({ name: '', phone: '', password: '' });
-  const { handleGoogleSuccess, handleGoogleError, loading: googleLoading } = useGoogleAuth('user');
+
   const [otp, setOtp] = useState('');
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
@@ -128,13 +126,7 @@ const RegisterPage = () => {
           </div>
         </form>
 
-        <AuthDivider />
-        <GoogleSignInButton
-          onSuccess={handleGoogleSuccess}
-          onError={handleGoogleError}
-          text="signup_with"
-          disabled={loading || googleLoading}
-        />
+
 
         <p className="text-center text-sm text-text-secondary mt-6 animate-fade-in-up" style={{ animationDelay: '0.2s' }}>
           Already have an account?{' '}

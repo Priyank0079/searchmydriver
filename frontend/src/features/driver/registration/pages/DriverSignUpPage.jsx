@@ -3,15 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import Button from '../../../../components/Button';
 import { Shield, CheckCircle, Clock } from 'lucide-react';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
-import GoogleSignInButton from '../../../auth/components/GoogleSignInButton';
-import AuthDivider from '../../../auth/components/AuthDivider';
-import useGoogleAuth from '../../../auth/hooks/useGoogleAuth';
+
 import { navigateDriverAfterAuth } from '../../../auth/utils/authNavigation';
 
 const DriverSignUpPage = () => {
   const navigate = useNavigate();
   const { isAuthenticated, driver } = useDriverAuthStore();
-  const { handleGoogleSuccess, handleGoogleError, loading: googleLoading } = useGoogleAuth('driver');
+
 
   useEffect(() => {
     if (isAuthenticated && driver) {
@@ -39,13 +37,7 @@ const DriverSignUpPage = () => {
         <Button variant="outline" fullWidth onClick={() => navigate('/driver/login')} className="rounded-full py-4 font-bold border-gray-200 bg-gray-200 text-black">
           Login
         </Button>
-        <AuthDivider />
-        <GoogleSignInButton
-          onSuccess={handleGoogleSuccess}
-          onError={handleGoogleError}
-          text="signup_with"
-          disabled={googleLoading}
-        />
+
         <p className="text-center text-xs text-text-muted mt-4">
           Already have an account? <button onClick={() => navigate('/driver/login')} className="text-primary font-semibold hover:underline">Sign in</button>
         </p>

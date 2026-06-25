@@ -1,5 +1,7 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import api from '../../../../utils/api';
 import { ArrowLeft, Download, FileText } from 'lucide-react';
 import Card from '../../../../components/Card';
 import Button from '../../../../components/Button';
@@ -18,6 +20,7 @@ const InvoicePage = () => {
   const navigate = useNavigate();
   const booking = useUserActiveBookingStore((s) => s.booking);
   const fetchActive = useUserActiveBookingStore((s) => s.fetchActive);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     if (!booking) fetchActive().catch(() => {});
@@ -78,6 +81,33 @@ const InvoicePage = () => {
     return { id, date, service, distance, duration, total };
   }, [booking]);
 
+  const handleDownload = async () => {
+    if (!booking) return;
+    try {
+      setDownloading(true);
+      const res = await api.get(`/bookings/${booking._id}/invoice`, {
+        responseType: 'blob'
+      });
+      
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `Invoice-${invoice.id}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+      toast.success('Invoice downloaded successfully');
+    } catch (error) {
+      console.error('Failed to download invoice:', error);
+      toast.error('Failed to download invoice');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col bg-bg min-h-dvh">
       <div className="bg-white px-4 pt-4 pb-4 shadow-sm">
@@ -119,7 +149,13 @@ const InvoicePage = () => {
             </div>
           </div>
 
-          <Button fullWidth variant="secondary" icon={Download} disabled>
+          <Button 
+            fullWidth 
+            variant="secondary" 
+            icon={Download} 
+            onClick={handleDownload}
+            loading={downloading}
+          >
             Download Invoice
           </Button>
         </Card>

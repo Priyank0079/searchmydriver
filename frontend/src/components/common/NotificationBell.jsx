@@ -17,7 +17,7 @@ const BG_COLORS = {
   error: 'bg-rose-50/50',
 };
 
-export default function NotificationBell({ prefix = '/user' }) {
+export default function NotificationBell({ prefix = '/auth' }) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef(null);
   

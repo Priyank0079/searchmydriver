@@ -44,6 +44,7 @@ import {
   cancelBookingExtension,
   respondToNoShowPrompt,
   rateDriverByCustomer,
+  downloadBookingInvoice,
 } from '../controllers/booking.controller.js';
 import {
   getMyWallet,
@@ -90,6 +91,7 @@ router.get('/bookings', getMyBookings);
 router.get('/bookings/active', getMyActiveBooking);
 router.get('/bookings/active-list', getMyActiveBookings);
 router.get('/bookings/:id', getBookingById);
+router.get('/bookings/:id/invoice', downloadBookingInvoice);
 router.post('/bookings/:id/cancel', cancelBooking);
 router.post('/bookings/:id/pay', createBookingPayment);
 router.post('/bookings/:id/verify-payment', verifyBookingPayment);

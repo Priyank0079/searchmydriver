@@ -150,7 +150,11 @@ const KitOrderDetailPage = lazy(() => import('./features/admin/pages/KitOrderDet
 const ManageTasks = lazy(() => import('./features/admin/pages/ManageTasks'));
 const TaskActivityLogPage = lazy(() => import('./features/admin/pages/TaskActivityLogPage'));
 const StaffProfilePage = lazy(() => import('./features/admin/pages/StaffProfilePage'));
+const ManageBanners = lazy(() => import('./features/admin/pages/ManageBanners'));
 const ManageAds = lazy(() => import('./features/admin/pages/ManageAds'));
+const IncomingRegistrations = lazy(() => import('./features/admin/pages/IncomingRegistrations'));
+const DriverWallet = lazy(() => import('./features/admin/pages/DriverWallet'));
+const FareManagement = lazy(() => import('./features/admin/pages/FareManagement'));
 
 function PageLoader() {
   return (
@@ -305,17 +309,23 @@ function App() {
             <Route path="/admin/users" element={<ManageUsers />} />
             <Route path="/admin/users/:userId/profile" element={<UserProfilePage />} />
             <Route path="/admin/profile" element={<StaffProfilePage />} />
+            
+            <Route path="/admin/incoming-registrations" element={<IncomingRegistrations />} />
+
+            <Route path="/admin/drivers" element={<ManageDrivers />} />
+            <Route path="/admin/driver-wallet" element={<DriverWallet />} />
+            <Route path="/admin/fare-management" element={<FareManagement />} />
             <Route path="/admin/tasks" element={<ManageTasks />} />
             <Route element={<SuperAdminOnlyGuard />}>
               <Route path="/admin/tasks/activity" element={<TaskActivityLogPage />} />
               <Route path="/admin/settings/team" element={<ManageTeam />} />
             </Route>
-            <Route path="/admin/drivers" element={<ManageDrivers />} />
             <Route path="/admin/drivers/live" element={<LiveDriverMap />} />
             <Route path="/admin/drivers/:driverId/profile" element={<DriverProfilePage />} />
             <Route path="/admin/kits" element={<Navigate to="/admin/settings/kits" replace />} />
             <Route path="/admin/kit-orders" element={<ManageKitOrders />} />
             <Route path="/admin/kit-orders/:orderId" element={<KitOrderDetailPage />} />
+            <Route path="/admin/banners" element={<ManageBanners />} />
             <Route path="/admin/ads" element={<ManageAds />} />
             <Route path="/admin/bookings" element={<ManageBookings />} />
             <Route

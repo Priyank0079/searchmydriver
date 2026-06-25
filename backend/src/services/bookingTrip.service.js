@@ -873,6 +873,7 @@ async function redispatchAfterDriverCancel(booking, driverId, policy, chance) {
     refundAmount: 0,
   };
 
+  booking.depopulate();
   await booking.save();
 
   // Kill the Pay Now timer (irrelevant now — booking is back in
@@ -956,6 +957,7 @@ async function terminateBookingByDriver(
   // Also sweep any pending extension intent so the driver banner /
   // customer modal don't outlive the booking.
   await clearPendingExtensionsOnTerminate(booking, 'driver_cancelled');
+  booking.depopulate();
   await booking.save();
 
   cancelPaymentTimeout(booking._id);
@@ -1073,6 +1075,7 @@ async function cancelOutstationByDriver(booking, driverId, reason = '') {
     }
     await releaseBookingBufferHold(booking);
     await clearPendingExtensionsOnTerminate(booking, 'driver_cancelled');
+    booking.depopulate();
     await booking.save();
 
     cancelPaymentTimeout(booking._id);
@@ -1170,6 +1173,7 @@ async function cancelOutstationByDriver(booking, driverId, reason = '') {
       typeof hoursUntilPickup === 'number' ? hoursUntilPickup : null,
   };
 
+  booking.depopulate();
   await booking.save();
   cancelPaymentTimeout(booking._id);
   cancelNoShowSchedule(booking._id);

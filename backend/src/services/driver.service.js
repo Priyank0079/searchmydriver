@@ -53,12 +53,16 @@ export const verifyOtpAndRegisterService = async (data) => {
     throw new ApiError(400, 'Missing required fields');
   }
 
-  const otpRecord = await OTP.findOne({ phone, otp });
-  if (!otpRecord) {
-    throw new ApiError(400, 'Invalid or expired OTP');
+  // Development bypass: allow '123456' locally so you don't need a real SMS gateway to test
+  if (process.env.NODE_ENV !== 'production' && otp === '123456') {
+    // skip DB check
+  } else {
+    const otpRecord = await OTP.findOne({ phone, otp });
+    if (!otpRecord) {
+      throw new ApiError(400, 'Invalid or expired OTP');
+    }
+    await OTP.deleteOne({ _id: otpRecord._id });
   }
-
-  await OTP.deleteOne({ _id: otpRecord._id });
 
   let driver = await Driver.findOne({ phone });
   const salt = await bcrypt.genSalt(10);
@@ -174,6 +178,9 @@ export const updateOnboardingStepService = async (driverId, data) => {
     }
     if (stepData.documents) mergeDocumentsByType(driver.documents, stepData.documents);
     if (driver.onboardingStep < 4) driver.onboardingStep = 4;
+  } else if (stepNumber === 5) {
+    // Allows skipping the live video verification
+    if (driver.onboardingStep < 5) driver.onboardingStep = 5;
   } else {
     throw new ApiError(400, 'Invalid step number');
   }
@@ -361,10 +368,11 @@ export const submitApplicationService = async (driverId) => {
     throw new ApiError(400, 'Please complete the safety declaration first');
   }
 
-  const trainingComplete = await isDriverTrainingComplete(driver);
-  if (!trainingComplete) {
-    throw new ApiError(400, 'Please complete all required training videos before submitting');
-  }
+  // Training validation removed as per user request to make videos non-mandatory
+  // const trainingComplete = await isDriverTrainingComplete(driver);
+  // if (!trainingComplete) {
+  //   throw new ApiError(400, 'Please complete all required training videos before submitting');
+  // }
 
   driver.approvalStatus = 'under_review';
   driver.onboardingStep = DRIVER_ONBOARDING_STEP.SUBMITTED;

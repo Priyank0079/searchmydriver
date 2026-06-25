@@ -1,10 +1,15 @@
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import ServiceCard from '../../home/components/ServiceCard';
+import SubscriptionBanner from '../../home/components/SubscriptionBanner';
 import { SERVICE_CATALOG } from '../../home/constants/serviceCatalog';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
-import { useUserServicePricingsStore } from '../../../../store/user/useUserPricingStore';
+import {
+  useUserServicePricingsStore,
+  useUserSubscriptionPlansStore,
+} from '../../../../store/user/useUserPricingStore';
 import useBookingDraftStore from '../../../../store/user/useBookingDraftStore';
 import { SERVICE_TYPES } from '../../../../constants/serviceTypes';
 
@@ -18,6 +23,19 @@ const SelectServicePage = () => {
     buildCacheKey('user-services-active'),
   );
   const services = Array.isArray(data) ? data : [];
+
+  const { data: planData } = useCachedQuery(
+    useUserSubscriptionPlansStore,
+    buildCacheKey('user-subscriptions-active'),
+  );
+
+  const startingPlanPrice = useMemo(() => {
+    const list = Array.isArray(planData) ? planData : [];
+    if (!list.length) return null;
+    return list
+      .filter((p) => p?.isActive !== false && typeof p.price === 'number')
+      .reduce((min, p) => (min == null || p.price < min ? p.price : min), null);
+  }, [planData]);
 
   // Users with multiple cars are allowed to spin up parallel bookings,
   // so we DON'T redirect into an existing active booking here anymore.
@@ -87,6 +105,13 @@ const SelectServicePage = () => {
                 />
               );
             })}
+        </div>
+
+        <div className="mt-4">
+          <SubscriptionBanner
+            startingPrice={startingPlanPrice}
+            onClick={() => navigate('/user/subscriptions')}
+          />
         </div>
 
         {!loading && services.length === 0 && (

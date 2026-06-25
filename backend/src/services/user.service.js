@@ -42,12 +42,16 @@ export const verifyUserOtpAndRegisterService = async ({ name, phone, password, o
     throw new ApiError(400, 'All fields are required');
   }
 
-  const otpRecord = await OTP.findOne({ phone, otp });
-  if (!otpRecord) {
-    throw new ApiError(400, 'Invalid or expired OTP');
+  // Development bypass: allow '123456' locally so you don't need a real SMS gateway to test
+  if (process.env.NODE_ENV !== 'production' && otp === '123456') {
+    // skip DB check
+  } else {
+    const otpRecord = await OTP.findOne({ phone, otp });
+    if (!otpRecord) {
+      throw new ApiError(400, 'Invalid or expired OTP');
+    }
+    await OTP.deleteOne({ _id: otpRecord._id });
   }
-
-  await OTP.deleteOne({ _id: otpRecord._id });
 
   const salt = await bcrypt.genSalt(10);
   const hashedPassword = await bcrypt.hash(password, salt);
@@ -136,7 +140,8 @@ export const getUserProfileService = async (userId) => {
     .populate('brandId', 'name')
     .populate('modelId', 'name')
     .populate('fuelTypeId', 'name')
-    .sort({ createdAt: -1 });
+    .sort({ createdAt: -1 })
+    .lean();
 
   const activeConditions = await PlatformCondition.find({ isActive: true }).lean();
   const answerMap = new Map(
@@ -268,7 +273,8 @@ export const getUserCarsService = async (userId) => {
     .populate('brandId', 'name')
     .populate('modelId', 'name')
     .populate('fuelTypeId', 'name')
-    .sort({ createdAt: -1 });
+    .sort({ createdAt: -1 })
+    .lean();
 };
 
 export const deleteUserCarService = async (userId, carId) => {

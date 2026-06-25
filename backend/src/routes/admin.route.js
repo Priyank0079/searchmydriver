@@ -13,6 +13,8 @@ import {
   getAdminTeam,
   updateAdminMember,
   deleteAdminMember,
+  getIncomingRegistrations,
+  getDriverWalletHistory,
 } from '../controllers/admin.controller.js';
 import { protectStaff, restrictTo } from '../middlewares/authMiddleware.js';
 import { ROUTE_ROLES } from '../constants/staffPermissions.js';
@@ -118,6 +120,13 @@ import {
   adminDeleteAd,
   adminUploadAdMedia,
 } from '../controllers/ad.controller.js';
+import {
+  adminListBanners,
+  adminUploadBannerMedia,
+  adminCreateBanner,
+  adminUpdateBanner,
+  adminDeleteBanner,
+} from '../controllers/banner.controller.js';
 import { downloadDriverProfilePdf } from '../controllers/driverPdf.controller.js';
 import { uploadAdMedia } from '../middlewares/multer.js';
 
@@ -129,6 +138,8 @@ router.get('/auth/me', protectStaff, restrictTo(...ALL_STAFF), getStaffMe);
 router.use('/notifications', protectStaff, notificationRouter);
 
 router.get('/users', protectStaff, restrictTo(...ALL_STAFF), getCustomers);
+router.get('/incoming-registrations', protectStaff, restrictTo(...ALL_STAFF), getIncomingRegistrations);
+router.get('/driver-wallet-history', protectStaff, restrictTo(...ALL_STAFF), getDriverWalletHistory);
 
 router.get('/tasks/assignees', protectStaff, restrictTo(...OPERATIONS), getTaskAssignees);
 router.get('/tasks/activity', protectStaff, restrictTo(...SUPER_ADMIN), listTaskActivity);
@@ -247,6 +258,19 @@ router.post(
 router.post('/ads', protectStaff, restrictTo(...OPERATIONS), adminCreateAd);
 router.put('/ads/:id', protectStaff, restrictTo(...OPERATIONS), adminUpdateAd);
 router.delete('/ads/:id', protectStaff, restrictTo(...OPERATIONS), adminDeleteAd);
+
+/* ---- Top Banners (admin + sub_admin manage; users get the public feed) ------ */
+router.get('/banners', protectStaff, restrictTo(...OPERATIONS), adminListBanners);
+router.post(
+  '/banners/upload',
+  protectStaff,
+  restrictTo(...OPERATIONS),
+  uploadAdMedia.single('media'), // Reusing uploadAdMedia since logic is identical
+  adminUploadBannerMedia,
+);
+router.post('/banners', protectStaff, restrictTo(...OPERATIONS), adminCreateBanner);
+router.put('/banners/:id', protectStaff, restrictTo(...OPERATIONS), adminUpdateBanner);
+router.delete('/banners/:id', protectStaff, restrictTo(...OPERATIONS), adminDeleteBanner);
 
 router.post('/team', protectStaff, restrictTo(...SUPER_ADMIN), addAdminMember);
 router.get('/team', protectStaff, restrictTo(...SUPER_ADMIN), getAdminTeam);

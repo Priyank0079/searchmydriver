@@ -20,6 +20,7 @@ const VehicleDetailsForm = ({
   errors = {},
   disabled = false,
   showVehicleNumber = true,
+  showCarModel = true,
 }) => {
   const {
     categoryOptions,
@@ -53,15 +54,17 @@ const VehicleDetailsForm = ({
         disabled={disabled || loading}
       />
 
-      <Input
-        label="Car model"
-        placeholder="e.g. Toyota Innova Crysta"
-        value={values.modelName}
-        onChange={(e) => setField('modelName')(e.target.value)}
-        error={errors.modelName}
-        icon={Car}
-        disabled={disabled}
-      />
+      {showCarModel && (
+        <Input
+          label="Car model"
+          placeholder="e.g. Toyota Innova Crysta"
+          value={values.modelName}
+          onChange={(e) => setField('modelName')(e.target.value)}
+          error={errors.modelName}
+          icon={Car}
+          disabled={disabled}
+        />
+      )}
 
       {showVehicleNumber && (
         <Input

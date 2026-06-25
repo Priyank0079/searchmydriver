@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Button from '../../../../components/Button';
 import LiveVideoRecorder from '../../../../components/LiveVideoRecorder';
@@ -8,10 +8,12 @@ import SavedVerificationVideo from '../components/SavedVerificationVideo';
 import useLiveVerification from '../../../../hooks/useLiveVerification';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
 import { LIVE_VERIFICATION_MIN_SECONDS } from '../../../../utils/driverOnboarding';
+import api from '../../../../utils/api';
 
 const LiveVerificationPage = () => {
   const navigate = useNavigate();
   const updateDriver = useDriverAuthStore((s) => s.updateDriver);
+  const [isSkipping, setIsSkipping] = useState(false);
 
   const {
     savedVideo,
@@ -47,6 +49,20 @@ const LiveVerificationPage = () => {
     if (ok) await fetchSavedVideo();
   };
 
+  const handleSkip = async () => {
+    try {
+      setIsSkipping(true);
+      await api.put('/driver/onboarding/step', { stepNumber: 5 });
+      updateDriver({ onboardingStep: 5 });
+      handleContinue();
+    } catch (err) {
+      console.error('Failed to skip verification', err);
+      alert('Failed to skip. Please try again.');
+    } finally {
+      setIsSkipping(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center min-h-dvh bg-slate-50">
@@ -64,15 +80,27 @@ const LiveVerificationPage = () => {
       onBack={() => navigate(-1)}
       footer={
         showRecorder ? (
-          <Button
-            fullWidth
-            loading={uploading}
-            disabled={!recordedBlob || recordedSeconds < LIVE_VERIFICATION_MIN_SECONDS}
-            onClick={handleSubmit}
-            className="rounded-full py-4 text-base font-bold"
-          >
-            Submit verification video
-          </Button>
+          <div className="flex flex-col gap-3">
+            <Button
+              fullWidth
+              loading={uploading}
+              disabled={!recordedBlob || recordedSeconds < LIVE_VERIFICATION_MIN_SECONDS || isSkipping}
+              onClick={handleSubmit}
+              className="rounded-full py-4 text-base font-bold"
+            >
+              Submit verification video
+            </Button>
+            <Button
+              fullWidth
+              variant="outline"
+              loading={isSkipping}
+              disabled={uploading}
+              onClick={handleSkip}
+              className="rounded-full py-4 text-base font-semibold"
+            >
+              Skip for now
+            </Button>
+          </div>
         ) : null
       }
     >

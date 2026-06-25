@@ -69,3 +69,13 @@ export const deleteAdminMember = asyncHandler(async (req, res) => {
   const result = await adminService.deleteAdminMemberService(req.params.id);
   return res.status(200).json(new ApiResponse(200, result, "Admin team member removed successfully"));
 });
+
+export const getIncomingRegistrations = asyncHandler(async (req, res) => {
+  const result = await adminService.getIncomingRegistrationsService(req.query);
+  return res.status(200).json(new ApiResponse(200, result, "Incoming registrations fetched successfully"));
+});
+
+export const getDriverWalletHistory = asyncHandler(async (req, res) => {
+  const result = await adminService.getDriverWalletHistoryService(req.query);
+  return res.status(200).json(new ApiResponse(200, result, "Driver wallet history fetched successfully"));
+});

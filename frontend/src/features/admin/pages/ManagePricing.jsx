@@ -19,7 +19,7 @@ const SERVICE_CARDS = [
   { type: SERVICE_TYPES.OUTSTATION, icon: Mountain },
 ];
 
-const ManagePricing = () => {
+const ManagePricing = ({ hideHeader, defaultFilter }) => {
   const cacheKey = buildCacheKey('admin-service-pricings', {});
   const { data, loading, refetch } = useCachedQuery(
     useAdminServicePricingStore,
@@ -115,24 +115,30 @@ const ManagePricing = () => {
     );
   };
 
+  const filteredCards = defaultFilter 
+    ? SERVICE_CARDS.filter(c => c.type === defaultFilter)
+    : SERVICE_CARDS;
+
   return (
-    <div className="space-y-6 animate-fade-in-up pb-10">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">Pricing &amp; commission</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Configure each service type: hourly slabs and outstation rates. Fare engine and live
-            billing use these values during booking and checkout.
-          </p>
+    <div className={`space-y-6 animate-fade-in-up ${hideHeader ? '' : 'pb-10'}`}>
+      {!hideHeader && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">Pricing &amp; commission</h1>
+            <p className="text-sm text-slate-500 mt-1">
+              Configure each service type: hourly slabs and outstation rates. Fare engine and live
+              billing use these values during booking and checkout.
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       {loading && pricings.length === 0 && (
         <p className="text-sm text-slate-500">Loading pricing…</p>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {SERVICE_CARDS.map(({ type, icon: Icon }) => {
+      <div className={`grid grid-cols-1 ${hideHeader ? 'lg:grid-cols-1 max-w-4xl' : 'lg:grid-cols-2'} gap-4`}>
+        {filteredCards.map(({ type, icon: Icon }) => {
           const pricing = pricingByType[type];
           return (
             <div
@@ -213,17 +219,19 @@ const ManagePricing = () => {
         })}
       </div>
 
-      <div className="bg-slate-900 rounded-2xl p-5 flex items-center gap-4 text-white">
-        <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
-          <Sparkles className="w-5 h-5 text-primary" />
+      {!hideHeader && (
+        <div className="bg-slate-900 rounded-2xl p-5 flex items-center gap-4 text-white">
+          <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
+            <Sparkles className="w-5 h-5 text-primary" />
+          </div>
+          <div className="text-sm">
+            <p className="font-semibold mb-0.5">Subscriptions assign a dedicated driver</p>
+            <p className="text-white/60 text-xs">
+              Configure subscription plans (full-time driver + booking discount) in Subscription Plans.
+            </p>
+          </div>
         </div>
-        <div className="text-sm">
-          <p className="font-semibold mb-0.5">Subscriptions assign a dedicated driver</p>
-          <p className="text-white/60 text-xs">
-            Configure subscription plans (full-time driver + booking discount) in Subscription Plans.
-          </p>
-        </div>
-      </div>
+      )}
 
       {editing && (
         <ServicePricingModal

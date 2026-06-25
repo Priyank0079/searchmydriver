@@ -5,9 +5,6 @@ import Input from '../../../components/Input';
 import { Phone, Lock, ArrowLeft } from 'lucide-react';
 import api from '../../../utils/api';
 import useUserAuthStore from '../../../store/useUserAuthStore';
-import GoogleSignInButton from '../components/GoogleSignInButton';
-import AuthDivider from '../components/AuthDivider';
-import useGoogleAuth from '../hooks/useGoogleAuth';
 import { navigateUserAfterAuth } from '../utils/authNavigation';
 
 const LoginPage = () => {
@@ -16,7 +13,6 @@ const LoginPage = () => {
   const [formData, setFormData] = useState({ phone: '', password: '' });
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
-  const { handleGoogleSuccess, handleGoogleError, loading: googleLoading } = useGoogleAuth('user');
 
   const handleChange = (field) => (e) => {
     setFormData((prev) => ({ ...prev, [field]: e.target.value }));
@@ -108,13 +104,6 @@ const LoginPage = () => {
           </Button>
         </form>
 
-        <AuthDivider />
-        <GoogleSignInButton
-          onSuccess={handleGoogleSuccess}
-          onError={handleGoogleError}
-          text="signin_with"
-          disabled={loading || googleLoading}
-        />
         <p className="text-center text-sm text-text-secondary mt-8 mb-6 animate-fade-in-up" style={{ animationDelay: '0.4s' }}>
           Don&apos;t have an account?{' '}
           <Link to="/register" className="text-primary font-semibold hover:underline">

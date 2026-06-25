@@ -1,12 +1,8 @@
 import { useNavigate } from 'react-router-dom';
 import Button from '../../../components/Button';
-import GoogleSignInButton from '../components/GoogleSignInButton';
-import AuthDivider from '../components/AuthDivider';
-import useGoogleAuth from '../hooks/useGoogleAuth';
 
 const WelcomePage = () => {
   const navigate = useNavigate();
-  const { handleGoogleSuccess, handleGoogleError, loading: googleLoading } = useGoogleAuth('user');
 
   return (
     <div className="flex flex-col bg-white min-h-dvh relative">
@@ -30,14 +26,6 @@ const WelcomePage = () => {
         <Button variant="outline" fullWidth onClick={() => navigate('/register')} className="rounded-full py-4 bg-black text-black font-bold border-gray-200 text-text hover:bg-gray-100 text-black">
           Sign Up
         </Button>
-        <AuthDivider />
-        <div className="w-full flex justify-center items-center items-center">  
-          <GoogleSignInButton
-            onSuccess={handleGoogleSuccess}
-            onError={handleGoogleError}
-            disabled={googleLoading}
-          />
-        </div>
       </div>
     </div>
   );

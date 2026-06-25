@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { Driver } from '../models/driverModels/driver.model.js';
 import User from '../models/user.model.js';
 import Car from '../models/user/car.model.js';
+import Payment from '../models/payment.model.js';
 import bcrypt from 'bcryptjs';
 import { ApiError } from '../utils/apiError.js';
 import { USER_ROLES } from '../constants/roles.js';
@@ -452,4 +453,149 @@ export const deleteAdminMemberService = async (id) => {
 
   await User.findByIdAndDelete(id);
   return { id };
+};
+
+export const getIncomingRegistrationsService = async (query) => {
+  const { page = 1, limit = 10 } = query;
+  const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
+  const parsedLimit = parseInt(limit, 10);
+
+  // 1. Fetch incomplete drivers
+  const driverFilter = {
+    isDeleted: false,
+    $or: [{ approvalStatus: 'pending' }, { onboardingStep: { $lt: 6 } }],
+  };
+  const totalDrivers = await Driver.countDocuments(driverFilter);
+  const incompleteDrivers = await Driver.find(driverFilter)
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(parsedLimit)
+    .lean();
+
+  // 2. Fetch incomplete users
+  // An incomplete user has no verified phone OR no cars
+  const userFilter = { role: 'user', isDeleted: false };
+  const allUsers = await User.find(userFilter)
+    .sort({ createdAt: -1 })
+    .select('-password')
+    .lean();
+
+  const userIds = allUsers.map((u) => u._id);
+  const carCounts = userIds.length
+    ? await Car.aggregate([
+        { $match: { userId: { $in: userIds }, isActive: true } },
+        { $group: { _id: '$userId', count: { $sum: 1 } } },
+      ])
+    : [];
+  const countMap = new Map(carCounts.map((c) => [String(c._id), c.count]));
+
+  const incompleteUsers = allUsers.filter((u) => {
+    const carsCount = countMap.get(String(u._id)) || 0;
+    // Condition check can be added if needed, but phone and cars cover 99%
+    return !u.isPhoneVerified || carsCount === 0;
+  });
+
+  const paginatedUsers = incompleteUsers.slice(skip, skip + parsedLimit);
+  const totalUsers = incompleteUsers.length;
+
+  return {
+    drivers: {
+      data: incompleteDrivers,
+      pagination: {
+        total: totalDrivers,
+        page: parseInt(page, 10),
+        pages: Math.ceil(totalDrivers / parsedLimit) || 1,
+      },
+    },
+    users: {
+      data: paginatedUsers.map((u) => ({ ...u, carsCount: countMap.get(String(u._id)) || 0 })),
+      pagination: {
+        total: totalUsers,
+        page: parseInt(page, 10),
+        pages: Math.ceil(totalUsers / parsedLimit) || 1,
+      },
+    },
+  };
+};
+
+export const getDriverWalletHistoryService = async (query) => {
+  const { page = 1, limit = 20, type = 'all', search = '' } = query;
+  const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
+  const parsedLimit = parseInt(limit, 10);
+
+  const filter = { driverId: { $ne: null } };
+
+  if (type === 'withdrawals') {
+    filter.purpose = 'withdrawal';
+  } else if (type === 'transactions') {
+    filter.purpose = { $ne: 'withdrawal' };
+  }
+
+  // If search is provided, we need to lookup driver by name/phone.
+  let driverIds = [];
+  if (search) {
+    const drivers = await Driver.find({
+      $or: [
+        { name: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } },
+      ],
+    })
+      .select('_id')
+      .lean();
+    driverIds = drivers.map((d) => d._id);
+    filter.driverId = { $in: driverIds };
+  }
+
+  const [total, payments] = await Promise.all([
+    Payment.countDocuments(filter),
+    Payment.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parsedLimit)
+      .populate('driverId', 'name phone profilePicture')
+      .lean(),
+  ]);
+
+  const formatted = payments.map((p) => {
+    let description = '';
+    let isCredit = false;
+
+    if (p.purpose === 'trip_fare' || p.purpose === 'trip_allowance' || p.purpose === 'trip_waiting') {
+      isCredit = true;
+      description = `Credit for ${p.purpose.replace('_', ' ')}`;
+    } else if (p.purpose === 'withdrawal') {
+      isCredit = false;
+      description = `Withdrawal Request (${p.status})`;
+    } else {
+      isCredit = false;
+      description = `Payment for ${p.purpose}`;
+    }
+
+    if (p.meta?.bookingNumber) {
+      description += ` (Trip ${p.meta.bookingNumber})`;
+    }
+
+    return {
+      _id: p._id,
+      driver: {
+        name: p.driverId?.name || 'Unknown',
+        phone: p.driverId?.phone || '',
+        profilePicture: p.driverId?.profilePicture || '',
+      },
+      type: isCredit ? 'CREDIT' : 'DEBIT',
+      amount: p.amount,
+      description,
+      date: p.createdAt,
+      status: p.status,
+    };
+  });
+
+  return {
+    data: formatted,
+    pagination: {
+      total,
+      page: parseInt(page, 10),
+      pages: Math.ceil(total / parsedLimit) || 1,
+    },
+  };
 };

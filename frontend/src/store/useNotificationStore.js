@@ -7,7 +7,7 @@ const useNotificationStore = create((set, get) => ({
   unreadCount: 0,
   isInitialized: false,
 
-  fetchNotifications: async (prefix = '/user') => {
+  fetchNotifications: async (prefix = '/auth') => {
     try {
       const res = await api.get(`${prefix}/notifications`);
       const { notifications, unreadCount } = res.data.data;
@@ -38,7 +38,7 @@ const useNotificationStore = create((set, get) => ({
     }));
   },
 
-  markAsRead: async (id, prefix = '/user') => {
+  markAsRead: async (id, prefix = '/auth') => {
     // Optimistic UI update
     set((state) => ({
       notifications: state.notifications.map((n) =>
@@ -54,7 +54,7 @@ const useNotificationStore = create((set, get) => ({
     }
   },
 
-  markAllAsRead: async (prefix = '/user') => {
+  markAllAsRead: async (prefix = '/auth') => {
     set((state) => ({
       notifications: state.notifications.map((n) => ({ ...n, isRead: true })),
       unreadCount: 0,

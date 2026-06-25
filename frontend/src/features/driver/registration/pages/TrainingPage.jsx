@@ -68,10 +68,6 @@ const TrainingPage = () => {
   };
 
   const handleSubmit = async () => {
-    if (!allRequiredComplete) {
-      alert('Please complete all required training videos before submitting.');
-      return;
-    }
     setSubmitting(true);
     try {
       const res = await api.post('/driver/onboarding/submit');
@@ -110,7 +106,7 @@ const TrainingPage = () => {
         <StepIndicator steps={DRIVER_ONBOARDING_STEPS} currentStep={6} />
         <p className="text-xs text-text-muted mt-3 flex items-center gap-1.5">
           <Shield className="w-3.5 h-3.5" />
-          Watch all required videos to complete registration. This step cannot be skipped.
+          Optional: Watch these videos to learn more about the platform. You may submit your application directly.
         </p>
         <p className="text-xs font-semibold text-slate-600 mt-2">
           {completedCount}/{videos.length} completed
@@ -138,17 +134,12 @@ const TrainingPage = () => {
           <Button
             fullWidth
             loading={submitting}
-            disabled={!allRequiredComplete || submitting || videos.length === 0}
+            disabled={submitting}
             onClick={handleSubmit}
             className="rounded-full py-4 text-base font-bold shadow-lg shadow-primary/20"
           >
             SUBMIT APPLICATION
           </Button>
-          {!allRequiredComplete && (
-            <p className="text-xs text-center text-amber-700 mt-2 font-medium">
-              Complete all required videos to submit
-            </p>
-          )}
         </div>
       </div>
     </div>

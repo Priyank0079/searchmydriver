@@ -12,6 +12,7 @@ import {
   sanitizeBookingForDriver,
   listAdminBookingsService,
 } from '../services/booking.service.js';
+import { buildBookingInvoicePdf } from '../services/invoicePdf.service.js';
 import {
   initiateExtensionService,
   verifyExtensionOtpService,
@@ -380,8 +381,23 @@ export const getAdminBookings = asyncHandler(async (req, res) => {
 });
 
 export const getAdminBookingById = asyncHandler(async (req, res) => {
-  const booking = await getBookingByIdService(req.params.id);
-  return res.status(200).json(new ApiResponse(200, { booking }, 'Booking fetched'));
+  const result = await getBookingByIdService(req.params.id, null, req.staff);
+  res.json(new ApiResponse(200, result, 'Booking fetched successfully'));
+});
+
+/**
+ * @desc    Generate and stream PDF invoice for a booking
+ * @route   GET /api/v1/bookings/:id/invoice
+ * @access  Private (User only)
+ */
+export const downloadBookingInvoice = asyncHandler(async (req, res) => {
+  // We can use getBookingByIdService to ensure they have permission to access it
+  const bookingData = await getBookingByIdService(req.params.id, req.user);
+  if (!bookingData || !bookingData.booking) {
+    throw new ApiError(404, 'Booking not found');
+  }
+  
+  await buildBookingInvoicePdf(bookingData.booking._id, { res });
 });
 
 /* ------------------------------------------------------------------ */
