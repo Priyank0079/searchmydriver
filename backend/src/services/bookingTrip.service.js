@@ -668,6 +668,14 @@ export async function completeTripService(driverId, bookingId) {
   booking.status = BOOKING_STATUS.COMPLETED;
   booking.timeline.completedAt = new Date();
 
+  // Async trigger referral logic
+  import('../services/referral.service.js').then(({ handleUserTripCompleted, handleDriverTripCompleted }) => {
+    handleUserTripCompleted(booking).catch((err) => console.error('[referral] handleUserTripCompleted error:', err));
+    if (booking.driverId) {
+      handleDriverTripCompleted(booking.driverId).catch((err) => console.error('[referral] handleDriverTripCompleted error:', err));
+    }
+  });
+
   // Post-pay bookings move from `not_due_yet` → `pending` so the user app
   // knows to surface a "pay now" screen. Pre-pay bookings were already
   // paid before EN_ROUTE.

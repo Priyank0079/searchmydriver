@@ -220,6 +220,7 @@ function buildOfferPayload(booking, driver, { customer, car, upcomingScheduledTr
     dropoff: booking.dropoff || null,
     hourly: booking.hourly || null,
     outstation: booking.outstation || null,
+    monthly: booking.monthly || null,
     // Drivers only ever see their own earning — never the customer's
     // gross total or the platform commission. Computed once here so the
     // offer payload, the active-trip view and the trip history all show
@@ -371,6 +372,8 @@ export async function dispatchNextDriverService(bookingId) {
     minResults: 1,
     carTypeIds,
     excludeDriverIds,
+    requireAvailableForMonthlyRide: booking.serviceType === SERVICE_TYPES.MONTHLY,
+    includeOnTrip: booking.serviceType === SERVICE_TYPES.MONTHLY,
   });
 
   if (!drivers.length) {

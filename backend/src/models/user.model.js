@@ -96,6 +96,31 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    referralCode: {
+      type: String,
+      trim: true,
+      unique: true,
+      sparse: true,
+      index: true,
+    },
+    wallet: {
+      balance: {
+        type: Number,
+        default: 0,
+      },
+      totalCredited: {
+        type: Number,
+        default: 0,
+      },
+      totalSpent: {
+        type: Number,
+        default: 0,
+      },
+      heldRupees: {
+        type: Number,
+        default: 0,
+      }
+    },
     isDeleted: {
       type: Boolean,
       default: false,
@@ -112,6 +137,10 @@ const userSchema = new mongoose.Schema(
         },
       }
     ],
+    hasPaidMonthlyRegistrationFee: {
+      type: Boolean,
+      default: false,
+    },
     savedLocations: {
       type: [savedLocationSchema],
       default: [],

@@ -27,7 +27,7 @@ const IdentityDetailsPage = () => {
     }
   }, [isAuthenticated, driver?.id, driver?.phone, driver?.onboardingStep, driver?.approvalStatus, navigate]);
 
-  const [form, setForm] = useState({ name: '', phone: '', password: '' });
+  const [form, setForm] = useState({ name: '', phone: '', password: '', referralCode: '' });
 
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
   const [showOtpModal, setShowOtpModal] = useState(false);
@@ -60,6 +60,7 @@ const IdentityDetailsPage = () => {
         otp,
         name: form.name,
         password: form.password,
+        referralCode: form.referralCode,
       });
 
       // Save driver to store (token is in cookies)
@@ -128,6 +129,8 @@ const IdentityDetailsPage = () => {
             </div>
             {error && <p className="text-danger text-xs mt-1">{error}</p>}
           </div>
+
+          <Input label="Referral Code (Optional)" placeholder="Enter referral code" value={form.referralCode} onChange={handleChange('referralCode')} icon={User} disabled={isPhoneVerified} />
 
         </div>
         

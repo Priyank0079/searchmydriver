@@ -14,7 +14,7 @@ const RegisterPage = () => {
   const navigate = useNavigate();
   const setAuth = useUserAuthStore((state) => state.setAuth);
   
-  const [formData, setFormData] = useState({ name: '', phone: '', password: '' });
+  const [formData, setFormData] = useState({ name: '', phone: '', password: '', referralCode: '' });
 
   const [otp, setOtp] = useState('');
   const [showOtpModal, setShowOtpModal] = useState(false);
@@ -125,6 +125,14 @@ const RegisterPage = () => {
               />
             </div>
           </div>
+
+          <Input
+            label="Referral Code (Optional)"
+            placeholder="Enter referral code"
+            value={formData.referralCode}
+            onChange={handleChange('referralCode')}
+            icon={User}
+          />
 
           {error && <p className="text-danger text-xs font-medium">{error}</p>}
 

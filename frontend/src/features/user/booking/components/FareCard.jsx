@@ -79,6 +79,12 @@ function buildOutstationRows(bd) {
   ];
 }
 
+function buildMonthlyRows(bd) {
+  return [
+    ['Registration Fee (To Platform)', bd.totalPayable],
+  ];
+}
+
 const FareCard = ({ estimate, estimating = false, error = null, dense = false, footnote = null, title = 'Fare estimate' }) => {
   // `breakdown` is wrapped in useMemo so the identity is stable
   // whenever the estimate hasn't changed — otherwise the
@@ -92,15 +98,19 @@ const FareCard = ({ estimate, estimating = false, error = null, dense = false, f
   const bufferRupees = Number(buffer?.bufferRupees || 0);
   const isOutstation =
     (estimate?.serviceType || breakdown.serviceType) === SERVICE_TYPES.OUTSTATION;
+  const isMonthly =
+    (estimate?.serviceType || breakdown.serviceType) === SERVICE_TYPES.MONTHLY;
 
   const detailRows = useMemo(() => {
     const raw = isOutstation
       ? buildOutstationRows(breakdown)
-      : buildHourlyRows(breakdown);
+      : isMonthly
+        ? buildMonthlyRows(breakdown)
+        : buildHourlyRows(breakdown);
     return raw
       .filter(([, value, suppress]) => !suppress && Number(value || 0) !== 0)
       .map(([label, value]) => [label, Number(value) || 0]);
-  }, [breakdown, isOutstation]);
+  }, [breakdown, isOutstation, isMonthly]);
 
   const subtotal = Number(breakdown.subtotal) || 0;
   const serviceCharge = Number(breakdown.serviceCharge) || 0;
@@ -122,6 +132,13 @@ const FareCard = ({ estimate, estimating = false, error = null, dense = false, f
 
       {!error && (
         <div className={dense ? 'space-y-1.5' : 'space-y-2.5'}>
+          {isMonthly && (
+            <div className="bg-blue-50 text-blue-800 text-[11px] p-3 rounded-xl mb-3 border border-blue-100 leading-snug">
+              <strong className="block mb-1 text-xs">Platform Registration Only</strong>
+              The ₹{fareTotal} fee is paid to the platform to confirm your monthly booking. 
+              <strong> You will negotiate the driver's actual monthly salary directly with them</strong> once they accept your request.
+            </div>
+          )}
           {/* Per-line breakdown with explicit multipliers (\u00d7 days,
               \u00d7 nights, etc.) so the customer can audit every rupee. */}
           {detailRows.map(([label, amount]) => (
@@ -138,7 +155,7 @@ const FareCard = ({ estimate, estimating = false, error = null, dense = false, f
           {/* Pre-platform subtotal — the boundary between trip costs and
               platform-side charges. Highlighted on outstation where the
               detail is rich enough to be worth a separator. */}
-          {subtotal > 0 && (
+          {subtotal > 0 && !isMonthly && (
             <div className="flex items-center justify-between">
               <span className="text-sm text-text-secondary">Subtotal</span>
               <span className="text-sm text-text">{rupees(subtotal)}</span>

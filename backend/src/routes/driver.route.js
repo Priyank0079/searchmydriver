@@ -12,6 +12,7 @@ import {
   uploadLiveVerification,
   reopenRejectedApplication,
   updateOutstationAvailability,
+  updateMonthlyAvailability,
 } from '../controllers/driver.controller.js';
 import { uploadVideo as uploadVideoMiddleware } from '../middlewares/multer.js';
 import {
@@ -28,6 +29,13 @@ import {
   markKitOrderPaymentFailed,
 } from '../controllers/kitOrder.controller.js';
 import { verifyKitPayment } from '../controllers/payment.controller.js';
+import {
+  getMyWallet,
+  getMyWalletTransactions,
+  createWalletTopupOrder,
+  verifyWalletTopupPayment,
+  requestWithdrawal,
+} from '../controllers/wallet.controller.js';
 import { getOnlineStatus, setOnlineStatus } from '../controllers/driverOnline.controller.js';
 import {
   getMyOrders,
@@ -85,6 +93,11 @@ router.put(
   protectDriver,
   updateOutstationAvailability,
 );
+router.put(
+  '/preferences/monthly-availability',
+  protectDriver,
+  updateMonthlyAvailability,
+);
 
 router.get('/kits', protectDriver, getAvailableKits);
 router.get('/kits/mandatory', protectDriver, getMandatoryKit);
@@ -97,6 +110,12 @@ router.get('/orders', protectDriver, getMyOrders);
 router.get('/orders/:id', protectDriver, getMyOrderById);
 router.get('/payments/history', protectDriver, getMyPaymentHistory);
 router.post('/payments/verify', protectDriver, verifyKitPayment);
+
+router.get('/wallet', protectDriver, getMyWallet);
+router.get('/wallet/transactions', protectDriver, getMyWalletTransactions);
+router.post('/wallet/topup', protectDriver, createWalletTopupOrder);
+router.post('/wallet/topup/verify', protectDriver, verifyWalletTopupPayment);
+router.post('/wallet/withdraw', protectDriver, requestWithdrawal);
 
 router.get('/online/status', protectDriver, getOnlineStatus);
 router.put('/online', protectDriver, setOnlineStatus);

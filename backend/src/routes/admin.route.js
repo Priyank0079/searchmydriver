@@ -77,15 +77,6 @@ import {
   adminUpsertServicePricing,
   adminUpdateServicePricing,
   adminDeleteServicePricing,
-  adminListSubscriptionPlans,
-  adminCreateSubscriptionPlan,
-  adminUpdateSubscriptionPlan,
-  adminDeleteSubscriptionPlan,
-  adminListUserSubscriptions,
-  adminListSubscriptionAvailableDrivers,
-  adminAssignDriverToSubscription,
-  adminReleaseSubscriptionDriver,
-  adminListSubscriptionRevenue,
 } from '../controllers/pricing.controller.js';
 import {
   getTaskAssignees,
@@ -136,19 +127,48 @@ import {
   getAdminSupportTickets,
   resolveSupportTicket,
 } from '../controllers/support.controller.js';
+import {
+  getReferralSettings,
+  updateReferralSettings,
+  listReferrals,
+  approveReferral,
+  rejectReferral,
+  listWithdrawals,
+  approveWithdrawal,
+  rejectWithdrawal,
+} from '../controllers/referralAdmin.controller.js';
 
 const router = express.Router();
 const { ALL_STAFF, OPERATIONS, SUPER_ADMIN } = ROUTE_ROLES;
 
+// ── Auth ──────────────────────────────────────────────────────────────────
 router.post('/auth/login', loginAdmin);
-router.get('/auth/me', protectStaff, restrictTo(...ALL_STAFF), getStaffMe);
-router.use('/notifications', protectStaff, notificationRouter);
 
-router.get('/users', protectStaff, restrictTo(...ALL_STAFF), getCustomers);
-router.get('/incoming-registrations', protectStaff, restrictTo(...ALL_STAFF), getIncomingRegistrations);
-router.get('/driver-wallet-history', protectStaff, restrictTo(...ALL_STAFF), getDriverWalletHistory);
+// ============================================================================
+// ALL ROUTES BELOW THIS REQUIRE A VALID STAFF JWT
+// ============================================================================
+router.use(protectStaff);
 
-router.post('/driver-wallet/adjust', protectStaff, restrictTo(...OPERATIONS), adjustDriverWallet);
+// ── Referrals & Withdrawals ─────────────────────────────────────────────────
+router.get('/referral-settings', restrictTo(...OPERATIONS), getReferralSettings);
+router.put('/referral-settings', restrictTo(...SUPER_ADMIN), updateReferralSettings);
+router.get('/referrals', restrictTo(...ALL_STAFF), listReferrals);
+router.put('/referrals/:id/approve', restrictTo(...OPERATIONS), approveReferral);
+router.put('/referrals/:id/reject', restrictTo(...OPERATIONS), rejectReferral);
+router.get('/withdrawals', restrictTo(...ALL_STAFF), listWithdrawals);
+router.put('/withdrawals/:id/approve', restrictTo(...OPERATIONS), approveWithdrawal);
+router.put('/withdrawals/:id/reject', restrictTo(...OPERATIONS), rejectWithdrawal);
+
+// ── Current Staff User ────────────────────────────────────────────────────
+router.get('/auth/me', getStaffMe);
+
+router.use('/notifications', notificationRouter);
+
+router.get('/users', restrictTo(...ALL_STAFF), getCustomers);
+router.get('/incoming-registrations', restrictTo(...ALL_STAFF), getIncomingRegistrations);
+router.get('/driver-wallet-history', restrictTo(...ALL_STAFF), getDriverWalletHistory);
+
+router.post('/driver-wallet/adjust', restrictTo(...OPERATIONS), adjustDriverWallet);
 
 // ----- Help Desk / Support Tickets -----
 // Only SUPER_ADMIN (or others if you assign them the permission, defaulting to SUPER_ADMIN here)
@@ -341,26 +361,7 @@ router.post('/pricing/services', protectStaff, restrictTo(...OPERATIONS), adminU
 router.put('/pricing/services/:id', protectStaff, restrictTo(...OPERATIONS), adminUpdateServicePricing);
 router.delete('/pricing/services/:id', protectStaff, restrictTo(...OPERATIONS), adminDeleteServicePricing);
 
-router.get('/pricing/subscriptions', protectStaff, restrictTo(...OPERATIONS), adminListSubscriptionPlans);
-router.post('/pricing/subscriptions', protectStaff, restrictTo(...OPERATIONS), adminCreateSubscriptionPlan);
-router.put('/pricing/subscriptions/:id', protectStaff, restrictTo(...OPERATIONS), adminUpdateSubscriptionPlan);
-router.delete('/pricing/subscriptions/:id', protectStaff, restrictTo(...OPERATIONS), adminDeleteSubscriptionPlan);
 
-router.get('/subscriptions/users', protectStaff, restrictTo(...ALL_STAFF), adminListUserSubscriptions);
-router.get(
-  '/subscriptions/revenue',
-  protectStaff,
-  restrictTo(...SUPER_ADMIN),
-  adminListSubscriptionRevenue,
-);
-router.get(
-  '/subscriptions/users/:id/available-drivers',
-  protectStaff,
-  restrictTo(...ALL_STAFF),
-  adminListSubscriptionAvailableDrivers,
-);
-router.post('/subscriptions/users/:id/assign', protectStaff, restrictTo(...OPERATIONS), adminAssignDriverToSubscription);
-router.post('/subscriptions/users/:id/release', protectStaff, restrictTo(...OPERATIONS), adminReleaseSubscriptionDriver);
 
 router.get('/kit-orders', protectStaff, restrictTo(...ALL_STAFF), getAdminKitOrders);
 router.get('/kit-orders/:id', protectStaff, restrictTo(...ALL_STAFF), getAdminKitOrderById);

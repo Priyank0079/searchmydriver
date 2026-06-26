@@ -22,11 +22,7 @@ import {
 } from '../controllers/googleAuth.controller.js';
 import {
   getActiveServicePricings,
-  getActiveSubscriptionPlans,
   estimateFare,
-  purchaseSubscription,
-  verifySubscriptionPayment,
-  getMySubscription,
 } from '../controllers/pricing.controller.js';
 import { getNearbyDriversForUser } from '../controllers/driverLocation.controller.js';
 import {
@@ -70,7 +66,6 @@ router.post('/logout', logout);
 
 // Public pricing reads (used by the booking flow before checkout)
 router.get('/pricing/services', getActiveServicePricings);
-router.get('/pricing/subscriptions', getActiveSubscriptionPlans);
 
 // Profile — customer (own id) or staff (any customer id)
 router.get('/users/:userId/profile', protectProfileViewer, getUserProfile);
@@ -83,10 +78,6 @@ router.use('/notifications', notificationRouter);
 // Fare estimate (auth required so we can apply the user's subscription discount)
 router.post('/bookings/estimate', estimateFare);
 
-// Subscriptions — purchase + active subscription read
-router.get('/subscriptions/me', getMySubscription);
-router.post('/subscriptions/purchase', purchaseSubscription);
-router.post('/subscriptions/verify-payment', verifySubscriptionPayment);
 
 // Booking lifecycle (Phase 4)
 router.post('/bookings', createBooking);

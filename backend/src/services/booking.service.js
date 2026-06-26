@@ -541,6 +541,7 @@ function validateCreateInput(body) {
     dropoff,
     hourly,
     outstation,
+    monthly,
   } = body || {};
 
   if (!SERVICE_TYPE_LIST.includes(serviceType)) {
@@ -607,6 +608,22 @@ function validateCreateInput(body) {
         400,
         'Outstation: expectedReturnAt must be after pickupAt',
       );
+    }
+  }
+  if (serviceType === SERVICE_TYPES.MONTHLY) {
+    if (!monthly?.startDate || !monthly?.endDate) {
+      throw new ApiError(400, 'Monthly: startDate and endDate are required');
+    }
+    const startMs = new Date(monthly.startDate).getTime();
+    const endMs = new Date(monthly.endDate).getTime();
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+      throw new ApiError(400, 'Monthly: startDate and endDate must be valid datetimes');
+    }
+    if (endMs <= startMs) {
+      throw new ApiError(400, 'Monthly: endDate must be after startDate');
+    }
+    if (!monthly?.workingHoursPerDay || monthly.workingHoursPerDay < 1) {
+      throw new ApiError(400, 'Monthly: workingHoursPerDay must be >= 1');
     }
   }
 }
@@ -676,7 +693,7 @@ export function computeOutstationDuration(pickupAt, expectedReturnAt) {
  * window (treated as "no conflict possible").
  */
 function windowFromCreatePayload(body) {
-  const { serviceType, bookingType, hourly, outstation } = body || {};
+  const { serviceType, bookingType, hourly, outstation, monthly } = body || {};
   if (serviceType === SERVICE_TYPES.HOURLY) {
     const durationMs = (Number(hourly?.durationHours) || 1) * 60 * 60 * 1000;
     const start =
@@ -698,6 +715,13 @@ function windowFromCreatePayload(body) {
       ? new Date(endSrc)
       : new Date(start.getTime() + (Number(outstation?.days) || 1) * 24 * 60 * 60 * 1000);
     if (Number.isNaN(start.getTime())) return null;
+    return { start, end };
+  }
+  if (serviceType === SERVICE_TYPES.MONTHLY) {
+    if (!monthly?.startDate || !monthly?.endDate) return null;
+    const start = new Date(monthly.startDate);
+    const end = new Date(monthly.endDate);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
     return { start, end };
   }
   return null;
@@ -728,6 +752,13 @@ function windowFromExistingBooking(b) {
       ? new Date(endSrc)
       : new Date(start.getTime() + (Number(b.outstation?.days) || 1) * 24 * 60 * 60 * 1000);
     if (Number.isNaN(start.getTime())) return null;
+    return { start, end };
+  }
+  if (b.serviceType === SERVICE_TYPES.MONTHLY) {
+    if (!b.monthly?.startDate || !b.monthly?.endDate) return null;
+    const start = new Date(b.monthly.startDate);
+    const end = new Date(b.monthly.endDate);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
     return { start, end };
   }
   return null;
@@ -797,7 +828,7 @@ async function assertCarAvailableForWindow({ userId, carId, body }) {
 export async function createBookingService(userId, body) {
   validateCreateInput(body);
 
-  const { serviceType, bookingType, carId, pickup, dropoff, hourly, outstation } = body;
+  const { serviceType, bookingType, carId, pickup, dropoff, hourly, outstation, monthly } = body;
 
   // Scheduled rides must be created with enough lead time for the
   // emergency-pool safety window to fire. Anything sooner is treated as
@@ -1037,6 +1068,15 @@ export async function createBookingService(userId, body) {
               needsFood: outstation.needsFood ?? true,
               estimatedKm: outstation.estimatedKm || 0,
               tripType: outstation.tripType || 'round_trip',
+            }
+          : null,
+      monthly:
+        serviceType === SERVICE_TYPES.MONTHLY
+          ? {
+              startDate: new Date(monthly?.startDate),
+              endDate: new Date(monthly?.endDate),
+              workingHoursPerDay: monthly?.workingHoursPerDay || 9,
+              includeLunch: !!monthly?.includeLunch,
             }
           : null,
       fareSnapshot,

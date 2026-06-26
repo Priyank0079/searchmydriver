@@ -51,9 +51,18 @@ export const WALLET_TXN_SOURCE = Object.freeze({
   /** Debit when an extension fareDelta is paid from the wallet. */
   BOOKING_EXTENSION_PAYMENT: 'booking_extension_payment',
   /** Credit for a cancellation fee being waived (rare; admin-driven). */
+  /** Credit when a cancellation fee is waived (rare; admin-driven). */
   CANCELLATION_FEE_WAIVED: 'cancellation_fee_waived',
   /** Debit for cancellation fee. */
   CANCELLATION_FEE: 'cancellation_fee',
+  /** Credit from successful referral. */
+  REFERRAL_REWARD: 'referral_reward',
+  /** Credit from signup bonus via referral. */
+  SIGNUP_BONUS: 'signup_bonus',
+  /** Debit for a driver withdrawal request. */
+  WITHDRAWAL: 'withdrawal',
+  /** Credit when a withdrawal is rejected/reversed. */
+  WITHDRAWAL_REJECTED: 'withdrawal_rejected',
 });
 
 export const WALLET_TXN_STATUS = Object.freeze({
@@ -64,10 +73,16 @@ export const WALLET_TXN_STATUS = Object.freeze({
 
 const walletTransactionSchema = new mongoose.Schema(
   {
+    userType: {
+      type: String,
+      enum: ['User', 'Driver'],
+      required: true,
+      default: 'User',
+    },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
       required: true,
+      refPath: 'userType',
       index: true,
     },
 
@@ -89,7 +104,7 @@ const walletTransactionSchema = new mongoose.Schema(
     /** Optional cross-link to the entity that caused this txn. */
     refType: {
       type: String,
-      enum: ['Booking', 'RazorpayOrder', 'Admin', ''],
+      enum: ['Booking', 'RazorpayOrder', 'Admin', 'Referral', 'WithdrawalRequest', ''],
       default: '',
     },
     refId: { type: String, default: '', trim: true, index: true },

@@ -47,3 +47,47 @@ export const verifyWalletTopupPayment = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, result, 'Top-up successful'));
 });
+
+import WithdrawalRequest from '../models/withdrawalRequest.model.js';
+import WalletTransaction, { WALLET_TXN_DIRECTION, WALLET_TXN_SOURCE } from '../models/walletTransaction.model.js';
+import { Driver } from '../models/driverModels/driver.model.js';
+
+export const requestWithdrawal = asyncHandler(async (req, res) => {
+  const driverId = req.driver._id;
+  const { amount, payoutMethod, payoutDetails } = req.body;
+
+  if (!amount || amount <= 0 || !payoutMethod || !payoutDetails) {
+    return res.status(400).json(new ApiResponse(400, null, 'Invalid withdrawal request details'));
+  }
+
+  const driver = await Driver.findById(driverId);
+  if (!driver || (driver.walletBalance || 0) < amount) {
+    return res.status(400).json(new ApiResponse(400, null, 'Insufficient wallet balance'));
+  }
+
+  // Deduct immediately, if rejected admin will refund
+  driver.walletBalance -= amount;
+  await driver.save();
+
+  const withdrawal = await WithdrawalRequest.create({
+    driverId,
+    amount,
+    payoutMethod,
+    payoutDetails,
+    status: 'pending',
+  });
+
+  await WalletTransaction.create({
+    userType: 'Driver',
+    userId: driverId,
+    direction: WALLET_TXN_DIRECTION.DEBIT,
+    amountRupees: amount,
+    balanceAfter: driver.walletBalance,
+    source: WALLET_TXN_SOURCE.WITHDRAWAL,
+    description: `Withdrawal request via ${payoutMethod}`,
+    refType: 'WithdrawalRequest',
+    refId: withdrawal._id,
+  });
+
+  return res.status(201).json(new ApiResponse(201, { withdrawal }, 'Withdrawal request submitted successfully'));
+});

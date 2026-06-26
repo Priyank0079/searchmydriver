@@ -1,10 +1,9 @@
 import ServicePricing from '../models/servicePricing.model.js';
-import SubscriptionPlan from '../models/subscriptionPlan.model.js';
-import UserSubscription from '../models/userSubscription.model.js';
 import User from '../models/user.model.js';
 import Zone from '../models/zone.model.js';
 import Payment from '../models/payment.model.js';
 import { Driver } from '../models/driverModels/driver.model.js';
+import PlatformSettings from '../models/platformSettings.model.js';
 import { ApiError } from '../utils/apiError.js';
 import {
   createRazorpayOrder,
@@ -14,9 +13,6 @@ import {
 import {
   SERVICE_TYPES,
   SERVICE_TYPE_LIST,
-  SUBSCRIPTION_DISCOUNT_TYPES,
-  SUBSCRIPTION_STATUS,
-  SUBSCRIPTION_ASSIGNMENT_STATUS,
 } from '../constants/serviceTypes.js';
 import {
   PAYMENT_PROVIDER,
@@ -262,344 +258,6 @@ function validateWaitingCharge(cfg) {
   }
 }
 
-// ─── Subscription plans CRUD ──────────────────────────────────────────────────
-
-function validateSubscriptionPlanFields(data) {
-  const platform = Number(data.platformSharePercent ?? 50);
-  const driver = Number(data.driverSharePercent ?? 50);
-  if (platform < 0 || driver < 0 || platform > 100 || driver > 100) {
-    throw new ApiError(400, 'platformSharePercent and driverSharePercent must be between 0 and 100');
-  }
-  if (round2(platform + driver) !== 100) {
-    throw new ApiError(400, 'platformSharePercent + driverSharePercent must equal 100');
-  }
-  if (data.bookingDiscountMinAmount != null && data.bookingDiscountMinAmount < 0) {
-    throw new ApiError(400, 'bookingDiscountMinAmount must be a non-negative number');
-  }
-  if (data.serviceChargePercent != null && (data.serviceChargePercent < 0 || data.serviceChargePercent > 100)) {
-    throw new ApiError(400, 'serviceChargePercent must be between 0 and 100');
-  }
-  if (data.gstPercent != null && (data.gstPercent < 0 || data.gstPercent > 100)) {
-    throw new ApiError(400, 'gstPercent must be between 0 and 100');
-  }
-}
-
-export function calculateSubscriptionCheckout(plan) {
-  const basePrice = round2(Number(plan.price) || 0);
-  const serviceChargePercent = Number(plan.serviceChargePercent) || 0;
-  const gstPercent = plan.gstPercent != null ? Number(plan.gstPercent) : 18;
-  const platformSharePercent = Number(plan.platformSharePercent ?? 50);
-  const driverSharePercent = Number(plan.driverSharePercent ?? 50);
-
-  const serviceCharge = round2((basePrice * serviceChargePercent) / 100);
-  const gstAmount = round2(((basePrice + serviceCharge) * gstPercent) / 100);
-  const totalPayable = round2(basePrice + serviceCharge + gstAmount);
-  const platformShareRupees = round2((basePrice * platformSharePercent) / 100);
-  const driverShareRupees = round2((basePrice * driverSharePercent) / 100);
-
-  return {
-    basePrice,
-    serviceCharge,
-    serviceChargePercent,
-    gstAmount,
-    gstPercent,
-    totalPayable,
-    platformSharePercent,
-    driverSharePercent,
-    platformShareRupees,
-    driverShareRupees,
-  };
-}
-
-export const listSubscriptionPlansService = async ({ onlyActive = false } = {}) => {
-  const filter = onlyActive ? { isActive: true } : {};
-  return SubscriptionPlan.find(filter).sort({ sortOrder: 1, durationMonths: 1 });
-};
-
-export const createSubscriptionPlanService = async (data, staffId) => {
-  if (!data.name?.trim()) throw new ApiError(400, 'name is required');
-  if (!data.durationMonths || data.durationMonths < 1) {
-    throw new ApiError(400, 'durationMonths must be at least 1');
-  }
-  if (data.price == null || data.price < 0) {
-    throw new ApiError(400, 'price must be a non-negative number');
-  }
-  if (data.bookingDiscountValue != null && data.bookingDiscountValue < 0) {
-    throw new ApiError(400, 'bookingDiscountValue must be a non-negative number');
-  }
-  if (
-    data.includedHoursPerDay != null &&
-    (data.includedHoursPerDay < 0 || data.includedHoursPerDay > 24)
-  ) {
-    throw new ApiError(400, 'includedHoursPerDay must be between 0 and 24');
-  }
-  validateSubscriptionPlanFields(data);
-  return SubscriptionPlan.create({ ...data, createdBy: staffId || null });
-};
-
-export const updateSubscriptionPlanService = async (id, data, staffId) => {
-  if (data.price != null && data.price < 0) {
-    throw new ApiError(400, 'price must be a non-negative number');
-  }
-  if (data.bookingDiscountValue != null && data.bookingDiscountValue < 0) {
-    throw new ApiError(400, 'bookingDiscountValue must be a non-negative number');
-  }
-  const existing = await SubscriptionPlan.findById(id);
-  if (!existing) throw new ApiError(404, 'Subscription plan not found');
-  validateSubscriptionPlanFields({ ...existing.toObject(), ...data });
-  const updated = await SubscriptionPlan.findByIdAndUpdate(
-    id,
-    { ...data, updatedBy: staffId || null },
-    { new: true, runValidators: true },
-  );
-  if (!updated) throw new ApiError(404, 'Subscription plan not found');
-  return updated;
-};
-
-export const deleteSubscriptionPlanService = async (id) => {
-  const deleted = await SubscriptionPlan.findByIdAndDelete(id);
-  if (!deleted) throw new ApiError(404, 'Subscription plan not found');
-  return { id };
-};
-
-// ─── Active subscription helpers ──────────────────────────────────────────────
-
-export const getActiveUserSubscriptionService = async (userId) => {
-  if (!userId) return null;
-  const now = new Date();
-  return UserSubscription.findOne({
-    userId,
-    status: SUBSCRIPTION_STATUS.ACTIVE,
-    expiryDate: { $gt: now },
-  })
-    .populate('planId', 'name includedHoursPerDay bookingDiscountType bookingDiscountValue durationMonths price')
-    .populate('assignedDriverId', 'name phone profilePicture rating')
-    .populate('zoneId', 'name city');
-};
-
-function addMonths(date, months) {
-  const next = new Date(date);
-  next.setMonth(next.getMonth() + Math.max(1, Number(months) || 1));
-  return next;
-}
-
-function buildSubscriptionSnapshot(plan) {
-  const checkout = calculateSubscriptionCheckout(plan);
-  return {
-    durationMonths: plan.durationMonths,
-    includedHoursPerDay: plan.includedHoursPerDay ?? 0,
-    bookingDiscountType: plan.bookingDiscountType || SUBSCRIPTION_DISCOUNT_TYPES.PERCENTAGE,
-    bookingDiscountValue: plan.bookingDiscountValue ?? 0,
-    bookingDiscountMinAmount: plan.bookingDiscountMinAmount ?? 0,
-    planNameSnapshot: plan.name || '',
-    basePrice: checkout.basePrice,
-    serviceCharge: checkout.serviceCharge,
-    serviceChargePercent: checkout.serviceChargePercent,
-    gstAmount: checkout.gstAmount,
-    gstPercent: checkout.gstPercent,
-    platformShareRupees: checkout.platformShareRupees,
-    driverShareRupees: checkout.driverShareRupees,
-    platformSharePercent: checkout.platformSharePercent,
-    driverSharePercent: checkout.driverSharePercent,
-  };
-}
-
-async function syncSubscriptionPaymentRecord(subscription, razorpayOrderId) {
-  return Payment.findOneAndUpdate(
-    { referenceId: subscription._id, referenceModel: 'UserSubscription' },
-    {
-      $set: {
-        provider: PAYMENT_PROVIDER.RAZORPAY,
-        purpose: PAYMENT_PURPOSE.SUBSCRIPTION,
-        referenceId: subscription._id,
-        referenceModel: 'UserSubscription',
-        razorpayOrderId,
-        amount: subscription.amount,
-        currency: 'INR',
-        status: 'created',
-        failureReason: '',
-      },
-      $unset: { razorpayPaymentId: 1, razorpaySignature: 1 },
-    },
-    { upsert: true, new: true, setDefaultsOnInsert: true },
-  );
-}
-
-export const createSubscriptionPurchaseOrderService = async (userId, planId, zoneId) => {
-  if (!planId || !zoneId) {
-    throw new ApiError(400, 'planId and zoneId are required');
-  }
-
-  const [user, plan, zone] = await Promise.all([
-    User.findById(userId).select('name email phone_no').lean(),
-    SubscriptionPlan.findOne({ _id: planId, isActive: true }),
-    Zone.findOne({ _id: zoneId, isActive: true }).select('_id name city').lean(),
-  ]);
-
-  if (!user) throw new ApiError(404, 'User not found');
-  if (!plan) throw new ApiError(404, 'Subscription plan not found or inactive');
-  if (!zone) throw new ApiError(400, 'Invalid or inactive service zone');
-
-  const existingActive = await UserSubscription.findOne({
-    userId,
-    status: SUBSCRIPTION_STATUS.ACTIVE,
-    expiryDate: { $gt: new Date() },
-  });
-  if (existingActive) {
-    throw new ApiError(409, 'You already have an active subscription');
-  }
-
-  const now = new Date();
-  const snapshot = buildSubscriptionSnapshot(plan);
-  const totalPayable = round2(snapshot.basePrice + snapshot.serviceCharge + snapshot.gstAmount);
-  let subscription = await UserSubscription.findOne({
-    userId,
-    planId,
-    status: SUBSCRIPTION_STATUS.PENDING_PAYMENT,
-  });
-
-  if (!subscription) {
-    subscription = await UserSubscription.create({
-      userId,
-      planId,
-      zoneId,
-      status: SUBSCRIPTION_STATUS.PENDING_PAYMENT,
-      startDate: now,
-      expiryDate: addMonths(now, plan.durationMonths),
-      amount: totalPayable,
-      assignmentStatus: SUBSCRIPTION_ASSIGNMENT_STATUS.PENDING,
-      ...snapshot,
-    });
-  } else {
-    subscription.zoneId = zoneId;
-    subscription.amount = totalPayable;
-    subscription.startDate = now;
-    subscription.expiryDate = addMonths(now, plan.durationMonths);
-    Object.assign(subscription, snapshot);
-    await subscription.save();
-  }
-
-  const amountPaise = Math.round(totalPayable * 100);
-  const razorpayOrder = await createRazorpayOrder({
-    amountPaise,
-    currency: 'INR',
-    receipt: `sub_${String(subscription._id).slice(-10)}_${Date.now().toString(36).slice(-4)}`,
-    notes: {
-      userSubscriptionId: String(subscription._id),
-      userId: String(userId),
-      planId: String(planId),
-      zoneId: String(zoneId),
-    },
-  });
-
-  subscription.razorpayOrderId = razorpayOrder.id;
-  await subscription.save();
-  await syncSubscriptionPaymentRecord(subscription, razorpayOrder.id);
-
-  return {
-    subscriptionId: subscription._id,
-    keyId: getRazorpayKeyId(),
-    orderId: razorpayOrder.id,
-    amount: amountPaise,
-    currency: 'INR',
-    name: 'SpareDriver',
-    description: `${plan.name} — ${plan.durationMonths} month subscription`,
-    pricing: {
-      basePrice: snapshot.basePrice,
-      serviceCharge: snapshot.serviceCharge,
-      serviceChargePercent: snapshot.serviceChargePercent,
-      gstAmount: snapshot.gstAmount,
-      gstPercent: snapshot.gstPercent,
-      totalPayable,
-      platformShareRupees: snapshot.platformShareRupees,
-      driverShareRupees: snapshot.driverShareRupees,
-    },
-    prefill: {
-      name: user.name || '',
-      email: user.email || '',
-      contact: user.phone_no ? String(user.phone_no) : '',
-    },
-  };
-};
-
-export const verifySubscriptionPaymentService = async (
-  userId,
-  { razorpayOrderId, razorpayPaymentId, razorpaySignature },
-) => {
-  if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
-    throw new ApiError(400, 'razorpayOrderId, razorpayPaymentId and razorpaySignature are required');
-  }
-
-  const subscription = await UserSubscription.findOne({ userId, razorpayOrderId });
-  if (!subscription) throw new ApiError(404, 'Subscription order not found');
-
-  if (subscription.status === SUBSCRIPTION_STATUS.ACTIVE) {
-    await subscription.populate([
-      { path: 'planId', select: 'name durationMonths includedHoursPerDay' },
-      { path: 'zoneId', select: 'name city' },
-      { path: 'assignedDriverId', select: 'name phone rating profilePicture' },
-    ]);
-    return {
-      subscription: serializeSubscriptionForUser(subscription),
-      alreadyPaid: true,
-    };
-  }
-
-  const valid = verifyRazorpayPaymentSignature({
-    orderId: razorpayOrderId,
-    paymentId: razorpayPaymentId,
-    signature: razorpaySignature,
-  });
-  if (!valid) throw new ApiError(400, 'Payment signature verification failed');
-
-  const now = new Date();
-  subscription.status = SUBSCRIPTION_STATUS.ACTIVE;
-  subscription.startDate = now;
-  subscription.expiryDate = addMonths(now, subscription.durationMonths);
-  subscription.razorpayPaymentId = razorpayPaymentId;
-  subscription.razorpaySignature = razorpaySignature;
-  subscription.paidAt = now;
-  subscription.assignmentStatus = SUBSCRIPTION_ASSIGNMENT_STATUS.PENDING;
-  await subscription.save();
-
-  if (subscription.platformShareRupees > 0) {
-    await recordPlatformRevenue({
-      source: PLATFORM_REVENUE_SOURCE.SUBSCRIPTION,
-      amountRupees: subscription.platformShareRupees,
-      userSubscriptionId: subscription._id,
-      userId: subscription.userId,
-      meta: {
-        planName: subscription.planNameSnapshot,
-        basePrice: subscription.basePrice,
-        totalPaid: subscription.amount,
-        driverShareRupees: subscription.driverShareRupees,
-        serviceCharge: subscription.serviceCharge,
-        gstAmount: subscription.gstAmount,
-      },
-      occurredAt: now,
-    }).catch(() => {});
-  }
-
-  await Payment.findOneAndUpdate(
-    { referenceId: subscription._id, referenceModel: 'UserSubscription' },
-    {
-      $set: {
-        razorpayPaymentId,
-        razorpaySignature,
-        status: 'captured',
-      },
-    },
-  );
-
-  await subscription.populate([
-    { path: 'planId', select: 'name durationMonths includedHoursPerDay bookingDiscountType bookingDiscountValue' },
-    { path: 'zoneId', select: 'name city' },
-    { path: 'assignedDriverId', select: 'name phone rating profilePicture' },
-  ]);
-
-  return { subscription: serializeSubscriptionForUser(subscription), alreadyPaid: false };
-};
-
 // ─── Fare calculation helpers ─────────────────────────────────────────────────
 
 export function findSlabForDuration(slabs = [], hours = 0) {
@@ -671,18 +329,6 @@ export function isLongDurationNight(bookedHours, nightConfig) {
   return Number(bookedHours) >= threshold;
 }
 
-function applySubscriptionDiscount(subtotal, subscription) {
-  if (!subscription || subscription.status !== SUBSCRIPTION_STATUS.ACTIVE) return 0;
-  const minAmount = Number(subscription.bookingDiscountMinAmount) || 0;
-  if (subtotal < minAmount) return 0;
-  const value = subscription.bookingDiscountValue || 0;
-  if (value <= 0) return 0;
-  const discount =
-    subscription.bookingDiscountType === SUBSCRIPTION_DISCOUNT_TYPES.PERCENTAGE
-      ? (subtotal * value) / 100
-      : value;
-  return Math.min(round2(discount), round2(subtotal));
-}
 
 /**
  * Apply the customer-facing layers (service charge, GST, subscription
@@ -703,13 +349,12 @@ function applySubscriptionDiscount(subtotal, subscription) {
  * waiting buffer reservations, etc.) keep the original "commission on
  * full subtotal" behaviour.
  */
-function applyPlatformLayers(subtotal, pricing, subscription, allowancePassThrough = 0) {
+function applyPlatformLayers(subtotal, pricing, allowancePassThrough = 0) {
   const serviceChargePercent = pricing.serviceChargePercent || 0;
   const gstPercent = pricing.gstPercent || 0;
   const serviceCharge = (subtotal * serviceChargePercent) / 100;
   const gstAmount = ((subtotal + serviceCharge) * gstPercent) / 100;
-  const subscriptionDiscount = applySubscriptionDiscount(subtotal, subscription);
-  const totalPayable = Math.max(0, subtotal + serviceCharge + gstAmount - subscriptionDiscount);
+  const totalPayable = Math.max(0, subtotal + serviceCharge + gstAmount);
 
   const platformCommissionPercent = pricing.platformCommissionPercent || 0;
   // Allowance is pass-through to the driver — never commissionable.
@@ -733,7 +378,7 @@ function applyPlatformLayers(subtotal, pricing, subscription, allowancePassThrou
     serviceChargePercent,
     gstAmount: round2(gstAmount),
     gstPercent,
-    subscriptionDiscount: round2(subscriptionDiscount),
+    subscriptionDiscount: 0,
     totalPayable: round2(totalPayable),
     platformCommission: round2(platformCommission),
     platformCommissionPercent,
@@ -767,7 +412,6 @@ export function calculateHourlyFare({
    */
   foodProvided = true,
   stayProvided = true,
-  subscription = null,
 } = {}) {
   if (!pricing) throw new ApiError(400, 'Service pricing is required for fare calculation');
 
@@ -1051,22 +695,28 @@ export const estimateFareService = async ({
   foodProvided = true,
   userId = null,
 }) => {
-  const pricing = await getServicePricingByTypeService(serviceType);
-  if (!pricing || !pricing.isActive) {
-    throw new ApiError(404, 'Pricing for this service type is not available');
+  let pricing = null;
+  if (serviceType !== SERVICE_TYPES.MONTHLY) {
+    pricing = await getServicePricingByTypeService(serviceType);
+    if (!pricing || !pricing.isActive) {
+      throw new ApiError(404, 'Pricing for this service type is not available');
+    }
   }
 
-  const subscription = userId ? await getActiveUserSubscriptionService(userId) : null;
+  const subscription = null;
   // Outstation only checks the start; hourly checks the whole booked
   // window so a 6-hour ride that starts at 18:00 still triggers night.
-  const isNight =
-    serviceType === SERVICE_TYPES.HOURLY
-      ? rideCoversNightWindow(
-          scheduledAt || new Date(),
-          Number(bookedHours) || 0,
-          pricing.nightCharge,
-        )
-      : isNightRideAt(scheduledAt || new Date(), pricing.nightCharge);
+  let isNight = false;
+  if (serviceType !== SERVICE_TYPES.MONTHLY) {
+    isNight =
+      serviceType === SERVICE_TYPES.HOURLY
+        ? rideCoversNightWindow(
+            scheduledAt || new Date(),
+            Number(bookedHours) || 0,
+            pricing.nightCharge,
+          )
+        : isNightRideAt(scheduledAt || new Date(), pricing.nightCharge);
+  }
 
   if (serviceType === SERVICE_TYPES.HOURLY) {
     let slab = null;
@@ -1112,7 +762,6 @@ export const estimateFareService = async ({
       tollParking,
       foodProvided,
       stayProvided,
-      subscription,
     });
 
     const waitingBuffer = buildWaitingBufferPreview(pricing);
@@ -1170,7 +819,6 @@ export const estimateFareService = async ({
         },
       },
       fareBreakdown: breakdown,
-      subscription: serializeSubscriptionForUser(subscription),
       // Hourly cancellation snapshot — status-driven (searching is free,
       // pre-arrival flat ₹, post-arrival flat ₹ or %). Surfaced so the
       // review/confirm page can render a "Cancellation policy" summary
@@ -1193,7 +841,6 @@ export const estimateFareService = async ({
       foodProvided,
       stayProvided,
       tollParking,
-      subscription,
     });
 
     return {
@@ -1228,6 +875,44 @@ export const estimateFareService = async ({
     };
   }
 
+  if (serviceType === SERVICE_TYPES.MONTHLY) {
+    const settings = await PlatformSettings.findOne();
+    const fee = settings?.monthlyRideRegistrationFee || 2000;
+    const total = round2(Number(fee));
+
+    return {
+      serviceType: SERVICE_TYPES.MONTHLY,
+      serviceName: 'Monthly Ride',
+      waitingBuffer: {
+        bufferRupees: 0,
+        freeWaitingMinutes: 0,
+        chargePerMinute: 0,
+        maxBillableMinutes: 0,
+        maxNoShowPrompts: 0,
+        noShowPromptMinutes: 0,
+        noShowGraceMinutes: 0,
+      },
+      isNightRide: false,
+      fareBreakdown: {
+        serviceType: SERVICE_TYPES.MONTHLY,
+        totalPayable: total,
+        platformCommission: total, // 100% of the registration fee goes to the platform
+        platformCommissionPercent: 100,
+        driverEarning: 0, // The actual monthly fare is negotiated directly with the driver
+        driverFareEarning: 0,
+        driverAllowanceEarning: 0,
+        serviceCharge: 0,
+        serviceChargePercent: 0,
+        gstAmount: 0,
+        gstPercent: 0,
+        commissionableSubtotal: total,
+        allowancePassThrough: 0,
+        subtotal: total,
+      },
+      cancellationPolicy: {},
+    };
+  }
+
   throw new ApiError(400, 'Unknown service type');
 };
 
@@ -1251,397 +936,3 @@ function buildWaitingBufferPreview(pricing) {
     noShowGraceMinutes: Math.max(0, Number(wc.noShowGraceMinutes) || 0),
   };
 }
-
-export function serializeSubscriptionForUser(subscription) {
-  if (!subscription) return null;
-  const doc = subscription.toObject ? subscription.toObject() : subscription;
-  const assigned = doc.assignedDriverId;
-  return {
-    _id: doc._id,
-    status: doc.status,
-    planNameSnapshot: doc.planNameSnapshot,
-    planId: doc.planId,
-    zoneId: doc.zoneId,
-    durationMonths: doc.durationMonths,
-    includedHoursPerDay: doc.includedHoursPerDay,
-    bookingDiscountType: doc.bookingDiscountType,
-    bookingDiscountValue: doc.bookingDiscountValue,
-    bookingDiscountMinAmount: doc.bookingDiscountMinAmount ?? 0,
-    startDate: doc.startDate,
-    expiryDate: doc.expiryDate,
-    paidAt: doc.paidAt,
-    amount: doc.amount,
-    basePrice: doc.basePrice ?? doc.amount,
-    serviceCharge: doc.serviceCharge ?? 0,
-    serviceChargePercent: doc.serviceChargePercent ?? 0,
-    gstAmount: doc.gstAmount ?? 0,
-    gstPercent: doc.gstPercent ?? 0,
-    platformShareRupees: doc.platformShareRupees ?? 0,
-    driverShareRupees: doc.driverShareRupees ?? 0,
-    assignmentStatus: doc.assignmentStatus,
-    assignedDriverId: assigned?._id || assigned || null,
-    assignedDriver: assigned && typeof assigned === 'object'
-      ? {
-        _id: assigned._id,
-        name: assigned.name,
-        phone: assigned.phone || assigned.phone_no,
-        rating: assigned.rating,
-        profilePicture: assigned.profilePicture,
-      }
-      : null,
-    driverSharePaidAt: doc.driverSharePaidAt,
-  };
-}
-
-async function creditDriverSubscriptionShare(subscription, driverId) {
-  const share = round2(Number(subscription.driverShareRupees) || 0);
-  if (share <= 0 || subscription.driverSharePaidAt) return;
-
-  const updated = await Driver.findOneAndUpdate(
-    {
-      _id: driverId,
-      isDeleted: { $ne: true },
-    },
-    {
-      $inc: {
-        'wallet.balance': share,
-        'wallet.totalEarnings': share,
-      },
-    },
-    { new: true },
-  );
-  if (!updated) return;
-
-  subscription.driverSharePaidAt = new Date();
-  subscription.driverSharePaidTo = driverId;
-}
-
-// ─── Admin: assign / release a dedicated driver to a subscription ─────────────
-
-function subscriptionWindowMs(subscription) {
-  const startMs = subscription?.startDate ? new Date(subscription.startDate).getTime() : null;
-  const endMs = subscription?.expiryDate ? new Date(subscription.expiryDate).getTime() : null;
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return null;
-  return { startMs, endMs };
-}
-
-function zoneScopeForStaff(staff) {
-  if (!staff) return [];
-  if (hasOperationalStaffAccess(staff)) return null;
-  return (staff.assignedZones || [])
-    .map((id) => String(id))
-    .filter(Boolean);
-}
-
-async function assertDriverAvailableForSubscription(subscription, driverId, { excludeSubscriptionId } = {}) {
-  const overlappingSubscription = await UserSubscription.findOne({
-    _id: { $ne: excludeSubscriptionId || subscription._id },
-    assignedDriverId: driverId,
-    status: SUBSCRIPTION_STATUS.ACTIVE,
-    assignmentStatus: SUBSCRIPTION_ASSIGNMENT_STATUS.ASSIGNED,
-    startDate: { $lt: subscription.expiryDate },
-    expiryDate: { $gt: subscription.startDate },
-  }).select('_id planNameSnapshot userId');
-
-  if (overlappingSubscription) {
-    throw new ApiError(
-      409,
-      'Driver is already assigned to another active subscription in this period',
-    );
-  }
-
-  const baseWindow = subscriptionWindowMs(subscription);
-  if (!baseWindow) return;
-
-  const bufferMinutes = SCHEDULED_BOOKING.RIDE_BUFFER_MINUTES;
-  const buffered = applyBuffer(baseWindow, bufferMinutes);
-  const driverConflictMap = await getDriverConflictMap({
-    driverIds: [driverId],
-    window: buffered,
-    bufferMinutes,
-  });
-  const conflicts = driverConflictMap[String(driverId)] || [];
-  if (conflicts.length) {
-    const err = new ApiError(
-      409,
-      'Driver is already assigned to an overlapping booking. Pick another driver.',
-    );
-    err.data = { code: 'DRIVER_CONFLICT', conflicts };
-    throw err;
-  }
-}
-
-export const assignDriverToSubscriptionService = async (subscriptionId, driverId, staffId) => {
-  const sub = await UserSubscription.findById(subscriptionId);
-  if (!sub) throw new ApiError(404, 'Subscription not found');
-  if (sub.status !== SUBSCRIPTION_STATUS.ACTIVE) {
-    throw new ApiError(400, 'Cannot assign a driver to an inactive subscription');
-  }
-
-  const driver = await Driver.findOne({
-    _id: driverId,
-    isDeleted: { $ne: true },
-    approvalStatus: 'approved',
-  }).select('_id name');
-  if (!driver) throw new ApiError(404, 'Driver not found or not approved');
-
-  await assertDriverAvailableForSubscription(sub, driverId);
-
-  if (sub.assignedDriverId) {
-    sub.previousAssignments.push({
-      driverId: sub.assignedDriverId,
-      assignedAt: sub.assignedAt,
-      releasedAt: new Date(),
-      releaseReason: 'reassigned by admin',
-    });
-  }
-
-  sub.assignedDriverId = driverId;
-  sub.assignedAt = new Date();
-  sub.assignedBy = staffId || null;
-  sub.assignmentStatus = SUBSCRIPTION_ASSIGNMENT_STATUS.ASSIGNED;
-  sub.releasedAt = null;
-  sub.releaseReason = '';
-  await creditDriverSubscriptionShare(sub, driverId);
-  await sub.save();
-  return sub;
-};
-
-export const releaseSubscriptionDriverService = async (subscriptionId, reason = '') => {
-  const sub = await UserSubscription.findById(subscriptionId);
-  if (!sub) throw new ApiError(404, 'Subscription not found');
-  if (!sub.assignedDriverId) {
-    throw new ApiError(400, 'No driver is currently assigned to this subscription');
-  }
-  sub.previousAssignments.push({
-    driverId: sub.assignedDriverId,
-    assignedAt: sub.assignedAt,
-    releasedAt: new Date(),
-    releaseReason: reason || 'released by admin',
-  });
-  sub.assignedDriverId = null;
-  sub.assignedAt = null;
-  sub.assignmentStatus = SUBSCRIPTION_ASSIGNMENT_STATUS.RELEASED;
-  sub.releasedAt = new Date();
-  sub.releaseReason = reason || '';
-  await sub.save();
-  return sub;
-};
-
-export const listSubscriptionAvailableDriversService = async (
-  subscriptionId,
-  { search, page = 1, limit = 50, staff } = {},
-) => {
-  const sub = await UserSubscription.findById(subscriptionId)
-    .populate('zoneId', 'name city')
-    .lean();
-  if (!sub) throw new ApiError(404, 'Subscription not found');
-  if (sub.status !== SUBSCRIPTION_STATUS.ACTIVE) {
-    throw new ApiError(400, 'Only active subscriptions can receive driver assignments');
-  }
-
-  const scope = zoneScopeForStaff(staff);
-  if (scope !== null) {
-    const zoneId = String(sub.zoneId?._id || sub.zoneId || '');
-    if (!scope.includes(zoneId)) {
-      throw new ApiError(404, 'Subscription not found or out of zone');
-    }
-  }
-
-  const pageNum = Math.max(1, parseInt(page, 10));
-  const limitNum = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 300);
-  const skip = (pageNum - 1) * limitNum;
-
-  const match = {
-    approvalStatus: 'approved',
-    isDeleted: { $ne: true },
-  };
-  if (search) {
-    const q = String(search).trim();
-    if (q) {
-      match.$or = [
-        { name: { $regex: q, $options: 'i' } },
-        { phone: { $regex: q, $options: 'i' } },
-      ];
-    }
-  }
-
-  const [total, drivers] = await Promise.all([
-    Driver.countDocuments(match),
-    Driver.find(match)
-      .select('name phone rating profilePicture isOnline carTypeExperience')
-      .sort({ isOnline: -1, rating: -1, createdAt: -1 })
-      .skip(skip)
-      .limit(limitNum)
-      .lean(),
-  ]);
-
-  const baseWindow = subscriptionWindowMs(sub);
-  const bufferMinutes = SCHEDULED_BOOKING.RIDE_BUFFER_MINUTES;
-  const buffered = baseWindow ? applyBuffer(baseWindow, bufferMinutes) : null;
-  const assignedDriverIds = await UserSubscription.find({
-    _id: { $ne: sub._id },
-    status: SUBSCRIPTION_STATUS.ACTIVE,
-    assignmentStatus: SUBSCRIPTION_ASSIGNMENT_STATUS.ASSIGNED,
-    assignedDriverId: { $ne: null },
-    startDate: { $lt: sub.expiryDate },
-    expiryDate: { $gt: sub.startDate },
-  })
-    .select('assignedDriverId')
-    .lean();
-  const busySubscriptionDrivers = new Set(
-    assignedDriverIds.map((row) => String(row.assignedDriverId)),
-  );
-
-  let conflictMap = {};
-  if (buffered && drivers.length) {
-    conflictMap = await getDriverConflictMap({
-      driverIds: drivers.map((d) => d._id),
-      window: buffered,
-      bufferMinutes,
-    });
-  }
-
-  const enriched = drivers.map((driver) => {
-    const id = String(driver._id);
-    const bookingConflicts = conflictMap[id] || [];
-    const hasSubscriptionConflict = busySubscriptionDrivers.has(id);
-    return {
-      ...driver,
-      conflicts: bookingConflicts,
-      hasConflict: bookingConflicts.length > 0 || hasSubscriptionConflict,
-      hasSubscriptionConflict,
-    };
-  });
-
-  return {
-    drivers: enriched,
-    total,
-    page: pageNum,
-    limit: limitNum,
-    subscriptionZone: sub.zoneId || null,
-  };
-};
-
-export const listUserSubscriptionsService = async ({
-  status,
-  assignmentStatus,
-  zoneId,
-  staff,
-  page = 1,
-  limit = 25,
-} = {}) => {
-  const filter = {};
-  if (status) filter.status = status;
-  else filter.status = SUBSCRIPTION_STATUS.ACTIVE;
-  if (assignmentStatus) filter.assignmentStatus = assignmentStatus;
-
-  const scope = zoneScopeForStaff(staff);
-  if (scope !== null) {
-    if (!scope.length) {
-      return { items: [], total: 0, page: Math.max(1, page), limit };
-    }
-    if (zoneId) {
-      if (!scope.includes(String(zoneId))) {
-        return { items: [], total: 0, page: Math.max(1, page), limit };
-      }
-      filter.zoneId = zoneId;
-    } else {
-      filter.zoneId = { $in: scope };
-    }
-  } else if (zoneId) {
-    filter.zoneId = zoneId;
-  }
-
-  const skip = (Math.max(1, page) - 1) * limit;
-  const [items, total] = await Promise.all([
-    UserSubscription.find(filter)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .populate('userId', 'name phone_no email')
-      .populate('planId', 'name durationMonths price includedHoursPerDay')
-      .populate('zoneId', 'name city')
-      .populate('assignedDriverId', 'name phone rating profilePicture'),
-    UserSubscription.countDocuments(filter),
-  ]);
-  return { items, total, page: Math.max(1, page), limit };
-};
-
-export const listSubscriptionRevenueService = async ({
-  page = 1,
-  limit = 20,
-  zoneId = '',
-  search = '',
-  from = '',
-  to = '',
-} = {}) => {
-  const filter = {
-    status: SUBSCRIPTION_STATUS.ACTIVE,
-    paidAt: { $ne: null },
-  };
-  if (zoneId) filter.zoneId = zoneId;
-  if (from || to) {
-    filter.paidAt = { ...filter.paidAt };
-    if (from) filter.paidAt.$gte = new Date(from);
-    if (to) filter.paidAt.$lte = new Date(to);
-  }
-  if (search) {
-    const q = String(search).trim();
-    filter.$or = [
-      { planNameSnapshot: { $regex: q, $options: 'i' } },
-    ];
-  }
-
-  const safeLimit = Math.max(1, Math.min(100, Number(limit) || 20));
-  const safePage = Math.max(1, Number(page) || 1);
-  const skip = (safePage - 1) * safeLimit;
-
-  const [items, total, aggregates] = await Promise.all([
-    UserSubscription.find(filter)
-      .sort({ paidAt: -1 })
-      .skip(skip)
-      .limit(safeLimit)
-      .populate('userId', 'name phone_no email')
-      .populate('zoneId', 'name city')
-      .populate('assignedDriverId', 'name phone')
-      .populate('driverSharePaidTo', 'name phone')
-      .lean(),
-    UserSubscription.countDocuments(filter),
-    UserSubscription.aggregate([
-      { $match: filter },
-      {
-        $group: {
-          _id: null,
-          totalCollected: { $sum: '$amount' },
-          totalPlatform: { $sum: '$platformShareRupees' },
-          totalDriver: { $sum: '$driverShareRupees' },
-          totalBase: { $sum: '$basePrice' },
-          count: { $sum: 1 },
-        },
-      },
-    ]),
-  ]);
-
-  const totals = aggregates[0] || {
-    totalCollected: 0,
-    totalPlatform: 0,
-    totalDriver: 0,
-    totalBase: 0,
-    count: 0,
-  };
-
-  return {
-    items,
-    total,
-    page: safePage,
-    limit: safeLimit,
-    totals: {
-      count: totals.count || 0,
-      totalCollected: round2(totals.totalCollected || 0),
-      totalPlatform: round2(totals.totalPlatform || 0),
-      totalDriver: round2(totals.totalDriver || 0),
-      totalBase: round2(totals.totalBase || 0),
-    },
-  };
-};

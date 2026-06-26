@@ -59,6 +59,12 @@ export async function getWalletService(userId) {
   };
   const balance = round2(wallet.balance || 0);
   const heldRupees = round2(wallet.heldRupees || 0);
+
+  // Also return the dynamic max usage percent if configured
+  const PlatformSettings = (await import('../models/platformSettings.model.js')).default;
+  const settings = await PlatformSettings.findOne();
+  const maxUsagePercent = settings?.referral?.user?.maxWalletUsagePercentage || 100;
+
   return {
     balance,
     heldRupees,
@@ -68,6 +74,7 @@ export async function getWalletService(userId) {
     totalCredited: round2(wallet.totalCredited || 0),
     totalSpent: round2(wallet.totalSpent || 0),
     currency: wallet.currency || 'INR',
+    maxUsagePercent,
   };
 }
 

@@ -75,6 +75,12 @@ const DEFAULT_STATE = {
     needsStay: false,
     needsFood: false,
   },
+  monthly: {
+    startDate: null,
+    endDate: null,
+    workingHoursPerDay: 9,
+    includeLunch: true,
+  },
   fareEstimate: null,
 };
 
@@ -84,7 +90,7 @@ const useBookingDraftStore = create(
       ...DEFAULT_STATE,
 
       setServiceType(serviceType) {
-        if (![SERVICE_TYPES.HOURLY, SERVICE_TYPES.OUTSTATION].includes(serviceType)) return;
+        if (![SERVICE_TYPES.HOURLY, SERVICE_TYPES.OUTSTATION, SERVICE_TYPES.MONTHLY].includes(serviceType)) return;
         // Switching service types nukes the type-specific fields so we don't
         // submit hourly + outstation data together.
         set({
@@ -92,6 +98,7 @@ const useBookingDraftStore = create(
           bookingType: null,
           hourly: { ...DEFAULT_STATE.hourly },
           outstation: { ...DEFAULT_STATE.outstation },
+          monthly: { ...DEFAULT_STATE.monthly },
           dropoff: null,
           fareEstimate: null,
         });
@@ -133,6 +140,12 @@ const useBookingDraftStore = create(
         set({ outstation: { ...get().outstation, ...patch }, fareEstimate: null });
       },
 
+      setMonthly(updates) {
+        set((state) => ({
+          monthly: { ...state.monthly, ...updates },
+        }));
+      },
+
       setFareEstimate(fareEstimate) {
         set({ fareEstimate });
       },
@@ -172,12 +185,14 @@ const useBookingDraftStore = create(
 
         const payload = {
           serviceType: s.serviceType,
-          // For outstation always send the outstation booking type —
+          // For outstation and monthly always send the booking type —
           // the backend also enforces this override, but sending it
           // from the client keeps both sides consistent.
           bookingType:
             s.serviceType === SERVICE_TYPES.OUTSTATION
               ? BOOKING_TYPE.OUTSTATION
+              : s.serviceType === SERVICE_TYPES.MONTHLY
+              ? BOOKING_TYPE.SCHEDULED
               : s.bookingType || BOOKING_TYPE.INSTANT,
           carId: s.carId || null,
           pickup: pickupPayload,
@@ -221,6 +236,14 @@ const useBookingDraftStore = create(
             nights: s.outstation.nights,
             needsStay: s.outstation.needsStay,
             needsFood: s.outstation.needsFood,
+          };
+        }
+        if (s.serviceType === SERVICE_TYPES.MONTHLY) {
+          payload.monthly = {
+            startDate: s.monthly.startDate,
+            endDate: s.monthly.endDate,
+            workingHoursPerDay: s.monthly.workingHoursPerDay,
+            includeLunch: s.monthly.includeLunch,
           };
         }
         return payload;

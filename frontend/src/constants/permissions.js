@@ -21,6 +21,7 @@ export const STAFF_PERMISSIONS = {
   SETTINGS_ZONES: 'settings_zones',
   SETTINGS_TEAM: 'settings_team',
   DRIVER_WALLET: 'driver_wallet',
+  REFERRALS: 'referrals',
 };
 
 export const PERMISSION_LABELS = {
@@ -46,4 +47,5 @@ export const PERMISSION_LABELS = {
   [STAFF_PERMISSIONS.SETTINGS_ZONES]: 'Service Zones',
   [STAFF_PERMISSIONS.SETTINGS_TEAM]: 'Team Management',
   [STAFF_PERMISSIONS.DRIVER_WALLET]: 'Driver Wallet',
+  [STAFF_PERMISSIONS.REFERRALS]: 'Refer & Earn',
 };

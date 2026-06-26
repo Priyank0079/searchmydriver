@@ -31,6 +31,7 @@ import {
 import OnlineBlockedDialog from '../../kit/components/OnlineBlockedDialog';
 import DriverKitHomeCard from '../../kit/components/DriverKitHomeCard';
 import OutstationOptInCard from '../components/OutstationOptInCard';
+import MonthlyOptInCard from '../components/MonthlyOptInCard';
 import { useDriverProfileStore } from '../../../../store/driver/useDriverProfileStore';
 import HelpDeskModal from '../../../../components/HelpDeskModal';
 
@@ -239,10 +240,13 @@ const DriverHomePage = () => {
           </Card>
         )}
 
-        <OutstationOptInCard
-          initial={!!driverProfile?.availableForOutstation}
-          initialZones={driverProfile?.preferredOutstationZones || []}
-        />
+        <div className="space-y-4">
+          <OutstationOptInCard
+            initial={!!driverProfile?.availableForOutstation}
+            initialZones={driverProfile?.preferredOutstationZones || []}
+          />
+          <MonthlyOptInCard initial={!!driverProfile?.availableForMonthlyRide} />
+        </div>
 
         {isOnline && location.error && location.permission === 'denied' && (
           <Card className="animate-fade-in-up border-l-4 border-l-danger">

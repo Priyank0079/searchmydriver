@@ -90,3 +90,17 @@ export const updateOutstationAvailability = asyncHandler(async (req, res) => {
     : "You've opted out of outstation assignments";
   return res.status(200).json(new ApiResponse(200, result, message));
 });
+
+export const updateMonthlyAvailability = asyncHandler(async (req, res) => {
+  const { available } = req.body || {};
+  const result = await driverService.updateMonthlyAvailabilityService(
+    req.driver._id,
+    {
+      available: !!available,
+    },
+  );
+  const message = result.availableForMonthlyRide
+    ? "You're now visible for monthly ride requests"
+    : "You've opted out of monthly ride requests";
+  return res.status(200).json(new ApiResponse(200, result, message));
+});

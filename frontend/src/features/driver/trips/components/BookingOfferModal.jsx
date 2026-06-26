@@ -168,6 +168,8 @@ const BookingOfferModal = () => {
   const title =
     offer.serviceType === SERVICE_TYPES.OUTSTATION
       ? `${offer.outstation?.days || 1}-day Outstation`
+      : offer.serviceType === SERVICE_TYPES.MONTHLY
+      ? `Monthly Ride (${offer.monthly?.workingHoursPerDay || 9}h/day)`
       : `${offer.hourly?.durationHours || ''}h ${SERVICE_TYPE_LABELS.hourly}`;
 
   // Distance from the driver to the customer's pickup (server-computed during
@@ -305,6 +307,18 @@ const BookingOfferModal = () => {
                 <p className="text-[11px] text-text-muted">Scheduled start</p>
                 <p className="text-sm font-medium text-text">
                   {new Date(offer.hourly.scheduledStartAt).toLocaleString()}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {offer.serviceType === SERVICE_TYPES.MONTHLY && offer.monthly?.startDate && (
+            <div className="flex items-start gap-3">
+              <Clock className="w-4 h-4 text-text-muted mt-0.5 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-[11px] text-text-muted">Monthly Start Date</p>
+                <p className="text-sm font-medium text-text">
+                  {new Date(offer.monthly.startDate).toLocaleDateString()} to {new Date(offer.monthly.endDate).toLocaleDateString()}
                 </p>
               </div>
             </div>

@@ -97,6 +97,7 @@ export async function findDriversWithinRadius({
   carTypeIds,
   excludeDriverIds,
   includeOnTrip = false,
+  requireAvailableForMonthlyRide = false,
 } = {}) {
   if (!validateCoords({ lat, lng })) return [];
 
@@ -113,6 +114,7 @@ export async function findDriversWithinRadius({
     isDeleted: false,
   };
   if (!includeOnTrip) match.isOnTrip = false;
+  if (requireAvailableForMonthlyRide) match.availableForMonthlyRide = true;
   if (excludeIds.length) match._id = { $nin: excludeIds };
   if (carTypeIds?.length) {
     const carTypeOids = carTypeIds.map(toObjectId).filter(Boolean);
@@ -206,6 +208,8 @@ export async function findDriversInExpandingRadius({
   minResults = 1,
   carTypeIds,
   excludeDriverIds,
+  requireAvailableForMonthlyRide = false,
+  includeOnTrip = false,
 } = {}) {
   if (!validateCoords({ lat, lng })) {
     return { drivers: [], radiusMeters: maxMeters };
@@ -228,6 +232,8 @@ export async function findDriversInExpandingRadius({
       limit,
       carTypeIds,
       excludeDriverIds,
+      requireAvailableForMonthlyRide,
+      includeOnTrip,
     });
 
     if (drivers.length >= target) {

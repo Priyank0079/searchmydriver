@@ -1,5 +1,9 @@
 import bcrypt from 'bcryptjs';
 import User from '../models/user.model.js';
+import { Driver } from '../models/driverModels/driver.model.js';
+import Referral from '../models/referral.model.js';
+import PlatformSettings from '../models/platformSettings.model.js';
+import WalletTransaction from '../models/walletTransaction.model.js';
 import { ApiError } from '../utils/apiError.js';
 import {
   generateAccessToken,
@@ -37,7 +41,7 @@ export const sendUserOtpService = async (phone) => {
   return { message: 'OTP sent successfully' };
 };
 
-export const verifyUserOtpAndRegisterService = async ({ name, phone, password, otp }) => {
+export const verifyUserOtpAndRegisterService = async ({ name, phone, password, otp, referralCode }) => {
   if (!name || !phone || !password || !otp) {
     throw new ApiError(400, 'All fields are required');
   }
@@ -56,6 +60,8 @@ export const verifyUserOtpAndRegisterService = async ({ name, phone, password, o
   const salt = await bcrypt.genSalt(10);
   const hashedPassword = await bcrypt.hash(password, salt);
 
+  const myReferralCode = (name.substring(0, 3).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase()).replace(/[^A-Z0-9]/g, '');
+
   const user = await User.create({
     name,
     email: `${phone}@phone.sparedriver.local`,
@@ -64,7 +70,58 @@ export const verifyUserOtpAndRegisterService = async ({ name, phone, password, o
     role: USER_ROLES.USER,
     authProvider: 'local',
     isPhoneVerified: true,
+    referralCode: myReferralCode,
   });
+
+  // Handle incoming referral code
+  if (referralCode) {
+    const code = referralCode.trim().toUpperCase();
+    let referrer = await User.findOne({ referralCode: code });
+    let referrerType = 'User';
+    
+    if (!referrer) {
+      referrer = await Driver.findOne({ referralCode: code });
+      referrerType = 'Driver';
+    }
+
+    if (referrer) {
+      const settings = await PlatformSettings.findOne();
+      const userSettings = settings?.referral?.user || {};
+      
+      if (userSettings.enabled) {
+        await Referral.create({
+          referrerId: referrer._id,
+          referrerType,
+          referredId: user._id,
+          referredType: 'User',
+          status: 'pending',
+          rewardAmount: userSettings.rewardAmount || 0,
+          signupBonusAmount: userSettings.signupBonus || 0,
+        });
+
+        if (userSettings.signupBonus > 0) {
+          user.wallet = {
+            balance: userSettings.signupBonus,
+            totalCredited: userSettings.signupBonus,
+            totalSpent: 0,
+            heldRupees: 0
+          };
+          await user.save();
+          await WalletTransaction.create({
+            userType: 'User',
+            userId: user._id,
+            direction: 'credit',
+            amountRupees: userSettings.signupBonus,
+            balanceAfter: user.wallet.balance,
+            source: 'signup_bonus',
+            description: 'Signup bonus from referral',
+            refType: 'Referral',
+            refId: null, // we don't strictly need to link the exact Referral doc here, or we could if we created it first
+          });
+        }
+      }
+    }
+  }
 
   const payload = tokenPayloadFromUser(user);
   return {
@@ -133,6 +190,11 @@ export const getUserProfileService = async (userId) => {
   const user = await User.findById(userId).populate('conditions.conditionId');
   if (!user || user.isDeleted || user.role !== USER_ROLES.USER) {
     throw new ApiError(404, 'User not found');
+  }
+
+  if (!user.referralCode) {
+    user.referralCode = 'USER' + Math.random().toString(36).substring(2, 8).toUpperCase();
+    await User.findByIdAndUpdate(userId, { referralCode: user.referralCode });
   }
 
   const cars = await Car.find({ userId, isActive: true })

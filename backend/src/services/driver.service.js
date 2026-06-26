@@ -47,7 +47,7 @@ export const sendOtpService = async (phone) => {
 };
 
 export const verifyOtpAndRegisterService = async (data) => {
-  const { phone, otp, name, password } = data;
+  const { phone, otp, name, password, referralCode } = data;
 
   if (!phone || !otp || !name || !password) {
     throw new ApiError(400, 'Missing required fields');
@@ -75,15 +75,74 @@ export const verifyOtpAndRegisterService = async (data) => {
     if (driver.onboardingStep < 1) driver.onboardingStep = 1;
     await driver.save();
   } else {
+    const myReferralCode = (name.substring(0, 3).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase()).replace(/[^A-Z0-9]/g, '');
+
     driver = new Driver({
       name,
       phone,
+      email: `${phone}@driver.sparedriver.local`, // Give them an email so they don't break
       password: hashedPassword,
       authProvider: 'local',
       onboardingStep: 1,
       approvalStatus: 'pending',
+      referralCode: myReferralCode,
     });
     await driver.save();
+    
+    // Handle incoming referral code
+    if (referralCode) {
+      const code = referralCode.trim().toUpperCase();
+      let referrer = await Driver.findOne({ referralCode: code });
+      let referrerType = 'Driver';
+      
+      if (!referrer) {
+        // We import User dynamically to avoid circular dependencies if any
+        const User = (await import('../models/user.model.js')).default;
+        referrer = await User.findOne({ referralCode: code });
+        referrerType = 'User';
+      }
+
+      if (referrer) {
+        const PlatformSettings = (await import('../models/platformSettings.model.js')).default;
+        const Referral = (await import('../models/referral.model.js')).default;
+        const WalletTransaction = (await import('../models/walletTransaction.model.js')).default;
+
+        const settings = await PlatformSettings.findOne();
+        const driverSettings = settings?.referral?.driver || {};
+        
+        if (driverSettings.enabled) {
+          await Referral.create({
+            referrerId: referrer._id,
+            referrerType,
+            referredId: driver._id,
+            referredType: 'Driver',
+            status: 'pending',
+            rewardAmount: driverSettings.rewardAmount || 0,
+            signupBonusAmount: driverSettings.signupBonus || 0,
+          });
+
+          if (driverSettings.signupBonus > 0) {
+            driver.wallet = {
+              balance: driverSettings.signupBonus,
+              totalEarnings: driverSettings.signupBonus,
+              totalWithdrawn: 0
+            };
+            await driver.save();
+            await WalletTransaction.create({
+              userType: 'Driver',
+              userId: driver._id,
+              direction: 'credit',
+              amountRupees: driverSettings.signupBonus,
+              balanceAfter: driver.wallet.balance,
+              source: 'signup_bonus',
+              description: 'Signup bonus from referral',
+              refType: 'Referral',
+              refId: null,
+            });
+          }
+        }
+      }
+    }
   }
 
   const payload = tokenPayloadFromDriver(driver);
@@ -398,6 +457,11 @@ export const getProfileService = async (driverId) => {
   if (!driver) {
     throw new ApiError(404, 'Driver not found');
   }
+
+  if (!driver.referralCode) {
+    driver.referralCode = 'DRV' + Math.random().toString(36).substring(2, 8).toUpperCase();
+    await Driver.findByIdAndUpdate(driverId, { referralCode: driver.referralCode });
+  }
   driver.documents = dedupeDocumentsByType(driver.documents);
 
   const eligibility = await syncDriverKitEligibility(driverId);
@@ -503,6 +567,29 @@ export const updateOutstationAvailabilityService = async (
   if (!driver) {
     throw new ApiError(404, 'Driver not found');
   }
+  driver.documents = dedupeDocumentsByType(driver.documents);
+  return driver.toObject();
+};
+
+/**
+ * Driver-side toggle for "I can take monthly bookings".
+ */
+export const updateMonthlyAvailabilityService = async (driverId, { available }) => {
+  const next = !!available;
+  const update = {
+    availableForMonthlyRide: next,
+  };
+
+  const driver = await Driver.findByIdAndUpdate(
+    driverId,
+    { $set: update },
+    { new: true },
+  ).populate(vehicleExperiencePopulate);
+
+  if (!driver) {
+    throw new ApiError(404, 'Driver not found');
+  }
+
   driver.documents = dedupeDocumentsByType(driver.documents);
   return driver.toObject();
 };

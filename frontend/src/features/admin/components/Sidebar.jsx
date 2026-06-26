@@ -101,6 +101,34 @@ const navItems = [
     ],
   },
   {
+    label: 'Refer & Earn',
+    icon: Sparkles,
+    roles: ['admin', 'sub_admin'],
+    children: [
+      {
+        path: '/admin/referrals',
+        label: 'Referrals List',
+        icon: Users,
+        roles: ['admin', 'sub_admin'],
+        permission: STAFF_PERMISSIONS.REFERRALS,
+      },
+      {
+        path: '/admin/referrals/withdrawals',
+        label: 'Withdrawals',
+        icon: Banknote,
+        roles: ['admin', 'sub_admin'],
+        permission: STAFF_PERMISSIONS.REFERRALS,
+      },
+      {
+        path: '/admin/settings/referrals',
+        label: 'Settings & Config',
+        icon: Settings,
+        roles: ['admin', 'sub_admin'],
+        permission: STAFF_PERMISSIONS.REFERRALS,
+      },
+    ],
+  },
+  {
     path: '/admin/fare-management',
     label: 'Fare Management',
     icon: Receipt,

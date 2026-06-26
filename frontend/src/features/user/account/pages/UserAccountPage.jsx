@@ -24,7 +24,7 @@ const menuItems = [
   { id: 'subscription', icon: Sparkles, label: 'My Subscription', path: '/user/account/subscription', dynamic: 'subscription' },
   { id: 'payments', icon: CreditCard, label: 'Payment Methods', path: '#' },
   { id: 'wallet', icon: Wallet, label: 'My Wallet', path: '/user/wallet', dynamic: 'wallet' },
-  { id: 'refer', icon: Users, label: 'Refer & Earn', path: '#' },
+  { id: 'refer', icon: Users, label: 'Refer & Earn', path: '/user/refer' },
   { id: 'help', icon: HelpCircle, label: 'Help & Support', path: '#' },
   { id: 'settings', icon: Settings, label: 'Settings', path: '#' },
 ];

@@ -62,6 +62,9 @@ const WalletPage = lazy(() => import('./features/user/wallet/pages/WalletPage'))
 const HourlyBookingTypePage = lazy(
   () => import('./features/user/booking/pages/hourly/HourlyBookingTypePage'),
 );
+const MonthlyBookingTypePage = lazy(
+  () => import('./features/user/booking/pages/monthly/MonthlyBookingTypePage'),
+);
 const OutstationBookingTypePage = lazy(
   () => import('./features/user/booking/pages/outstation/OutstationBookingTypePage'),
 );
@@ -85,8 +88,7 @@ const TripDetailsPage = lazy(
   () => import('./features/user/activity/pages/TripDetailsPage'),
 );
 const UserAccountPage = lazy(() => import('./features/user/account/pages/UserAccountPage'));
-const SubscriptionsPage = lazy(() => import('./features/user/subscriptions/pages/SubscriptionsPage'));
-const MySubscriptionPage = lazy(() => import('./features/user/account/pages/MySubscriptionPage'));
+const ReferAndEarnPage = lazy(() => import('./features/user/account/pages/ReferAndEarnPage'));
 
 // Driver Registration
 const DriverLoginPage = lazy(() => import('./features/driver/auth/pages/DriverLoginPage'));
@@ -115,8 +117,13 @@ const DriverActiveTripPage = lazy(() => import('./features/driver/trips/pages/Dr
 const EarningsPage = lazy(() => import('./features/driver/earnings/pages/EarningsPage'));
 const DriverAccountPage = lazy(() => import('./features/driver/account/pages/DriverAccountPage'));
 const DriverOrdersPage = lazy(() => import('./features/driver/account/pages/DriverOrdersPage'));
-const DriverOrderDetailPage = lazy(() => import('./features/driver/account/pages/DriverOrderDetailPage'));
-const DriverPaymentHistoryPage = lazy(() => import('./features/driver/account/pages/DriverPaymentHistoryPage'));
+const DriverOrderDetailPage = lazy(
+  () => import('./features/driver/account/pages/DriverOrderDetailPage'),
+);
+const DriverPaymentHistoryPage = lazy(
+  () => import('./features/driver/account/pages/DriverPaymentHistoryPage'),
+);
+const DriverReferAndEarnPage = lazy(() => import('./features/driver/account/pages/DriverReferAndEarnPage'));
 
 // Driver Kit
 const DriverKitPage = lazy(() => import('./features/driver/kit/pages/DriverKitPage'));
@@ -156,6 +163,9 @@ const IncomingRegistrations = lazy(() => import('./features/admin/pages/Incoming
 const DriverWallet = lazy(() => import('./features/admin/pages/DriverWallet'));
 const HelpDesk = lazy(() => import('./features/admin/pages/HelpDesk'));
 const FareManagement = lazy(() => import('./features/admin/pages/FareManagement'));
+const ManageReferrals = lazy(() => import('./features/admin/pages/ManageReferrals'));
+const ManageWithdrawals = lazy(() => import('./features/admin/pages/ManageWithdrawals'));
+const ReferralSettings = lazy(() => import('./features/admin/pages/ReferralSettings'));
 
 function PageLoader() {
   return (
@@ -195,8 +205,7 @@ function App() {
               <Route path="/user/activity" element={<ActivityPage />} />
               <Route path="/user/trips/:id" element={<TripDetailsPage />} />
               <Route path="/user/account" element={<UserAccountPage />} />
-              <Route path="/user/account/subscription" element={<MySubscriptionPage />} />
-              <Route path="/user/subscriptions" element={<SubscriptionsPage />} />
+              <Route path="/user/refer" element={<ReferAndEarnPage />} />
               <Route path="/user/wallet" element={<WalletPage />} />
               {/* Scheduled-ride parking lot: PENDING_ASSIGNMENT (worker hasn't
                   fired yet) and IN_EMERGENCY_POOL (admin is in the loop). */}
@@ -225,6 +234,7 @@ function App() {
           {/* New hourly flow: type → details → slab → searching → assigned */}
           <Route path="/user/book/hourly" element={<Navigate to="/user/book/hourly/type" replace />} />
           <Route path="/user/book/hourly/type" element={<HourlyBookingTypePage />} />
+          <Route path="/user/book/monthly/type" element={<MonthlyBookingTypePage />} />
           <Route path="/user/book/outstation/type" element={<OutstationBookingTypePage />} />
           <Route path="/user/book/hourly/details" element={<HourlyTripDetailsPage />} />
           <Route path="/user/book/hourly/slab" element={<HourlySlabSelectionPage />} />
@@ -268,6 +278,7 @@ function App() {
               <Route path="/driver/trips" element={<MyTripsPage />} />
               <Route path="/driver/earnings" element={<EarningsPage />} />
               <Route path="/driver/account" element={<DriverAccountPage />} />
+              <Route path="/driver/refer" element={<DriverReferAndEarnPage />} />
             </Route>
 
             <Route path="/driver/kit" element={<DriverKitPage />} />
@@ -357,6 +368,9 @@ function App() {
             <Route path="/admin/settings/zones" element={<ManageZones />} />
             <Route path="/admin/settings/pricing" element={<ManagePricing />} />
             <Route path="/admin/settings/subscriptions" element={<ManageSubscriptions />} />
+            <Route path="/admin/referrals" element={<ManageReferrals />} />
+            <Route path="/admin/referrals/withdrawals" element={<ManageWithdrawals />} />
+            <Route path="/admin/settings/referrals" element={<ReferralSettings />} />
             {/* Top-level /admin/revenue now forwards into the Account section
                 so all revenue management lives under one roof. */}
             <Route path="/admin/revenue" element={<Navigate to="/admin/account/revenue" replace />} />

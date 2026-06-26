@@ -154,12 +154,14 @@ const ConfirmAndPayPage = () => {
       base.scheduledAt = draft.hourly.scheduledStartAt;
       if (draft.hourly.foodProvided != null) base.foodProvided = !!draft.hourly.foodProvided;
       if (draft.hourly.stayProvided != null) base.stayProvided = !!draft.hourly.stayProvided;
-    } else {
+    } else if (draft.serviceType === SERVICE_TYPES.OUTSTATION) {
       base.days = draft.outstation.days;
       base.scheduledAt =
         draft.outstation.pickupAt || draft.outstation.startDate;
       base.foodProvided = draft.outstation.needsFood;
       base.stayProvided = draft.outstation.needsStay;
+    } else if (draft.serviceType === SERVICE_TYPES.MONTHLY) {
+      base.scheduledAt = draft.monthly.startDate;
     }
     return base;
   }, [draft]);
@@ -978,11 +980,14 @@ function FoodAcknowledgement({ thresholdHours, checked, onChange }) {
 
 function TripSummary({ draft, car, onEditCar, onEditPickup }) {
   const isHourly = draft.serviceType === SERVICE_TYPES.HOURLY;
+  const isMonthly = draft.serviceType === SERVICE_TYPES.MONTHLY;
   const schedule = isHourly
     ? draft.hourly?.scheduledStartAt
-    : draft.outstation?.pickupAt || draft.outstation?.startDate;
+    : isMonthly
+      ? draft.monthly?.startDate
+      : draft.outstation?.pickupAt || draft.outstation?.startDate;
   const expectedReturn =
-    draft.outstation?.expectedReturnAt || draft.outstation?.endDate;
+    draft.outstation?.expectedReturnAt || draft.outstation?.endDate || draft.monthly?.endDate;
   const dropAddress = draft.dropoff?.address || draft.outstation?.destinationAddress;
 
   return (
@@ -1006,7 +1011,7 @@ function TripSummary({ draft, car, onEditCar, onEditPickup }) {
                 {draft.pickup?.address}
               </p>
             </div>
-            {!isHourly && dropAddress && (
+            {!isHourly && !isMonthly && dropAddress && (
               <div className="mt-3">
                 <p className="text-xs text-text-muted">Destination</p>
                 <p className="text-sm font-medium text-text break-words">{dropAddress}</p>
@@ -1060,27 +1065,29 @@ function TripSummary({ draft, car, onEditCar, onEditPickup }) {
           <div className="flex-1 grid grid-cols-2 gap-3">
             <FactRow
               icon={Calendar}
-              label={isHourly ? 'Pickup time' : 'Pickup'}
+              label={isHourly ? 'Pickup time' : isMonthly ? 'Start Date' : 'Pickup'}
               value={formatPickupDateTime(schedule)}
             />
             {!isHourly && (
               <FactRow
                 icon={Calendar}
-                label="Expected return"
+                label={isMonthly ? 'End Date' : 'Expected return'}
                 value={formatPickupDateTime(expectedReturn)}
               />
             )}
             <FactRow
               icon={Clock}
-              label={isHourly ? 'Duration' : 'Days \u00b7 nights'}
+              label={isHourly ? 'Duration' : isMonthly ? 'Daily hours' : 'Days \u00b7 nights'}
               value={
                 isHourly
                   ? `${draft.hourly?.durationHours || 0} h`
+                  : isMonthly
+                  ? `${draft.monthly?.workingHoursPerDay || 0} hrs/day`
                   : `${draft.outstation?.days || 1} day${(draft.outstation?.days || 1) === 1 ? '' : 's'} \u00b7 ${draft.outstation?.nights || 0} night${(draft.outstation?.nights || 0) === 1 ? '' : 's'}`
               }
             />
             <FactRow icon={Car} label="Service" value={SERVICE_TYPE_LABELS[draft.serviceType]} />
-            {!isHourly && (
+            {!isHourly && !isMonthly && (
               <FactRow
                 icon={HandCoins}
                 label="Driver food & stay"
@@ -1090,6 +1097,13 @@ function TripSummary({ draft, car, onEditCar, onEditPickup }) {
                     ? 'Arranged by customer (no allowance)'
                     : 'Allowance billed per night'
                 }
+              />
+            )}
+            {isMonthly && (
+              <FactRow
+                icon={Utensils}
+                label="Driver lunch"
+                value={draft.monthly?.includeLunch ? 'Included' : 'Not included'}
               />
             )}
           </div>

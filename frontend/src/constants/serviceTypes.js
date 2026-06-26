@@ -2,6 +2,7 @@
 export const SERVICE_TYPES = Object.freeze({
   HOURLY: 'hourly',
   OUTSTATION: 'outstation',
+  MONTHLY: 'monthly',
 });
 
 export const SERVICE_TYPE_LIST = Object.freeze(Object.values(SERVICE_TYPES));
@@ -9,6 +10,7 @@ export const SERVICE_TYPE_LIST = Object.freeze(Object.values(SERVICE_TYPES));
 export const SERVICE_TYPE_LABELS = Object.freeze({
   [SERVICE_TYPES.HOURLY]: 'Hourly',
   [SERVICE_TYPES.OUTSTATION]: 'Outstation (multi-day)',
+  [SERVICE_TYPES.MONTHLY]: 'Monthly',
 });
 
 export const SERVICE_TYPE_DESCRIPTIONS = Object.freeze({
@@ -16,6 +18,8 @@ export const SERVICE_TYPE_DESCRIPTIONS = Object.freeze({
     'Hourly bookings. User picks a duration slab; extra hours billed if the ride runs over.',
   [SERVICE_TYPES.OUTSTATION]:
     'Multi-day trips. Daily rate × days + night halt × (days−1) + optional food and stay charges if the customer does not provide.',
+  [SERVICE_TYPES.MONTHLY]:
+    'Monthly subscription ride. A dynamic registration fee unlocks the feature.',
 });
 
 export const SUBSCRIPTION_DISCOUNT_TYPES = Object.freeze({

@@ -100,8 +100,7 @@ const BookDriverSection = () => {
 
       <div className="mt-4">
         <SubscriptionBanner
-          startingPrice={startingPlanPrice}
-          onClick={() => navigate('/user/subscriptions')}
+          onClick={() => navigate('/user/book/monthly/type')}
         />
       </div>
     </section>

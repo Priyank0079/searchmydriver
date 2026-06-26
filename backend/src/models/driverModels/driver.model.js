@@ -354,6 +354,11 @@ const driverSchema = new mongoose.Schema(
       ref: 'Driver',
       default: null,
     },
+    walletBalance: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
 
     // ── Trip preferences ─────────────────────────────────────────────────────
     /**
@@ -376,6 +381,11 @@ const driverSchema = new mongoose.Schema(
      * the next time they edit their preference).
      */
     availableForOutstation: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    availableForMonthlyRide: {
       type: Boolean,
       default: false,
       index: true,

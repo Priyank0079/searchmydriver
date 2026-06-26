@@ -139,6 +139,7 @@ export const updatePlatformSettingsService = async (data, updatedBy) => {
     settings.cashCancelFeeThresholdMinutes = data.cashCancelFeeThresholdMinutes ?? settings.cashCancelFeeThresholdMinutes;
     settings.cashCancelFeeAmount = data.cashCancelFeeAmount ?? settings.cashCancelFeeAmount;
     settings.driverCancelFeeAmount = data.driverCancelFeeAmount ?? settings.driverCancelFeeAmount;
+    settings.monthlyRideRegistrationFee = data.monthlyRideRegistrationFee ?? settings.monthlyRideRegistrationFee;
     settings.updatedBy = updatedBy;
     await settings.save();
   }

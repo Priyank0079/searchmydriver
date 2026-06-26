@@ -1,7 +1,7 @@
 import { Sparkles, ArrowRight, Check } from 'lucide-react';
 import { SUBSCRIPTION_BANNER } from '../constants/serviceCatalog';
 
-const SubscriptionBanner = ({ startingPrice, onClick }) => {
+const SubscriptionBanner = ({ onClick }) => {
   return (
     <button
       type="button"
@@ -37,35 +37,30 @@ const SubscriptionBanner = ({ startingPrice, onClick }) => {
             Premium
           </span>
 
-          {startingPrice ? (
-            <div className="text-right">
-              <p className="text-white/60 text-[8px] sm:text-[10px] uppercase tracking-wide leading-none">
-                Starting at
-              </p>
-              <p className="text-white text-sm sm:text-base font-extrabold whitespace-nowrap mt-0.5">
-                ₹{startingPrice}
-                <span className="text-white/70 text-[10px] sm:text-xs font-medium">/mo</span>
-              </p>
-            </div>
-          ) : (
-            <p className="text-white/70 text-[8px] sm:text-[10px] uppercase tracking-wider">Coming soon</p>
-          )}
+          <div className="text-right">
+            <p className="text-white/60 text-[8px] sm:text-[10px] uppercase tracking-wide leading-none">
+              Book for a
+            </p>
+            <p className="text-white text-sm sm:text-base font-extrabold whitespace-nowrap mt-0.5">
+              Month
+            </p>
+          </div>
         </div>
 
         {/* Title + tagline + perks — adjusted padding for mobile */}
         <div className="mt-2 sm:mt-3 pr-24 sm:pr-32 md:pr-40">
           <h3 className="text-white text-base sm:text-lg font-extrabold leading-tight">
-            {SUBSCRIPTION_BANNER.title}
+            Need a driver for the month?
           </h3>
           <p className="text-white/70 text-[11px] sm:text-xs mt-0.5 sm:mt-1 line-clamp-2">
-            {SUBSCRIPTION_BANNER.tagline}
+            Get a dedicated driver for your daily commute.
           </p>
         </div>
 
         {/* See plans CTA - smaller on mobile */}
         <div className="mt-auto pt-3 sm:pt-5">
           <span className="inline-flex items-center gap-1 sm:gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2.5 rounded-full bg-primary text-dark text-[11px] sm:text-xs font-bold shadow-md group-hover:translate-x-0.5 transition-transform">
-            See plans
+            Book Now
             <ArrowRight className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
           </span>
         </div>

@@ -46,7 +46,9 @@ const PlatformSettings = () => {
   const [policyForm, setPolicyForm] = useState({
     cashCancelFeeThresholdMinutes: 30,
     cashCancelFeeAmount: 50,
+    cashCancelFeeAmount: 50,
     driverCancelFeeAmount: 50,
+    monthlyRideRegistrationFee: 2000,
   });
 
   const fetchData = useCallback(async ({ silent = false } = {}) => {
@@ -66,7 +68,9 @@ const PlatformSettings = () => {
         setPolicyForm({
           cashCancelFeeThresholdMinutes: platformSettingsRes.data.data.cashCancelFeeThresholdMinutes ?? 30,
           cashCancelFeeAmount: platformSettingsRes.data.data.cashCancelFeeAmount ?? 50,
+          cashCancelFeeAmount: platformSettingsRes.data.data.cashCancelFeeAmount ?? 50,
           driverCancelFeeAmount: platformSettingsRes.data.data.driverCancelFeeAmount ?? 50,
+          monthlyRideRegistrationFee: platformSettingsRes.data.data.monthlyRideRegistrationFee ?? 2000,
         });
       }
     } catch (err) {
@@ -232,6 +236,24 @@ const PlatformSettings = () => {
                       min="0"
                       value={policyForm.cashCancelFeeAmount}
                       onChange={(e) => setPolicyForm({ ...policyForm, cashCancelFeeAmount: Number(e.target.value) })}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <hr className="border-slate-200" />
+
+                {/* Monthly Rides Policy */}
+                <div>
+                  <h3 className="text-xl font-bold text-slate-800">Monthly Rides Policy</h3>
+                  <p className="text-sm text-slate-500 mt-1 mb-4">Configure registration fees for monthly subscriptions.</p>
+                  <div className="space-y-4">
+                    <Input
+                      label="Monthly Ride Registration Fee (₹)"
+                      type="number"
+                      min="0"
+                      value={policyForm.monthlyRideRegistrationFee}
+                      onChange={(e) => setPolicyForm({ ...policyForm, monthlyRideRegistrationFee: Number(e.target.value) })}
                       required
                     />
                   </div>

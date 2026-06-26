@@ -32,8 +32,6 @@ export const PLATFORM_REVENUE_SOURCE = Object.freeze({
   CANCELLATION_FEE: 'cancellation_fee',
   /** Driver cancellation penalty — entire amount goes to the platform. */
   DRIVER_PENALTY: 'driver_penalty',
-  /** Platform share of a subscription purchase. */
-  SUBSCRIPTION: 'subscription',
   /** Manual deduction taken by an admin. */
   ADMIN_ADJUSTMENT: 'admin_adjustment',
 });
@@ -51,16 +49,10 @@ const platformRevenueSchema = new mongoose.Schema(
     amountRupees: { type: Number, required: true, min: 0 },
     currency: { type: String, default: 'INR', trim: true },
 
-    /** Originating booking — absent for subscription revenue rows. */
+    /** Originating booking. */
     bookingId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Booking',
-      default: null,
-      index: true,
-    },
-    userSubscriptionId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'UserSubscription',
       default: null,
       index: true,
     },

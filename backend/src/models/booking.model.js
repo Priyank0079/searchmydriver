@@ -74,6 +74,16 @@ const outstationDetailsSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const monthlyDetailsSchema = new mongoose.Schema(
+  {
+    startDate: { type: Date, required: true },
+    endDate: { type: Date, required: true },
+    workingHoursPerDay: { type: Number, required: true },
+    includeLunch: { type: Boolean, default: false },
+  },
+  { _id: false },
+);
+
 /** Snapshot of pricing engine output at booking-creation time. */
 const fareSnapshotSchema = new mongoose.Schema(
   {
@@ -86,7 +96,6 @@ const fareSnapshotSchema = new mongoose.Schema(
     total: { type: Number, required: true, min: 0 },
     /** Full pricing engine output retained for display + audit. */
     breakdown: { type: mongoose.Schema.Types.Mixed, default: {} },
-    subscriptionId: { type: mongoose.Schema.Types.ObjectId, ref: 'UserSubscription', default: null },
   },
   { _id: false },
 );
@@ -347,6 +356,7 @@ const bookingSchema = new mongoose.Schema(
 
     hourly: { type: hourlyDetailsSchema, default: null },
     outstation: { type: outstationDetailsSchema, default: null },
+    monthly: { type: monthlyDetailsSchema, default: null },
 
     fareSnapshot: { type: fareSnapshotSchema, required: true },
 

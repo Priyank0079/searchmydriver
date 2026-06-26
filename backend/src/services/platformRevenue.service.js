@@ -36,7 +36,6 @@ export async function recordPlatformRevenue({
   source,
   amountRupees,
   bookingId = null,
-  userSubscriptionId = null,
   bookingNumber = '',
   serviceType = '',
   userId = null,
@@ -49,11 +48,7 @@ export async function recordPlatformRevenue({
   }
   const amt = round2(Number(amountRupees) || 0);
   if (amt <= 0) return null;
-  if (source === PLATFORM_REVENUE_SOURCE.SUBSCRIPTION) {
-    if (!userSubscriptionId) {
-      throw new ApiError(400, 'userSubscriptionId is required for subscription revenue');
-    }
-  } else if (!bookingId) {
+  if (!bookingId) {
     throw new ApiError(400, 'bookingId is required');
   }
 
@@ -61,7 +56,6 @@ export async function recordPlatformRevenue({
     source,
     amountRupees: amt,
     bookingId: bookingId || null,
-    userSubscriptionId: userSubscriptionId || null,
     bookingNumber: bookingNumber ? String(bookingNumber).slice(0, 80) : '',
     serviceType: serviceType ? String(serviceType).slice(0, 40) : '',
     userId: userId || null,

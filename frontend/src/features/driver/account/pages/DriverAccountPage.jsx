@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   User,
+  Users,
   FileText,
   Building2,
   Car,
@@ -61,6 +62,7 @@ const MENU_GROUPS = [
       { icon: User, label: 'My Profile' },
       { icon: FileText, label: 'Documents' },
       { icon: Building2, label: 'Bank Details' },
+      { icon: Users, label: 'Refer & Earn', path: '/driver/refer' },
     ],
   },
   {
