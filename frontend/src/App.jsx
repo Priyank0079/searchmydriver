@@ -147,7 +147,7 @@ const AdminHomeRedirect = lazy(() => import('./features/admin/pages/AdminHomeRed
 const ManageDrivers = lazy(() => import('./features/admin/pages/ManageDrivers'));
 const DriverProfilePage = lazy(() => import('./features/admin/pages/DriverProfilePage'));
 const ManageUsers = lazy(() => import('./features/admin/pages/ManageUsers'));
-const UserProfilePage = lazy(() => import('./features/admin/pages/UserProfilePage'));
+const AdminUserProfilePage = lazy(() => import('./features/admin/pages/UserProfilePage'));
 const ManageBookings = lazy(() => import('./features/admin/pages/ManageBookings'));
 const ManageEmergencyPool = lazy(() => import('./features/admin/pages/ManageEmergencyPool'));
 const ManageOutstationAssignments = lazy(() => import('./features/admin/pages/ManageOutstationAssignments'));
@@ -341,7 +341,7 @@ function App() {
           <Route element={<AdminLayout />}>
             <Route path="/admin" element={<AdminHomeRedirect />} />
             <Route path="/admin/users" element={<ManageUsers />} />
-            <Route path="/admin/users/:userId/profile" element={<UserProfilePage />} />
+            <Route path="/admin/users/:userId/profile" element={<AdminUserProfilePage />} />
             <Route path="/admin/profile" element={<StaffProfilePage />} />
             
             <Route path="/admin/incoming-registrations" element={<IncomingRegistrations />} />
