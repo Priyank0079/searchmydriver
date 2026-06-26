@@ -1,6 +1,6 @@
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiResponse } from '../utils/apiResponse.js';
-import { setAuthCookies } from '../utils/cookie.util.js';
+import { setAuthCookies, clearAuthCookies } from '../utils/cookie.util.js';
 import * as userService from '../services/user.service.js';
 
 export const sendUserOtp = asyncHandler(async (req, res) => {
@@ -72,4 +72,10 @@ export const addSavedLocation = asyncHandler(async (req, res) => {
 export const deleteSavedLocation = asyncHandler(async (req, res) => {
   await userService.deleteSavedLocationService(req.user._id, req.params.id);
   return res.status(200).json(new ApiResponse(200, null, 'Saved location removed'));
+});
+
+export const deleteMyAccount = asyncHandler(async (req, res) => {
+  const result = await userService.deleteUserAccountService(req.user._id);
+  clearAuthCookies(res);
+  return res.status(200).json(new ApiResponse(200, result, 'Account deleted successfully'));
 });

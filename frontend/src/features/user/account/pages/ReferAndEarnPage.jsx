@@ -17,14 +17,19 @@ export default function ReferAndEarnPage() {
 
   const fetchStats = async () => {
     try {
+      if (!user?._id) {
+        setLoading(false);
+        return;
+      }
+
       if (!user?.referralCode) {
         const profileRes = await api.get(`/auth/users/${user._id}/profile`);
         if (profileRes.data?.data?.user) {
           useUserAuthStore.getState().setAuth(profileRes.data.data.user);
         }
       }
-      
-      const res = await api.get('/auth/wallet/transactions');
+
+      await api.get('/auth/wallet/transactions');
       setLoading(false);
     } catch (err) {
       setLoading(false);

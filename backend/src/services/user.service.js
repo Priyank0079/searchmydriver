@@ -1,10 +1,12 @@
 import bcrypt from 'bcryptjs';
 import User from '../models/user.model.js';
 import { Driver } from '../models/driverModels/driver.model.js';
+import Booking from '../models/booking.model.js';
 import Referral from '../models/referral.model.js';
 import PlatformSettings from '../models/platformSettings.model.js';
 import WalletTransaction from '../models/walletTransaction.model.js';
 import { ApiError } from '../utils/apiError.js';
+import { ACTIVE_BOOKING_STATUSES } from '../constants/bookingStatus.js';
 import {
   generateAccessToken,
   generateRefreshToken,
@@ -413,4 +415,32 @@ export const deleteSavedLocationService = async (userId, locationId) => {
   }
   await user.save();
   return { id: locationId };
+};
+
+export const deleteUserAccountService = async (userId) => {
+  const user = await User.findById(userId);
+  if (!user || user.isDeleted || user.role !== USER_ROLES.USER) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  const activeBookings = await Booking.countDocuments({
+    userId,
+    isDeleted: false,
+    status: { $in: ACTIVE_BOOKING_STATUSES },
+  });
+
+  if (activeBookings > 0) {
+    throw new ApiError(409, 'Finish or cancel your active bookings before deleting your account');
+  }
+
+  user.isDeleted = true;
+  user.isActive = false;
+  user.deletedAt = new Date();
+  user.fcmToken = '';
+  await user.save();
+
+  return {
+    id: user._id,
+    deletedAt: user.deletedAt,
+  };
 };

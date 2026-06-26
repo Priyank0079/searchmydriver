@@ -88,7 +88,14 @@ const TripDetailsPage = lazy(
   () => import('./features/user/activity/pages/TripDetailsPage'),
 );
 const UserAccountPage = lazy(() => import('./features/user/account/pages/UserAccountPage'));
+const UserPrivacyPage = lazy(() => import('./features/user/account/pages/PrivacyPage'));
 const ReferAndEarnPage = lazy(() => import('./features/user/account/pages/ReferAndEarnPage'));
+const MySubscriptionPage = lazy(() => import('./features/user/account/pages/MySubscriptionPage'));
+const UserSubscriptionsPage = lazy(() => import('./features/user/account/pages/SubscriptionsPage'));
+const UserProfilePage = lazy(() => import('./features/user/account/pages/UserProfilePage'));
+const UserPaymentMethodsPage = lazy(() => import('./features/user/account/pages/PaymentMethodsPage'));
+const UserSettingsPage = lazy(() => import('./features/user/account/pages/SettingsPage'));
+const UserHelpSupportPage = lazy(() => import('./features/user/account/pages/HelpSupportPage'));
 
 // Driver Registration
 const DriverLoginPage = lazy(() => import('./features/driver/auth/pages/DriverLoginPage'));
@@ -116,6 +123,10 @@ const DriverActiveTripPage = lazy(() => import('./features/driver/trips/pages/Dr
 // Driver Dashboard
 const EarningsPage = lazy(() => import('./features/driver/earnings/pages/EarningsPage'));
 const DriverAccountPage = lazy(() => import('./features/driver/account/pages/DriverAccountPage'));
+const DriverAccountProfilePage = lazy(() => import('./features/driver/account/pages/DriverProfilePage'));
+const DriverAccountDocumentsPage = lazy(() => import('./features/driver/account/pages/DriverDocumentsPage'));
+const DriverAccountBankDetailsPage = lazy(() => import('./features/driver/account/pages/DriverBankDetailsPage'));
+const DriverPrivacyPage = lazy(() => import('./features/driver/account/pages/PrivacyPage'));
 const DriverOrdersPage = lazy(() => import('./features/driver/account/pages/DriverOrdersPage'));
 const DriverOrderDetailPage = lazy(
   () => import('./features/driver/account/pages/DriverOrderDetailPage'),
@@ -205,6 +216,13 @@ function App() {
               <Route path="/user/activity" element={<ActivityPage />} />
               <Route path="/user/trips/:id" element={<TripDetailsPage />} />
               <Route path="/user/account" element={<UserAccountPage />} />
+              <Route path="/user/account/profile" element={<UserProfilePage />} />
+              <Route path="/user/account/subscription" element={<MySubscriptionPage />} />
+              <Route path="/user/subscriptions" element={<UserSubscriptionsPage />} />
+              <Route path="/user/account/payment-methods" element={<UserPaymentMethodsPage />} />
+              <Route path="/user/account/help" element={<UserHelpSupportPage />} />
+              <Route path="/user/account/settings" element={<UserSettingsPage />} />
+              <Route path="/user/privecy" element={<UserPrivacyPage />} />
               <Route path="/user/refer" element={<ReferAndEarnPage />} />
               <Route path="/user/wallet" element={<WalletPage />} />
               {/* Scheduled-ride parking lot: PENDING_ASSIGNMENT (worker hasn't
@@ -278,6 +296,10 @@ function App() {
               <Route path="/driver/trips" element={<MyTripsPage />} />
               <Route path="/driver/earnings" element={<EarningsPage />} />
               <Route path="/driver/account" element={<DriverAccountPage />} />
+              <Route path="/driver/account/profile" element={<DriverAccountProfilePage />} />
+              <Route path="/driver/account/documents" element={<DriverAccountDocumentsPage />} />
+              <Route path="/driver/account/bank-details" element={<DriverAccountBankDetailsPage />} />
+              <Route path="/driver/privecy" element={<DriverPrivacyPage />} />
               <Route path="/driver/refer" element={<DriverReferAndEarnPage />} />
             </Route>
 

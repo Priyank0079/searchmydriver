@@ -13,6 +13,8 @@ import { ArrowLeft, FileText, Calendar, Briefcase } from 'lucide-react';
 import api from '../../../../utils/api';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
 import { useDocumentsManager } from '../../../../hooks/useDocumentsManager';
+import { useDriverProfileStore } from '../../../../store/driver/useDriverProfileStore';
+import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
 
 import { DRIVER_ONBOARDING_STEPS } from '../../../../utils/driverOnboarding';
 const CREDENTIAL_DOC_TYPES = ['driving_license', 'live_selfie', 'address_proof', 'police_verification', 'driver_registration'];
@@ -133,6 +135,7 @@ const DrivingCredentialsPage = () => {
         },
       });
 
+      await useDriverProfileStore.getState().refresh(buildCacheKey('driver-profile', {}), {});
       updateDriver({ onboardingStep: 3 });
       navigate('/driver/register/bank');
     } catch (error) {

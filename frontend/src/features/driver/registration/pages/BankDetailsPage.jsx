@@ -6,6 +6,8 @@ import StepIndicator from '../../../../components/StepIndicator';
 import { ArrowLeft, User, Hash, Building2, CreditCard } from 'lucide-react';
 import api from '../../../../utils/api';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
+import { useDriverProfileStore } from '../../../../store/driver/useDriverProfileStore';
+import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
 
 import { DRIVER_ONBOARDING_STEPS } from '../../../../utils/driverOnboarding';
 
@@ -57,6 +59,7 @@ const BankDetailsPage = () => {
         stepData
       });
 
+      await useDriverProfileStore.getState().refresh(buildCacheKey('driver-profile', {}), {});
       updateDriver({ onboardingStep: 4 });
       navigate('/driver/register/safety');
     } catch (error) {

@@ -7,6 +7,8 @@ import LiveVerificationInstructions from '../components/LiveVerificationInstruct
 import SavedVerificationVideo from '../components/SavedVerificationVideo';
 import useLiveVerification from '../../../../hooks/useLiveVerification';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
+import { useDriverProfileStore } from '../../../../store/driver/useDriverProfileStore';
+import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
 import { LIVE_VERIFICATION_MIN_SECONDS } from '../../../../utils/driverOnboarding';
 import api from '../../../../utils/api';
 
@@ -53,6 +55,7 @@ const LiveVerificationPage = () => {
     try {
       setIsSkipping(true);
       await api.put('/driver/onboarding/step', { stepNumber: 5 });
+      await useDriverProfileStore.getState().refresh(buildCacheKey('driver-profile', {}), {});
       updateDriver({ onboardingStep: 5 });
       handleContinue();
     } catch (err) {

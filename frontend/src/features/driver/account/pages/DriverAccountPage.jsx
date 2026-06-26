@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   User,
@@ -7,10 +7,11 @@ import {
   Building2,
   Car,
   HelpCircle,
-  Settings,
   LogOut,
   ChevronRight,
   Package,
+  ShieldCheck,
+  Trash2,
   ShoppingBag,
   History,
   Phone,
@@ -18,7 +19,6 @@ import {
   Star,
   Wallet,
   IdCard,
-  ShieldCheck,
   Circle,
   Calendar,
   Briefcase,
@@ -28,6 +28,10 @@ import Avatar from '../../../../components/Avatar';
 import Badge from '../../../../components/Badge';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
 import { useDriverProfileStore } from '../../../../store/driver/useDriverProfileStore';
+import ConfirmDialog from '../../../../components/ConfirmDialog';
+import HelpDeskModal from '../../../../components/HelpDeskModal';
+import api from '../../../../utils/api';
+import toast from 'react-hot-toast';
 import { useDriverHomeSummaryStore } from '../../../../store/driver/useDriverTripsStore';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
@@ -59,17 +63,17 @@ const MENU_GROUPS = [
   {
     title: 'Account',
     items: [
-      { icon: User, label: 'My Profile' },
-      { icon: FileText, label: 'Documents' },
-      { icon: Building2, label: 'Bank Details' },
+      { icon: User, label: 'My Profile', path: '/driver/account/profile' },
+      { icon: FileText, label: 'Documents', path: '/driver/account/documents' },
+      { icon: Building2, label: 'Bank Details', path: '/driver/account/bank-details' },
       { icon: Users, label: 'Refer & Earn', path: '/driver/refer' },
+      { icon: ShieldCheck, label: 'Privacy Policy', path: '/driver/privecy' },
     ],
   },
   {
     title: 'Help',
     items: [
-      { icon: HelpCircle, label: 'Help & Support' },
-      { icon: Settings, label: 'Settings' },
+      { icon: HelpCircle, label: 'Help & Support', action: 'support' },
     ],
   },
 ];
@@ -83,10 +87,13 @@ const DriverAccountPage = () => {
   const cachedDriver = useDriverAuthStore((s) => s.driver);
   const updateDriver = useDriverAuthStore((s) => s.updateDriver);
   const logout = useDriverAuthStore((s) => s.logout);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [supportOpen, setSupportOpen] = useState(false);
 
   const profileKey = buildCacheKey('driver-profile', {});
   const summaryKey = buildCacheKey('driver-home-summary', {});
-  const { data: profile } = useCachedQuery(useDriverProfileStore, profileKey, {});
+  const { data: profile, refetch } = useCachedQuery(useDriverProfileStore, profileKey, {});
   const { data: summary } = useCachedQuery(useDriverHomeSummaryStore, summaryKey, {});
 
   // Hydrate the persisted auth-store copy so other surfaces (BottomNav badge,
@@ -103,6 +110,10 @@ const DriverAccountPage = () => {
       canGoOnline: profile.canGoOnline,
     });
   }, [profile, updateDriver]);
+
+  useEffect(() => {
+    refetch().catch(() => {});
+  }, [refetch]);
 
   // Memoise the resolved driver doc so downstream `useMemo`s have a stable
   // reference — `profile || cachedDriver || {}` would otherwise produce a new
@@ -179,6 +190,22 @@ const DriverAccountPage = () => {
   const handleLogout = () => {
     logout();
     navigate('/driver/login');
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      await api.delete('/driver/account');
+      toast.success('Account deleted successfully');
+      logout();
+      navigate('/driver/login', { replace: true });
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to delete account');
+    } finally {
+      setDeleting(false);
+      setDeleteOpen(false);
+    }
   };
 
   return (
@@ -261,8 +288,14 @@ const DriverAccountPage = () => {
                 <li key={item.label}>
                   <button
                     type="button"
-                    onClick={() => item.path && navigate(item.path)}
-                    disabled={!item.path}
+                    onClick={() => {
+                      if (item.action === 'support') {
+                        setSupportOpen(true);
+                        return;
+                      }
+                      if (item.path) navigate(item.path);
+                    }}
+                    disabled={!item.path && item.action !== 'support'}
                     className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-default text-left"
                   >
                     <div className="w-9 h-9 rounded-lg bg-bg flex items-center justify-center shrink-0">
@@ -282,14 +315,42 @@ const DriverAccountPage = () => {
         </div>
       ))}
 
-      <button
-        type="button"
-        onClick={handleLogout}
-        className="w-full flex items-center justify-center gap-2 py-3.5 bg-white rounded-2xl shadow-card text-danger font-medium text-sm hover:bg-danger-light transition-colors"
-      >
-        <LogOut className="w-4 h-4" />
-        Logout
-      </button>
+      <div className="space-y-3">
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="w-full flex items-center justify-center gap-2 py-3.5 bg-white rounded-2xl shadow-card text-danger font-medium text-sm hover:bg-danger-light transition-colors"
+        >
+          <LogOut className="w-4 h-4" />
+          Logout
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setDeleteOpen(true)}
+          className="w-full flex items-center justify-center gap-2 py-3.5 bg-white border border-red-200 rounded-2xl shadow-card text-red-600 font-semibold text-sm hover:bg-red-50 transition-colors"
+        >
+          <Trash2 className="w-4 h-4" />
+          Delete Account
+        </button>
+      </div>
+
+      <ConfirmDialog
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        onConfirm={handleDeleteAccount}
+        title="Delete your account?"
+        description="This permanently deletes your driver account and signs you out. Active trips must be completed or cancelled first."
+        confirmLabel="Delete account"
+        variant="danger"
+        loading={deleting}
+      />
+
+      <HelpDeskModal
+        isOpen={supportOpen}
+        onClose={() => setSupportOpen(false)}
+        userType="driver"
+      />
 
       <p className="text-center text-[11px] text-text-muted pt-1">
         Driver ID {driver?._id ? short(driver._id) : '—'}

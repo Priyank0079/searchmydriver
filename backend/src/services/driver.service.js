@@ -2,9 +2,11 @@ import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 import { OTP } from '../models/otp.model.js';
 import { Driver } from '../models/driverModels/driver.model.js';
+import Booking from '../models/booking.model.js';
 import Zone from '../models/zone.model.js';
 import { ApiError } from '../utils/apiError.js';
 import { sendSmsOtp } from '../utils/otpService.js';
+import { ACTIVE_BOOKING_STATUSES } from '../constants/bookingStatus.js';
 import {
   generateAccessToken,
   generateRefreshToken,
@@ -592,4 +594,39 @@ export const updateMonthlyAvailabilityService = async (driverId, { available }) 
 
   driver.documents = dedupeDocumentsByType(driver.documents);
   return driver.toObject();
+};
+
+export const deleteDriverAccountService = async (driverId) => {
+  const driver = await Driver.findById(driverId);
+  if (!driver || driver.isDeleted) {
+    throw new ApiError(404, 'Driver not found');
+  }
+
+  const activeBookings = await Booking.countDocuments({
+    driverId,
+    isDeleted: false,
+    status: { $in: ACTIVE_BOOKING_STATUSES },
+  });
+
+  if (activeBookings > 0) {
+    throw new ApiError(409, 'Finish or cancel your active trips before deleting your account');
+  }
+
+  driver.isDeleted = true;
+  driver.deletedAt = new Date();
+  driver.isOnline = false;
+  driver.isOnTrip = false;
+  driver.currentBookingId = null;
+  driver.socketId = null;
+  driver.fcmToken = '';
+  driver.canGoOnline = false;
+  driver.availableForOutstation = false;
+  driver.availableForMonthlyRide = false;
+  driver.preferredOutstationZones = [];
+  await driver.save();
+
+  return {
+    id: driver._id,
+    deletedAt: driver.deletedAt,
+  };
 };

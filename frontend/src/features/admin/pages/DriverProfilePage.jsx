@@ -10,6 +10,7 @@ import {
   Mail,
   Phone,
   RefreshCw,
+  ShieldAlert,
   Video,
 } from 'lucide-react';
 import Avatar from '../../../components/Avatar';
@@ -111,6 +112,7 @@ const DriverProfilePage = () => {
   }
 
   const { driver, training, trainingComplete } = profile;
+  const isDeleted = Boolean(driver.isDeleted);
   const selfie = driver.documents?.find((d) => d.type === 'selfie')?.fileUrl;
   const carLabels = (driver.carTypeExperience || []).map(getCarTypeLabel).filter(Boolean);
   const vehicleExperience = driver.vehicleExperience || [];
@@ -144,6 +146,16 @@ const DriverProfilePage = () => {
           </button>
         </div>
       </div>
+
+      {isDeleted && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 flex items-start gap-3">
+          <ShieldAlert className="w-5 h-5 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold">Deleted account</p>
+            <p className="text-sm">Deleted at {driver.deletedAt ? formatDate(driver.deletedAt) : '?'}</p>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center gap-5">

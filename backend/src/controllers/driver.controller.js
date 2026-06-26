@@ -1,6 +1,6 @@
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiResponse } from '../utils/apiResponse.js';
-import { setAuthCookies } from '../utils/cookie.util.js';
+import { setAuthCookies, clearAuthCookies } from '../utils/cookie.util.js';
 import * as driverService from '../services/driver.service.js';
 
 export const sendOtp = asyncHandler(async (req, res) => {
@@ -103,4 +103,10 @@ export const updateMonthlyAvailability = asyncHandler(async (req, res) => {
     ? "You're now visible for monthly ride requests"
     : "You've opted out of monthly ride requests";
   return res.status(200).json(new ApiResponse(200, result, message));
+});
+
+export const deleteMyAccount = asyncHandler(async (req, res) => {
+  const result = await driverService.deleteDriverAccountService(req.driver._id);
+  clearAuthCookies(res);
+  return res.status(200).json(new ApiResponse(200, result, 'Account deleted successfully'));
 });

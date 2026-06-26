@@ -14,6 +14,7 @@ import {
   listSavedLocations,
   addSavedLocation,
   deleteSavedLocation,
+  deleteMyAccount,
 } from '../controllers/user.controller.js';
 import {
   googleSignInUser,
@@ -63,6 +64,7 @@ router.post('/google', googleSignInUser);
 router.post('/google/link-phone/otp', sendGoogleLinkPhoneOtp);
 router.post('/refresh-token', refreshAccessToken);
 router.post('/logout', logout);
+router.delete('/account', protectUser, deleteMyAccount);
 
 // Public pricing reads (used by the booking flow before checkout)
 router.get('/pricing/services', getActiveServicePricings);

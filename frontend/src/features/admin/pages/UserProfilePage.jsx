@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Car, Loader2, Mail, Phone, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Car, Loader2, Mail, Phone, RefreshCw, ShieldAlert } from 'lucide-react';
 import Avatar from '../../../components/Avatar';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { buildCacheKey } from '../../../store/lib/buildCacheKey';
@@ -50,6 +50,7 @@ const UserProfilePage = () => {
   }
 
   const { user, cars, checklist, hasChecklist, carsCount } = profile;
+  const isDeleted = Boolean(user.isDeleted);
 
   return (
     <div className="space-y-6 animate-fade-in-up pb-8">
@@ -65,6 +66,16 @@ const UserProfilePage = () => {
           Refresh
         </button>
       </div>
+
+      {isDeleted && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 flex items-start gap-3">
+          <ShieldAlert className="w-5 h-5 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold">Deleted account</p>
+            <p className="text-sm">Deleted at {user.deletedAt ? formatDate(user.deletedAt) : '?'}</p>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center gap-5">

@@ -13,6 +13,7 @@ import {
   reopenRejectedApplication,
   updateOutstationAvailability,
   updateMonthlyAvailability,
+  deleteMyAccount,
 } from '../controllers/driver.controller.js';
 import { uploadVideo as uploadVideoMiddleware } from '../middlewares/multer.js';
 import {
@@ -86,6 +87,7 @@ router.put('/training/progress', protectDriver, updateTrainingProgress);
 router.post('/onboarding/submit', protectDriver, submitApplication);
 router.post('/application/reopen', protectDriver, reopenRejectedApplication);
 router.get('/profile', protectDriver, getProfile);
+router.delete('/account', protectDriver, deleteMyAccount);
 // Driver-side preferences \u2014 currently only the outstation opt-in
 // for the admin-managed outstation queue.
 router.put(

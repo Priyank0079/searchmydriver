@@ -7,6 +7,8 @@ import { ArrowLeft } from 'lucide-react';
 import api from '../../../../utils/api';
 import useDriverAuthStore from '../../../../store/useDriverAuthStore';
 import { useDocumentsManager } from '../../../../hooks/useDocumentsManager';
+import { useDriverProfileStore } from '../../../../store/driver/useDriverProfileStore';
+import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
 
 import { DRIVER_ONBOARDING_STEPS } from '../../../../utils/driverOnboarding';
 const SAFETY_DOC_TYPES = ['aadhaar_front', 'aadhaar_back', 'police_verification'];
@@ -57,6 +59,7 @@ const SafetyProtocolPage = () => {
         },
       });
 
+      await useDriverProfileStore.getState().refresh(buildCacheKey('driver-profile', {}), {});
       updateDriver({ onboardingStep: 4 });
       navigate('/driver/register/verification', { replace: true });
     } catch (error) {
