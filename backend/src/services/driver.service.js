@@ -80,7 +80,7 @@ export const verifyOtpAndRegisterService = async (data) => {
     driver = new Driver({
       name,
       phone,
-      email: `${phone}@driver.sparedriver.local`, // Give them an email so they don't break
+      email: `${phone}@driver.searchmydriver.local`, // Give them an email so they don't break
       password: hashedPassword,
       authProvider: 'local',
       onboardingStep: 1,
@@ -279,7 +279,7 @@ export const uploadLiveVerificationService = async (driverId, file, durationSeco
   }
 
   const oldPublicId = driver.liveVerificationVideo?.cloudinaryPublicId;
-  const uploadResult = await uploadToCloudinary(file.buffer, 'sparedriver/live-verification', {
+  const uploadResult = await uploadToCloudinary(file.buffer, 'searchmydriver/live-verification', {
     resourceType: 'video',
   });
 

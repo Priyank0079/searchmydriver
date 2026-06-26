@@ -402,7 +402,7 @@ export async function createTopupOrderService(userId, amount) {
     orderId: order.id,
     amount: amountPaise,
     currency: 'INR',
-    name: 'SpareDriver',
+    name: 'SearchMyDriver',
     description: `Wallet top-up \u20B9${amt}`,
     prefill: {
       name: user.name || '',

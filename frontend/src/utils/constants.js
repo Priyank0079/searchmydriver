@@ -1,8 +1,8 @@
 /* ============================================
-   SpareDriver Constants
+   SearchMyDriver Constants
    ============================================ */
 
-export const APP_NAME = 'SpareDriver';
+export const APP_NAME = 'SearchMyDriver';
 export const APP_TAGLINE = 'Your Car, Our Driver';
 export const APP_SUBTITLE = 'Your Car, Our Professional Driver';
 export const APP_DESCRIPTION = 'Safe · Verified · On-Time';
@@ -65,7 +65,7 @@ export const PAYMENT_METHODS = [
   { id: 'upi', label: 'UPI', icon: 'Smartphone' },
   { id: 'card', label: 'Card', icon: 'CreditCard' },
   { id: 'wallet', label: 'Wallet', icon: 'Wallet' },
-  { id: 'sparedriver-wallet', label: 'SpareDriver Wallet', icon: 'Banknote' },
+  { id: 'searchmydriver-wallet', label: 'SearchMyDriver Wallet', icon: 'Banknote' },
 ];
 
 // Mock Data

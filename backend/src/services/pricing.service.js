@@ -509,7 +509,7 @@ export function calculateHourlyFare({
   const layers = applyPlatformLayers(
     subtotal,
     pricing,
-    subscription,
+    null,
     foodAllowance + stayAllowance,
   );
 
@@ -634,7 +634,7 @@ export function calculateOutstationFare({
   const layers = applyPlatformLayers(
     subtotal,
     pricing,
-    subscription,
+    null,
     allowanceTotal,
   );
 

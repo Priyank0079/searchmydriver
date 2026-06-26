@@ -32,7 +32,7 @@ import { useJsApiLoader } from '@react-google-maps/api';
  *                touch `window.google` directly.
  */
 
-const GOOGLE_MAPS_ID = 'sparedriver-gmaps-loader';
+const GOOGLE_MAPS_ID = 'searchmydriver-gmaps-loader';
 const GOOGLE_MAPS_VERSION = 'weekly';
 // Loaded libraries — MUST stay stable across renders for the loader to be
 // deduped. Adding a new library here loads it for every map automatically.

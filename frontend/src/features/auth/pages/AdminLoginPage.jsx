@@ -64,7 +64,7 @@ const AdminLoginPage = () => {
           <Input
             label="Email Address"
             type="email"
-            placeholder="admin@sparedriver.com"
+            placeholder="admin@searchmydriver.com"
             value={formData.email}
             onChange={handleChange('email')}
             error={errors.email}

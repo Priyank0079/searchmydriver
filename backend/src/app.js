@@ -66,7 +66,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.get('/', (_req, res) => {
-  res.send('SpareDriver API');
+  res.send('SearchMyDriver API');
 });
 
 app.use((err, req, res, _next) => {

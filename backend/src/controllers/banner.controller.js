@@ -21,7 +21,7 @@ export const adminUploadBannerMedia = asyncHandler(async (req, res) => {
     );
   }
   
-  const result = await uploadToCloudinary(req.file.buffer, 'sparedriver/banners', {
+  const result = await uploadToCloudinary(req.file.buffer, 'searchmydriver/banners', {
     resourceType: 'image',
   });
 

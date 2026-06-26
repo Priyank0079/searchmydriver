@@ -64,7 +64,7 @@ export const verifyUserOtpAndRegisterService = async ({ name, phone, password, o
 
   const user = await User.create({
     name,
-    email: `${phone}@phone.sparedriver.local`,
+    email: `${phone}@phone.searchmydriver.local`,
     phone_no: phone,
     password: hashedPassword,
     role: USER_ROLES.USER,

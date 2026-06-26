@@ -115,7 +115,7 @@ const LinkPhonePage = ({ accountType = 'user' }) => {
           <h1 className="text-2xl font-bold text-text mb-1">Link your mobile</h1>
           <p className="text-text-secondary text-sm">
             {profile?.name ? `Hi ${profile.name}, ` : ''}
-            add your phone number to continue with SpareDriver.
+            add your phone number to continue with SearchMyDriver.
           </p>
         </div>
 

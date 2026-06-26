@@ -278,7 +278,7 @@ export async function buildDriverProfilePdf(driverId, { res } = {}) {
     bufferPages: true,
     info: {
       Title: `${driver.name || 'Driver'} – Profile`,
-      Author: 'SpareDriver Admin',
+      Author: 'SearchMyDriver Admin',
       Subject: `Driver dossier for ${driver._id}`,
       CreationDate: new Date(),
     },
@@ -559,7 +559,7 @@ export async function buildDriverProfilePdf(driverId, { res } = {}) {
       .fontSize(8)
       .fillColor(PALETTE.muted)
       .text(
-        `Generated ${fmtDateTime(new Date())} • SpareDriver Admin • Page ${i + 1} of ${range.count}`,
+        `Generated ${fmtDateTime(new Date())} • SearchMyDriver Admin • Page ${i + 1} of ${range.count}`,
         doc.page.margins.left,
         footerY,
         { align: 'center', width: pageRight - doc.page.margins.left },

@@ -250,7 +250,7 @@ const useBookingDraftStore = create(
       },
     }),
     {
-      name: 'spareDriver.bookingDraft',
+      name: 'searchMyDriver.bookingDraft',
       storage: createJSONStorage(() => sessionStorage),
     },
   ),

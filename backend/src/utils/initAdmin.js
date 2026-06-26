@@ -9,7 +9,7 @@ export const initSuperAdmin = async () => {
     if (!adminExists) {
       console.log('[SYSTEM] No admin found. Initializing default Super Admin...');
 
-      const email = process.env.ADMIN_DEFAULT_EMAIL || 'admin@sparedriver.com';
+      const email = process.env.ADMIN_DEFAULT_EMAIL || 'admin@searchmydriver.com';
       const password = process.env.ADMIN_DEFAULT_PASSWORD || 'admin123';
 
       const salt = await bcrypt.genSalt(10);

@@ -1,7 +1,7 @@
 {
   "name": "spare-driver-backend",
   "version": "1.0.0",
-  "description": "SpareDriver platform backend",
+  "description": "SearchMyDriver platform backend",
   "main": "src/server.js",
   "type": "module",
   "scripts": {

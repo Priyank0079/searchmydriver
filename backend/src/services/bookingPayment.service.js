@@ -134,7 +134,7 @@ export async function createBookingPaymentOrderService(userId, bookingId) {
     orderId,
     amount: amountPaise,
     currency: 'INR',
-    name: 'SpareDriver',
+    name: 'SearchMyDriver',
     description: `Booking ${booking.bookingNumber}`,
     bookingId: String(booking._id),
     effectiveTotal: effectiveTotalForBooking(booking),

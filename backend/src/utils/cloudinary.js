@@ -14,7 +14,7 @@ cloudinary.config({
  * @param {string} folder - The destination folder in Cloudinary
  * @returns {Promise<Object>} - The Cloudinary upload response (secure_url, public_id)
  */
-export const uploadToCloudinary = (fileBuffer, folder = 'sparedriver', options = {}) => {
+export const uploadToCloudinary = (fileBuffer, folder = 'searchmydriver', options = {}) => {
   const { resourceType = 'auto' } = options;
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(

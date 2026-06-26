@@ -17,7 +17,7 @@ export const uploadImageService = async (file, oldPublicId) => {
     throw new ApiError(400, 'No file provided');
   }
 
-  const result = await uploadToCloudinary(file.buffer, 'sparedriver/documents');
+  const result = await uploadToCloudinary(file.buffer, 'searchmydriver/documents');
 
   if (oldPublicId) {
     await deleteFromCloudinary(oldPublicId);
@@ -34,7 +34,7 @@ export const uploadVideoService = async (file, oldPublicId) => {
     throw new ApiError(400, 'No file provided');
   }
 
-  const result = await uploadToCloudinary(file.buffer, 'sparedriver/training', {
+  const result = await uploadToCloudinary(file.buffer, 'searchmydriver/training', {
     resourceType: 'video',
   });
 

@@ -6,7 +6,7 @@
 export const sendSmsOtp = async (phone, otp) => {
   console.log(`\n=========================================`);
   console.log(`[MOCK SMS] Sending OTP to +91${phone}`);
-  console.log(`[MOCK SMS] Your SpareDriver verification code is: ${otp}`);
+  console.log(`[MOCK SMS] Your SearchMyDriver verification code is: ${otp}`);
   console.log(`=========================================\n`);
 
   // Simulate network delay
@@ -19,7 +19,7 @@ export const sendSmsOtp = async (phone, otp) => {
   // Example Twilio integration structure:
   // const twilio = require('twilio')(process.env.TWILIO_SID, process.env.TWILIO_AUTH);
   // await twilio.messages.create({
-  //   body: `Your SpareDriver verification code is: ${otp}`,
+  //   body: `Your SearchMyDriver verification code is: ${otp}`,
   //   from: process.env.TWILIO_PHONE,
   //   to: `+91${phone}`
   // });

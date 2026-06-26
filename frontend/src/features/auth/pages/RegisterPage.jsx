@@ -85,7 +85,7 @@ const RegisterPage = () => {
       <div className="flex-1 flex flex-col px-6 pt-4 pb-8">
         <div className="mb-6 animate-fade-in-up">
           <h1 className="text-2xl font-bold text-text mb-1">Create Account</h1>
-          <p className="text-text-secondary text-sm">Join SpareDriver and get started</p>
+          <p className="text-text-secondary text-sm">Join SearchMyDriver and get started</p>
         </div>
 
         <form onSubmit={handleSendOtp} className="space-y-4 animate-fade-in-up" style={{ animationDelay: '0.1s' }}>

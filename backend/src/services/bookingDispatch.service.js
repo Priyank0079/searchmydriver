@@ -2,7 +2,12 @@ import Booking from '../models/booking.model.js';
 import Car from '../models/user/car.model.js';
 import User from '../models/user.model.js';
 import { Driver } from '../models/driverModels/driver.model.js';
+import '../models/carType.model.js';
+import '../models/carBrand.model.js';
+import '../models/carModel.model.js';
+import '../models/fuelType.model.js';
 import { findDriversInExpandingRadius } from './driverFinder.service.js';
+import { SERVICE_TYPES } from '../constants/serviceTypes.js';
 import {
   adminMarkNoDriversFoundService,
   driverEarningFromFareSnapshot,

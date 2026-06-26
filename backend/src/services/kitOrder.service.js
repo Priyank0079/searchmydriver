@@ -35,7 +35,7 @@ function buildRazorpayCheckoutPayload(kitOrder, kit) {
       orderId: kitOrder.razorpayOrderId,
       amount: amountPaise,
       currency: kitOrder.currency || kit?.currency || 'INR',
-      name: 'SpareDriver',
+      name: 'SearchMyDriver',
       description: kit?.name || kitOrder.kitSnapshot?.name || 'Driver Kit',
       prefill: {},
     },

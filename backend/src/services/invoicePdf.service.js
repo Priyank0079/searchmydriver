@@ -7,7 +7,7 @@ const PALETTE = {
   text: '#0F172A',
   muted: '#64748B',
   border: '#E2E8F0',
-  accent: '#FBBF24', // SpareDriver Yellow
+  accent: '#FBBF24', // SearchMyDriver Yellow
   danger: '#DC2626',
   success: '#16A34A',
 };
@@ -43,7 +43,7 @@ export async function buildBookingInvoicePdf(bookingId, { res } = {}) {
     margin: 50,
     info: {
       Title: `Invoice ${invoiceNumber}`,
-      Author: 'SpareDriver',
+      Author: 'SearchMyDriver',
       Subject: `Invoice for Trip ${invoiceNumber}`,
     },
   });
@@ -59,7 +59,7 @@ export async function buildBookingInvoicePdf(bookingId, { res } = {}) {
     .font('Helvetica-Bold')
     .fontSize(24)
     .fillColor(PALETTE.text)
-    .text('SPAREDRIVER', 50, 50);
+    .text('SEARCHMYDRIVER', 50, 50);
 
   doc
     .font('Helvetica')
@@ -195,8 +195,8 @@ export async function buildBookingInvoicePdf(bookingId, { res } = {}) {
     .font('Helvetica')
     .fontSize(10)
     .fillColor(PALETTE.muted)
-    .text('Thank you for choosing SpareDriver.', 50, doc.page.height - 100, { align: 'center', width: 500 })
-    .text('For support, contact support@sparedriver.com', 50, doc.page.height - 85, { align: 'center', width: 500 });
+    .text('Thank you for choosing SearchMyDriver.', 50, doc.page.height - 100, { align: 'center', width: 500 })
+    .text('For support, contact support@searchmydriver.com', 50, doc.page.height - 85, { align: 'center', width: 500 });
 
   doc.end();
   return doc;

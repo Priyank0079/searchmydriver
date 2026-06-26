@@ -1203,7 +1203,7 @@ export async function createBookingService(userId, body) {
         orderId: rzpOrder.id,
         amount: amountPaise,
         currency: 'INR',
-        name: 'SpareDriver',
+        name: 'SearchMyDriver',
         description: `Booking ${booking.bookingNumber}`,
         bookingId: String(booking._id),
       };

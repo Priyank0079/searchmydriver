@@ -41,7 +41,7 @@ export function useRazorpayCheckout() {
             key: razorpay.keyId,
             amount: razorpay.amount,
             currency: razorpay.currency,
-            name: razorpay.name || 'SpareDriver',
+            name: razorpay.name || 'SearchMyDriver',
             description: razorpay.description || 'Driver Kit',
             order_id: razorpay.orderId,
             prefill: {
