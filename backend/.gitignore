@@ -44,3 +44,5 @@ secrets/
 
 # Misc
 *.tgz
+
+.env
