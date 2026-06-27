@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Clock, Award, Star, ArrowRight, MapPin, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
+import { Shield, Clock, Award, Star, ArrowRight, MapPin, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ShieldCheck, Handshake, Users } from 'lucide-react';
 import api from '../../utils/api';
 
 const LandingPage = () => {
@@ -10,6 +10,40 @@ const LandingPage = () => {
   const [cities, setCities] = useState([]);
   const [faqs, setFaqs] = useState([]);
   const [openFaqIndex, setOpenFaqIndex] = useState(null);
+  const [showFullDesc, setShowFullDesc] = useState(false);
+
+  const words = ['PROFESSIONAL DRIVER', 'CHAUFFEUR', 'HOURLY DRIVER', 'MONTHLY DRIVER'];
+  const [wordIndex, setWordIndex] = useState(0);
+  const [currentText, setCurrentText] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    let timer;
+    const currentWord = words[wordIndex];
+    const typingSpeed = isDeleting ? 50 : 100;
+
+    const handleTyping = () => {
+      if (!isDeleting) {
+        setCurrentText(currentWord.substring(0, currentText.length + 1));
+        if (currentText === currentWord) {
+          timer = setTimeout(() => setIsDeleting(true), 2000);
+        } else {
+          timer = setTimeout(handleTyping, typingSpeed);
+        }
+      } else {
+        setCurrentText(currentWord.substring(0, currentText.length - 1));
+        if (currentText === '') {
+          setIsDeleting(false);
+          setWordIndex((prev) => (prev + 1) % words.length);
+        } else {
+          timer = setTimeout(handleTyping, typingSpeed);
+        }
+      }
+    };
+
+    timer = setTimeout(handleTyping, typingSpeed);
+    return () => clearTimeout(timer);
+  }, [currentText, isDeleting, wordIndex]);
 
   useEffect(() => {
     const fetchFaqs = async () => {
@@ -82,20 +116,33 @@ const LandingPage = () => {
     <div className="w-full bg-slate-50 text-slate-900 font-sans selection:bg-amber-500 selection:text-black">
       {/* Inline animations and custom clip-paths */}
       <style>{`
+        @keyframes driveIn {
+          0% { transform: translate(-100%, 0) scale(0.95); opacity: 0; }
+          75% { transform: translate(5%, -5px) scale(1.02); opacity: 1; }
+          100% { transform: translate(0, 0) scale(1); }
+        }
         @keyframes floatCar {
           0%, 100% { transform: translateY(0px) rotate(0deg); }
-          50% { transform: translateY(-10px) rotate(-0.5deg); }
+          50% { transform: translateY(-8px) rotate(-0.5deg); }
         }
         @keyframes slideInLeft {
-          from { opacity: 0; transform: translateX(-50px); }
+          from { opacity: 0; transform: translateX(-40px); }
           to { opacity: 1; transform: translateX(0); }
         }
         @keyframes slideInRight {
-          from { opacity: 0; transform: translateX(50px); }
+          from { opacity: 0; transform: translateX(40px); }
           to { opacity: 1; transform: translateX(0); }
         }
+        @keyframes blinkCursor {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0; }
+        }
+        .animate-drive-in {
+          animation: driveIn 1.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
         .animate-float-car {
-          animation: floatCar 6s ease-in-out infinite;
+          animation: floatCar 5s ease-in-out infinite;
+          animation-delay: 1.5s;
         }
         .animate-slide-left {
           animation: slideInLeft 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -103,57 +150,70 @@ const LandingPage = () => {
         .animate-slide-right {
           animation: slideInRight 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
+        .animate-cursor {
+          animation: blinkCursor 0.8s infinite;
+        }
         .yellow-clip {
           clip-path: polygon(0 0, 100% 0, 78% 100%, 0% 100%);
+        }
+        .yellow-clip-accent {
+          clip-path: polygon(0 0, 100% 0, 81.5% 100%, 0% 100%);
         }
         @media (max-width: 1024px) {
           .yellow-clip {
             clip-path: polygon(0 0, 100% 0, 100% 90%, 0% 100%);
           }
+          .yellow-clip-accent {
+            clip-path: polygon(0 0, 100% 0, 100% 93%, 0% 100%);
+          }
         }
       `}</style>
 
       {/* Recreated Dynamic Hero Section */}
-      <section className="relative w-full bg-white overflow-hidden border-b border-slate-100 min-h-[580px] lg:min-h-[640px] flex items-center">
-        <div className="absolute inset-0 grid lg:grid-cols-12">
-          {/* Left Angle Yellow Block */}
-          <div className="lg:col-span-7 bg-gradient-to-r from-amber-400 to-amber-500 yellow-clip relative flex flex-col justify-center px-6 sm:px-12 lg:px-20 pt-16 pb-28 lg:py-0 min-h-[360px] lg:min-h-full">
-            <div className="space-y-6 z-10 animate-slide-left">
-              <span className="inline-block text-xs sm:text-sm font-extrabold uppercase tracking-[0.2em] text-slate-900 bg-white/20 px-3 py-1 rounded-full">
-                Few clicks away to book a
-              </span>
-              <h1 className="text-5xl sm:text-6xl lg:text-7xl font-black tracking-tight text-slate-950 flex flex-col">
-                <span className="bg-slate-950 text-amber-400 px-4 py-2 inline-block rounded-xl shadow-lg border border-slate-900 max-w-max uppercase tracking-wider">
-                  Driver
+      <section className="relative w-full bg-white overflow-hidden border-b border-slate-100 flex items-center py-4 lg:py-8">
+        <div className="relative w-full grid lg:grid-cols-12 gap-4 lg:gap-0">
+          {/* Left Angle Yellow Block Wrapper */}
+          <div className="lg:col-span-7 relative min-h-[350px] lg:min-h-[420px]">
+            {/* Layer 1: Dark Amber Accent Triangle */}
+            <div className="absolute inset-0 bg-gradient-to-br from-amber-600 to-amber-700 yellow-clip-accent z-0" />
+            
+            {/* Layer 2: Main Yellow Block */}
+            <div className="absolute inset-0 bg-gradient-to-br from-amber-400 to-amber-500 yellow-clip z-10 flex flex-col justify-center items-start px-6 sm:px-12 lg:px-20 pt-10 pb-28 lg:py-10">
+              <div className="space-y-2 z-10 animate-slide-left flex flex-col items-start text-left mb-20 lg:mb-8 w-full">
+                <span className="inline-block text-[10px] sm:text-xs md:text-sm font-bold uppercase tracking-[0.2em] text-slate-800">
+                  Few clicks away to book a
                 </span>
-              </h1>
-              <p className="text-slate-950 text-sm sm:text-base font-semibold max-w-md leading-relaxed opacity-90">
-                Safe, background-verified, and professional driver partners at your service hourly or monthly.
-              </p>
-            </div>
+                <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-black tracking-tight text-slate-900 uppercase min-h-[35px] sm:min-h-[45px] lg:min-h-[55px]">
+                  {currentText}
+                  <span className="animate-cursor text-slate-900 ml-1">|</span>
+                </h1>
+              </div>
 
-            {/* Floating Sedan Image */}
-            <div className="absolute bottom-4 left-6 sm:left-12 lg:left-16 w-[75%] sm:w-[50%] lg:w-[70%] z-20 animate-float-car">
-              <img
-                src="/Gemini_Generated_Image_2jf3zt2jf3zt2jf3-removebg-preview.png"
-                alt="Yellow Luxury Sedan"
-                className="w-full h-auto drop-shadow-[0_20px_35px_rgba(0,0,0,0.25)] object-contain"
-              />
+              {/* Floating Sedan Image with entry drive-in */}
+              <div className="absolute bottom-2 left-6 sm:left-12 lg:left-16 w-[70%] sm:w-[50%] lg:w-[55%] z-20 animate-drive-in">
+                <div className="animate-float-car">
+                  <img
+                    src="/Gemini_Generated_Image_2jf3zt2jf3zt2jf3-removebg-preview.png"
+                    alt="Yellow Luxury Sedan"
+                    className="w-full h-auto drop-shadow-[0_12px_22px_rgba(0,0,0,0.2)] object-contain transition-transform duration-500 hover:scale-[1.03] cursor-pointer"
+                  />
+                </div>
+              </div>
             </div>
           </div>
 
           {/* Right Cards Grid Block */}
-          <div className="lg:col-span-5 flex items-center justify-center p-6 sm:p-12 lg:p-8 bg-slate-50/50">
-            <div className="grid grid-cols-2 gap-4 sm:gap-6 w-full max-w-lg z-10 animate-slide-right">
+          <div className="lg:col-span-5 flex items-center justify-center p-4 lg:p-6 bg-slate-50/50">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 w-full max-w-md z-10 animate-slide-right">
               {/* Card 1: Local */}
               <div 
                 onClick={() => navigate('/welcome')}
-                className="group cursor-pointer bg-white border border-slate-200 rounded-3xl p-3 sm:p-4 shadow-sm hover:shadow-xl hover:-translate-y-1.5 transition-all duration-300 flex flex-col justify-between aspect-[4/5]"
+                className="group cursor-pointer bg-white border border-slate-200 rounded-3xl p-3 sm:p-4 shadow-sm hover:shadow-xl hover:-translate-y-1.5 transition-all duration-300 flex flex-col justify-between aspect-[4/5] border-b-[8px] border-b-amber-400"
               >
                 <div className="relative aspect-[4/3] rounded-2xl overflow-hidden bg-slate-100 border border-slate-100">
                   <img src="/images/local-preview.png" alt="Local Service" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                 </div>
-                <div className="text-center pt-3 border-b-4 border-transparent group-hover:border-amber-500 pb-1.5 transition-all">
+                <div className="text-center pt-3 pb-1">
                   <h3 className="font-extrabold text-slate-900 text-xs sm:text-sm uppercase tracking-wider">Local</h3>
                 </div>
               </div>
@@ -161,12 +221,12 @@ const LandingPage = () => {
               {/* Card 2: Outstation */}
               <div 
                 onClick={() => navigate('/welcome')}
-                className="group cursor-pointer bg-white border border-slate-200 rounded-3xl p-3 sm:p-4 shadow-sm hover:shadow-xl hover:-translate-y-1.5 transition-all duration-300 flex flex-col justify-between aspect-[4/5]"
+                className="group cursor-pointer bg-white border border-slate-200 rounded-3xl p-3 sm:p-4 shadow-sm hover:shadow-xl hover:-translate-y-1.5 transition-all duration-300 flex flex-col justify-between aspect-[4/5] border-b-[8px] border-b-amber-400"
               >
                 <div className="relative aspect-[4/3] rounded-2xl overflow-hidden bg-slate-100 border border-slate-100">
                   <img src="/images/outstation-preview.png" alt="Outstation Service" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                 </div>
-                <div className="text-center pt-3 border-b-4 border-transparent group-hover:border-amber-500 pb-1.5 transition-all">
+                <div className="text-center pt-3 pb-1">
                   <h3 className="font-extrabold text-slate-900 text-xs sm:text-sm uppercase tracking-wider">Outstation</h3>
                 </div>
               </div>
@@ -174,27 +234,97 @@ const LandingPage = () => {
               {/* Card 3: Outstation Drop */}
               <div 
                 onClick={() => navigate('/welcome')}
-                className="group cursor-pointer bg-white border border-slate-200 rounded-3xl p-3 sm:p-4 shadow-sm hover:shadow-xl hover:-translate-y-1.5 transition-all duration-300 flex flex-col justify-between aspect-[4/5]"
+                className="group cursor-pointer bg-white border border-slate-200 rounded-3xl p-3 sm:p-4 shadow-sm hover:shadow-xl hover:-translate-y-1.5 transition-all duration-300 flex flex-col justify-between aspect-[4/5] border-b-[8px] border-b-amber-400"
               >
                 <div className="relative aspect-[4/3] rounded-2xl overflow-hidden bg-slate-100 border border-slate-100">
                   <img src="/images/drop-preview.png" alt="Outstation Drop" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                 </div>
-                <div className="text-center pt-3 border-b-4 border-transparent group-hover:border-amber-500 pb-1.5 transition-all">
-                  <h3 className="font-extrabold text-slate-900 text-xs sm:text-sm uppercase tracking-wider">Drop</h3>
+                <div className="text-center pt-3 pb-1">
+                  <h3 className="font-extrabold text-slate-900 text-xs sm:text-xs uppercase tracking-wider">Outstation Drop</h3>
                 </div>
               </div>
 
               {/* Card 4: Permanent */}
               <div 
                 onClick={() => navigate('/welcome')}
-                className="group cursor-pointer bg-white border border-slate-200 rounded-3xl p-3 sm:p-4 shadow-sm hover:shadow-xl hover:-translate-y-1.5 transition-all duration-300 flex flex-col justify-between aspect-[4/5]"
+                className="group cursor-pointer bg-white border border-slate-200 rounded-3xl p-3 sm:p-4 shadow-sm hover:shadow-xl hover:-translate-y-1.5 transition-all duration-300 flex flex-col justify-between aspect-[4/5] border-b-[8px] border-b-amber-400"
               >
                 <div className="relative aspect-[4/3] rounded-2xl overflow-hidden bg-slate-100 border border-slate-100">
                   <img src="/images/permanent-preview.png" alt="Permanent Driver" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                 </div>
-                <div className="text-center pt-3 border-b-4 border-transparent group-hover:border-amber-500 pb-1.5 transition-all">
+                <div className="text-center pt-3 pb-1">
                   <h3 className="font-extrabold text-slate-900 text-xs sm:text-sm uppercase tracking-wider">Permanent</h3>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Hassle-free Commute Section */}
+      <section className="py-16 bg-white border-b border-slate-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-6">
+          <div className="space-y-3 max-w-3xl mx-auto">
+            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-slate-950 tracking-tight leading-tight">
+              Hassle-free Commute with #1 Driver Service by our Professional Drivers
+            </h2>
+            <div className="w-16 h-1.5 bg-amber-500 mx-auto rounded-full" />
+          </div>
+
+          <div className="max-w-3xl mx-auto space-y-3">
+            <p className="text-slate-500 font-medium text-xs sm:text-sm leading-relaxed">
+              Welcome to SearchMyDriver! With our driver on call service, you can say goodbye to the hassles of driving, parking, and navigating through traffic.
+              {showFullDesc && (
+                <span className="inline">
+                  {" "}If you're looking for a driver for rent near you, we have you covered. Our mission is to provide top-notch chauffeur services that meet all your commuting needs.
+                </span>
+              )}
+            </p>
+            <button 
+              onClick={() => setShowFullDesc(!showFullDesc)} 
+              className="text-xs font-bold text-amber-600 hover:text-amber-500 transition-colors uppercase tracking-wider cursor-pointer"
+            >
+              {showFullDesc ? 'Read Less' : 'Read More...'}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8 max-w-5xl mx-auto pt-8">
+            {/* Stat 1 */}
+            <div className="bg-white border border-slate-200 border-l-[6px] border-b-[6px] border-l-amber-400 border-b-slate-900 rounded-3xl p-6 flex items-center justify-between shadow-sm hover:shadow-md hover:-translate-y-1 transition-all duration-300 group">
+              <div className="text-left space-y-1">
+                <p className="text-2xl sm:text-3xl font-black text-slate-950">20000+</p>
+                <p className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider leading-tight">
+                  Police Verified Drivers
+                </p>
+              </div>
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 flex items-center justify-center text-amber-600 transition-transform group-hover:scale-110 duration-300">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+            </div>
+
+            {/* Stat 2 */}
+            <div className="bg-white border border-slate-200 border-l-[6px] border-b-[6px] border-l-amber-400 border-b-slate-900 rounded-3xl p-6 flex items-center justify-between shadow-sm hover:shadow-md hover:-translate-y-1 transition-all duration-300 group">
+              <div className="text-left space-y-1">
+                <p className="text-2xl sm:text-3xl font-black text-slate-950">5 Lac+</p>
+                <p className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider leading-tight">
+                  Happy Clients
+                </p>
+              </div>
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 flex items-center justify-center text-amber-600 transition-transform group-hover:scale-110 duration-300">
+                <Users className="w-6 h-6" />
+              </div>
+            </div>
+
+            {/* Stat 3 */}
+            <div className="bg-white border border-slate-200 border-l-[6px] border-b-[6px] border-l-amber-400 border-b-slate-900 rounded-3xl p-6 flex items-center justify-between shadow-sm hover:shadow-md hover:-translate-y-1 transition-all duration-300 group">
+              <div className="text-left space-y-1">
+                <p className="text-2xl sm:text-3xl font-black text-slate-950">1 Lac+</p>
+                <p className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider leading-tight">
+                  Permanent Drivers
+                </p>
+              </div>
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 flex items-center justify-center text-amber-600 transition-transform group-hover:scale-110 duration-300">
+                <Handshake className="w-6 h-6" />
               </div>
             </div>
           </div>
