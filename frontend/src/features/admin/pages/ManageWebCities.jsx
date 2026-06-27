@@ -172,17 +172,15 @@ const ManageWebCities = () => {
         />
       )}
 
-      {confirmDelete && (
-        <ConfirmDialog
-          isOpen={!!confirmDelete}
-          title="Delete Serviced City"
-          message={`Are you sure you want to delete "${confirmDelete.name}"? This will remove it from the public homepage.`}
-          confirmLabel={deleting ? 'Deleting...' : 'Delete'}
-          onConfirm={handleDelete}
-          onCancel={() => setConfirmDelete(null)}
-          loading={deleting}
-        />
-      )}
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title="Delete Serviced City"
+        description={`Are you sure you want to delete "${confirmDelete.name}"? This will remove it from the public homepage.`}
+        confirmLabel={deleting ? 'Deleting...' : 'Delete'}
+        onConfirm={handleDelete}
+        onClose={() => setConfirmDelete(null)}
+        loading={deleting}
+      />
     </div>
   );
 };

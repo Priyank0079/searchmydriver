@@ -165,15 +165,15 @@ const ManageWebFaqs = () => {
       )}
 
       {confirmDelete && (
-        <ConfirmDialog
-          isOpen={!!confirmDelete}
-          title="Delete FAQ"
-          message={`Are you sure you want to delete this FAQ? It will be removed from the public website homepage.`}
-          confirmLabel={deleting ? 'Deleting...' : 'Delete'}
-          onConfirm={handleDelete}
-          onCancel={() => setConfirmDelete(null)}
-          loading={deleting}
-        />
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title="Delete FAQ"
+        description="Are you sure you want to delete this FAQ? It will be removed from the public website homepage."
+        confirmLabel={deleting ? 'Deleting...' : 'Delete'}
+        onConfirm={handleDelete}
+        onClose={() => setConfirmDelete(null)}
+        loading={deleting}
+      />
       )}
     </div>
   );

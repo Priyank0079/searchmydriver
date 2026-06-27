@@ -189,17 +189,15 @@ const ManageWebBanners = () => {
         />
       )}
 
-      {confirmDelete && (
-        <ConfirmDialog
-          isOpen={!!confirmDelete}
-          title="Delete Web Banner"
-          message={`Are you sure you want to delete "${confirmDelete.title || 'this banner'}"? This action cannot be undone.`}
-          confirmLabel={deleting ? 'Deleting...' : 'Delete'}
-          onConfirm={handleDelete}
-          onCancel={() => setConfirmDelete(null)}
-          loading={deleting}
-        />
-      )}
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title="Delete Web Banner"
+        description={`Are you sure you want to delete "${confirmDelete.title || 'this banner'}"? This action cannot be undone.`}
+        confirmLabel={deleting ? 'Deleting...' : 'Delete'}
+        onConfirm={handleDelete}
+        onClose={() => setConfirmDelete(null)}
+        loading={deleting}
+      />
     </div>
   );
 };
