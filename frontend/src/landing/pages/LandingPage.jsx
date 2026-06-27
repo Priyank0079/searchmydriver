@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Clock, Award, Star, ArrowRight, MapPin, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Shield, Clock, Award, Star, ArrowRight, MapPin, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
 import api from '../../utils/api';
 
 const LandingPage = () => {
@@ -8,6 +8,22 @@ const LandingPage = () => {
   const [banners, setBanners] = useState([]);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [cities, setCities] = useState([]);
+  const [faqs, setFaqs] = useState([]);
+  const [openFaqIndex, setOpenFaqIndex] = useState(null);
+
+  useEffect(() => {
+    const fetchFaqs = async () => {
+      try {
+        const res = await api.get('/web-faqs/common');
+        if (res.data?.data) {
+          setFaqs(res.data.data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch FAQs:', err);
+      }
+    };
+    fetchFaqs();
+  }, []);
 
   useEffect(() => {
     const fetchCities = async () => {
@@ -319,6 +335,47 @@ const LandingPage = () => {
           </div>
         </div>
       </section>
+
+      {/* Frequently Asked Questions Section */}
+      {faqs.length > 0 && (
+        <section className="py-20 bg-slate-50 border-t border-slate-200">
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-12">
+            <div className="space-y-3">
+              <h2 className="text-3xl font-extrabold text-slate-950">Frequently Asked Questions</h2>
+              <div className="w-16 h-1 bg-emerald-500 mx-auto rounded-full" />
+            </div>
+
+            <div className="text-left space-y-4 max-w-3xl mx-auto">
+              {faqs.map((faq, index) => {
+                const isOpen = openFaqIndex === index;
+                return (
+                  <div 
+                    key={faq._id} 
+                    className="bg-white border border-slate-200 rounded-2xl overflow-hidden transition-all duration-200 shadow-sm"
+                  >
+                    <button
+                      onClick={() => setOpenFaqIndex(isOpen ? null : index)}
+                      className="w-full px-6 py-5 flex items-center justify-between gap-4 text-slate-900 font-bold text-sm sm:text-base hover:bg-slate-50/50 transition-colors text-left"
+                    >
+                      <span>{faq.question}</span>
+                      {isOpen ? (
+                        <ChevronUp className="w-5 h-5 text-slate-400 shrink-0" />
+                      ) : (
+                        <ChevronDown className="w-5 h-5 text-slate-400 shrink-0" />
+                      )}
+                    </button>
+                    {isOpen && (
+                      <div className="px-6 pb-5 text-sm text-slate-500 font-medium leading-relaxed border-t border-slate-100 pt-4 bg-slate-50/20">
+                        {faq.answer}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* App Download Banner */}
       <section className="py-16 bg-gradient-to-r from-emerald-600 to-teal-700 relative overflow-hidden">

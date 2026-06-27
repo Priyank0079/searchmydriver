@@ -25,6 +25,7 @@ const routeTitles = {
   '/admin/web-banners': 'Website Banners Control',
   '/admin/web-tickets': 'Website Support Tickets',
   '/admin/web-cities': 'Website Cities Control',
+  '/admin/web-faqs': 'Website FAQs Control',
 };
 
 const AdminLayout = () => {

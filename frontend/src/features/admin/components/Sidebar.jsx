@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Car, CalendarCheck, DollarSign, Settings,
   LogOut, X, ChevronRight, ChevronDown, ShieldCheck, Monitor, Package,
   CheckSquare, MapPin, Receipt, Sparkles, Navigation, Wallet, Banknote,
-  LifeBuoy, ClipboardList, Timer, Megaphone, Compass, LayoutTemplate, Headset,
+  LifeBuoy, ClipboardList, Timer, Megaphone, Compass, LayoutTemplate, Headset, HelpCircle,
 } from 'lucide-react';
 import { APP_NAME } from '../../../utils/constants';
 import useAdminAuthStore from '../../../store/useAdminAuthStore';
@@ -44,6 +44,7 @@ const navItems = [
       { path: '/admin/web-banners', label: 'Web Banners', icon: LayoutTemplate, roles: ['admin', 'sub_admin'], permission: STAFF_PERMISSIONS.BANNERS },
       { path: '/admin/web-tickets', label: 'Web Tickets', icon: Headset, roles: ['admin', 'sub_admin'], permission: STAFF_PERMISSIONS.SUPPORT || 'SUPPORT' },
       { path: '/admin/web-cities', label: 'Web Cities', icon: MapPin, roles: ['admin', 'sub_admin'], permission: STAFF_PERMISSIONS.ZONES },
+      { path: '/admin/web-faqs', label: 'Web FAQs', icon: HelpCircle, roles: ['admin', 'sub_admin'], permission: STAFF_PERMISSIONS.SUPPORT || 'SUPPORT' },
     ],
   },
   {
