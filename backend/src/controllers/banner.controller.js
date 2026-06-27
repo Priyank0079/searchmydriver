@@ -23,6 +23,7 @@ export const adminUploadBannerMedia = asyncHandler(async (req, res) => {
   
   const result = await uploadToCloudinary(req.file.buffer, 'searchmydriver/banners', {
     resourceType: 'image',
+    transformation: [{ format: 'webp', quality: 'auto:eco' }],
   });
 
   if (req.body.oldPublicId) {
@@ -41,8 +42,9 @@ export const adminUploadBannerMedia = asyncHandler(async (req, res) => {
   );
 });
 
-export const adminListBanners = asyncHandler(async (_req, res) => {
-  const banners = await bannerService.listBannersService({ onlyActive: false });
+export const adminListBanners = asyncHandler(async (req, res) => {
+  const { type = 'user' } = req.query;
+  const banners = await bannerService.listBannersService({ onlyActive: false, type });
   return res
     .status(200)
     .json(new ApiResponse(200, banners, 'Banners fetched successfully'));
@@ -63,7 +65,8 @@ export const adminDeleteBanner = asyncHandler(async (req, res) => {
   return res.status(200).json(new ApiResponse(200, null, 'Banner deleted successfully'));
 });
 
-export const listActiveBanners = asyncHandler(async (_req, res) => {
-  const banners = await bannerService.listBannersService({ onlyActive: true });
+export const listActiveBanners = asyncHandler(async (req, res) => {
+  const { type = 'user' } = req.query;
+  const banners = await bannerService.listBannersService({ onlyActive: true, type });
   return res.status(200).json(new ApiResponse(200, banners, 'Banners fetched successfully'));
 });

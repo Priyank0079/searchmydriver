@@ -15,10 +15,20 @@ cloudinary.config({
  * @returns {Promise<Object>} - The Cloudinary upload response (secure_url, public_id)
  */
 export const uploadToCloudinary = (fileBuffer, folder = 'searchmydriver', options = {}) => {
-  const { resourceType = 'auto' } = options;
+  const { resourceType = 'auto', transformation } = options;
+  const uploadParams = { folder, resource_type: resourceType };
+
+  if (resourceType === 'image') {
+    uploadParams.transformation = transformation ?? [
+      { format: 'webp', quality: 'auto:eco' },
+    ];
+  } else if (transformation) {
+    uploadParams.transformation = transformation;
+  }
+
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
-      { folder, resource_type: resourceType },
+      uploadParams,
       (error, result) => {
         if (error) return reject(error);
         resolve(result);

@@ -7,8 +7,8 @@ import {
   adminUploadBannerMedia,
   listActiveBanners,
 } from '../controllers/banner.controller.js';
-import { auth, authorize } from '../middlewares/authMiddleware.js';
-import { uploadMedia } from '../middlewares/multer.js';
+import { protectStaff, restrictTo } from '../middlewares/authMiddleware.js';
+import { uploadAdMedia } from '../middlewares/multer.js';
 
 const router = Router();
 
@@ -16,11 +16,11 @@ const router = Router();
 router.get('/common', listActiveBanners);
 
 // Admin routes
-router.use('/admin', auth, authorize('admin', 'sub_admin'));
+router.use('/admin', protectStaff, restrictTo('admin', 'sub_admin'));
 router.get('/admin', adminListBanners);
 router.post('/admin', adminCreateBanner);
 router.put('/admin/:id', adminUpdateBanner);
 router.delete('/admin/:id', adminDeleteBanner);
-router.post('/admin/upload', uploadMedia, adminUploadBannerMedia);
+router.post('/admin/upload', uploadAdMedia.single('media'), adminUploadBannerMedia);
 
 export default router;

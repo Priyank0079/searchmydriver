@@ -23,9 +23,15 @@ export const adminUploadAdMedia = asyncHandler(async (req, res) => {
       `Ad image must be at most ${Math.round(AD_IMAGE_MAX / 1024 / 1024)} MB`,
     );
   }
-  const result = await uploadToCloudinary(req.file.buffer, 'searchmydriver/ads', {
+  const uploadOptions = {
     resourceType: 'auto',
-  });
+  };
+
+  if (isImage) {
+    uploadOptions.transformation = [{ format: 'webp', quality: 'auto:eco' }];
+  }
+
+  const result = await uploadToCloudinary(req.file.buffer, 'searchmydriver/ads', uploadOptions);
   // Best-effort cleanup of a previously-uploaded asset when the admin
   // swaps the media before saving the form.
   if (req.body.oldPublicId) {

@@ -36,10 +36,11 @@ const bannerSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-    createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      default: null,
+    type: {
+      type: String,
+      enum: ['user', 'web'],
+      default: 'user',
+      index: true,
     },
   },
   { timestamps: true },

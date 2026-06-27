@@ -19,6 +19,14 @@ import AdminLayout from './layouts/AdminLayout';
 // auth store has a session, auto-disconnects on logout).
 import './store/useSocketStore';
 
+// Landing Website
+const LandingLayout = lazy(() => import('./landing/layouts/LandingLayout'));
+const LandingPage = lazy(() => import('./landing/pages/LandingPage'));
+const HowItWorksPage = lazy(() => import('./landing/pages/HowItWorksPage'));
+const ServicesPage = lazy(() => import('./landing/pages/ServicesPage'));
+const TestimonialsPage = lazy(() => import('./landing/pages/TestimonialsPage'));
+const SupportPage = lazy(() => import('./landing/pages/SupportPage'));
+
 // Auth
 const WelcomePage = lazy(() => import('./features/auth/pages/WelcomePage'));
 const LoginPage = lazy(() => import('./features/auth/pages/LoginPage'));
@@ -170,6 +178,8 @@ const TaskActivityLogPage = lazy(() => import('./features/admin/pages/TaskActivi
 const StaffProfilePage = lazy(() => import('./features/admin/pages/StaffProfilePage'));
 const ManageBanners = lazy(() => import('./features/admin/pages/ManageBanners'));
 const ManageAds = lazy(() => import('./features/admin/pages/ManageAds'));
+const ManageWebBanners = lazy(() => import('./features/admin/pages/ManageWebBanners'));
+const ManageWebTickets = lazy(() => import('./features/admin/pages/ManageWebTickets'));
 const IncomingRegistrations = lazy(() => import('./features/admin/pages/IncomingRegistrations'));
 const DriverWallet = lazy(() => import('./features/admin/pages/DriverWallet'));
 const HelpDesk = lazy(() => import('./features/admin/pages/HelpDesk'));
@@ -190,10 +200,19 @@ function App() {
   return (
     <Suspense fallback={<PageLoader />}>
       <Routes>
+        {/* Public Website Routes */}
+        <Route element={<LandingLayout />}>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/how-it-works" element={<HowItWorksPage />} />
+          <Route path="/services" element={<ServicesPage />} />
+          <Route path="/testimonials" element={<TestimonialsPage />} />
+          <Route path="/support" element={<SupportPage />} />
+        </Route>
+
         <Route element={<MobileLayout />}>
           {/* ========== Auth Routes ========== */}
           <Route element={<AuthLayout />}>
-            <Route path="/" element={<WelcomePage />} />
+            <Route path="/welcome" element={<WelcomePage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
@@ -204,6 +223,7 @@ function App() {
 
           {/* ========== User Onboarding ========== */}
           <Route element={<UserOnboardingGuard />}>
+            <Route path="/user" element={<Navigate to="/user/home" replace />} />
             <Route path="/user/add-car" element={<AddCarPage />} />
             <Route path="/user/my-cars" element={<MyCarsPage />} />
             <Route path="/user/checklist" element={<RegistrationChecklistPage />} />
@@ -290,6 +310,7 @@ function App() {
 
           {/* ========== Protected Driver Routes ========== */}
           <Route element={<DriverGuard />}>
+            <Route path="/driver" element={<Navigate to="/driver/home" replace />} />
             {/* ========== Driver Dashboard (with bottom nav) ========== */}
             <Route element={<DriverDashboardLayout />}>
               <Route path="/driver/home" element={<DriverHomePage />} />
@@ -362,6 +383,8 @@ function App() {
             <Route path="/admin/kit-orders/:orderId" element={<KitOrderDetailPage />} />
             <Route path="/admin/banners" element={<ManageBanners />} />
             <Route path="/admin/ads" element={<ManageAds />} />
+            <Route path="/admin/web-banners" element={<ManageWebBanners />} />
+            <Route path="/admin/web-tickets" element={<ManageWebTickets />} />
             <Route path="/admin/bookings" element={<ManageBookings />} />
             <Route
               path="/admin/bookings/scheduled-jobs"

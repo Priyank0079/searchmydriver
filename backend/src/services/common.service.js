@@ -17,7 +17,10 @@ export const uploadImageService = async (file, oldPublicId) => {
     throw new ApiError(400, 'No file provided');
   }
 
-  const result = await uploadToCloudinary(file.buffer, 'searchmydriver/documents');
+  const result = await uploadToCloudinary(file.buffer, 'searchmydriver/documents', {
+    resourceType: 'image',
+    transformation: [{ format: 'webp', quality: 'auto:eco' }],
+  });
 
   if (oldPublicId) {
     await deleteFromCloudinary(oldPublicId);

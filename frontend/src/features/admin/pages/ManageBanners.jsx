@@ -37,7 +37,7 @@ const ManageBanners = () => {
   const fetchBanners = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get('/admin/banners');
+      const res = await api.get('/admin/banners?type=user');
       setBanners(res?.data?.data || []);
       setError('');
     } catch (err) {
@@ -50,7 +50,7 @@ const ManageBanners = () => {
   useEffect(() => {
     let cancelled = false;
     api
-      .get('/admin/banners')
+      .get('/admin/banners?type=user')
       .then((res) => {
         if (cancelled) return;
         setBanners(res?.data?.data || []);
@@ -302,6 +302,7 @@ function BannerFormModal({ banner, onClose, onSaved }) {
         sortOrder: Number(sortOrder) || 0,
         imageUrl,
         imagePublicId,
+        type: 'user',
       };
       if (isEdit) {
         await api.put(`/admin/banners/${banner._id}`, payload);

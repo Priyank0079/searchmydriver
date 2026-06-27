@@ -20,6 +20,10 @@ const routeTitles = {
   '/admin/account/revenue': 'Revenue',
   '/admin/account/refunds': 'Refunds',
   '/admin/profile': 'My Profile',
+  '/admin/banners': 'User App Banners',
+  '/admin/ads': 'User App Ads',
+  '/admin/web-banners': 'Website Banners Control',
+  '/admin/web-tickets': 'Website Support Tickets',
 };
 
 const AdminLayout = () => {

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Calendar, Mail, Phone, User, Users } from 'lucide-react';
+import { ArrowLeft, Calendar, Mail, Phone, User, Users, Copy, CheckCircle, AlertCircle } from 'lucide-react';
 import Card from '../../../../components/Card';
 import Badge from '../../../../components/Badge';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
@@ -8,6 +8,7 @@ import { useUserProfileStore } from '../../../../store/user/useUserProfileStore'
 import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
 import useUserAuthStore from '../../../../store/useUserAuthStore';
 import { formatDate } from '../../../../utils/formatters';
+import toast from 'react-hot-toast';
 
 const UserProfilePage = () => {
   const navigate = useNavigate();
@@ -21,22 +22,56 @@ const UserProfilePage = () => {
   );
 
   useEffect(() => {
-    refetch().catch(() => {});
-  }, [refetch]);
+    if (authUser?._id) {
+      refetch().catch((err) => {
+        console.error('Failed to fetch profile:', err);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authUser?._id]);
 
   useEffect(() => {
     if (!profile?.user) return;
     setAuth(profile.user);
-  }, [profile, setAuth]);
+  }, [profile?.user, setAuth]);
 
   const user = profile?.user || authUser || {};
 
+  const handleCopyReferralCode = () => {
+    if (user?.referralCode) {
+      navigator.clipboard.writeText(user.referralCode);
+      toast.success('Referral code copied!');
+    }
+  };
+
   if (loading && !profile) {
-    return <ScreenFrame title="My Profile" onBack={() => navigate('/user/account')} body={<Card className="p-6 text-center text-text-secondary">Loading profile...</Card>} />;
+    return (
+      <ScreenFrame title="My Profile" onBack={() => navigate('/user/account')}>
+        <Card className="p-6 text-center text-text-secondary">
+          <div className="animate-pulse">Loading profile...</div>
+        </Card>
+      </ScreenFrame>
+    );
   }
 
   if (error && !profile) {
-    return <ScreenFrame title="My Profile" onBack={() => navigate('/user/account')} body={<Card className="p-4 text-sm text-rose-700 bg-rose-50 border border-rose-200">{error}</Card>} />;
+    return (
+      <ScreenFrame title="My Profile" onBack={() => navigate('/user/account')}>
+        <Card className="p-4 flex items-start gap-3 text-sm text-rose-700 bg-rose-50 border border-rose-200">
+          <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold">Failed to load profile</p>
+            <p className="text-xs mt-1">{error}</p>
+            <button 
+              onClick={() => refetch()}
+              className="mt-2 px-3 py-1 bg-rose-700 text-white rounded-lg text-xs hover:bg-rose-800 transition"
+            >
+              Retry
+            </button>
+          </div>
+        </Card>
+      </ScreenFrame>
+    );
   }
 
   return (
@@ -58,23 +93,60 @@ const UserProfilePage = () => {
         </div>
       </Card>
 
-      <InfoCard title="Contact" rows={[
-        { icon: Phone, label: 'Phone', value: user?.phone_no ? `+91 ${user.phone_no}` : 'Not added' },
-        { icon: Mail, label: 'Email', value: user?.email || 'Not added' },
-      ]} />
+      <Card className="p-4 space-y-3">
+        <p className="text-[11px] uppercase tracking-wide font-semibold text-text-muted">Phone</p>
+        <div className="flex items-center gap-3 rounded-2xl border border-border-light bg-white px-3 py-3">
+          <div className="w-8 h-8 rounded-lg bg-bg flex items-center justify-center shrink-0">
+            <Phone className="w-4 h-4 text-text-secondary" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-text break-words">{formatPhoneNumber(user?.phone_no)}</p>
+          </div>
+        </div>
+      </Card>
+
+      <Card className="p-4 space-y-3">
+        <p className="text-[11px] uppercase tracking-wide font-semibold text-text-muted">Email</p>
+        <div className="flex items-center gap-3 rounded-2xl border border-border-light bg-white px-3 py-3">
+          <div className="w-8 h-8 rounded-lg bg-bg flex items-center justify-center shrink-0">
+            <Mail className="w-4 h-4 text-text-secondary" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-text break-words">{user?.email || 'Not added'}</p>
+          </div>
+        </div>
+      </Card>
 
       <InfoCard title="Profile" rows={[
         { icon: User, label: 'Gender', value: user?.gender || 'Not set' },
         { icon: Calendar, label: 'Date of birth', value: user?.dateOfBirth ? formatDate(user.dateOfBirth) : 'Not set' },
-        { icon: Users, label: 'Referral code', value: user?.referralCode || 'Not generated yet' },
       ]} />
+
+      <Card className="p-4 space-y-3">
+        <p className="text-[11px] uppercase tracking-wide font-semibold text-text-muted">Referral Code</p>
+        <div className="flex items-center gap-2 rounded-2xl border border-border-light bg-white px-3 py-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] text-text-muted">Your Code</p>
+            <p className="text-sm font-mono font-semibold text-text">{user?.referralCode || 'Not generated'}</p>
+          </div>
+          {user?.referralCode && (
+            <button
+              onClick={handleCopyReferralCode}
+              className="p-2 hover:bg-bg rounded-lg transition text-text-muted hover:text-primary"
+              title="Copy referral code"
+            >
+              <Copy className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </Card>
 
       <Card className="p-4 space-y-3">
         <p className="text-[11px] uppercase tracking-wide font-semibold text-text-muted">Cars linked</p>
         {Array.isArray(profile?.cars) && profile.cars.length > 0 ? (
           <div className="space-y-2">
             {profile.cars.map((car) => (
-              <div key={car._id} className="rounded-2xl border border-border-light bg-bg px-3 py-3">
+              <div key={car._id} className="rounded-2xl border border-border-light bg-white px-3 py-3">
                 <p className="text-sm font-semibold text-text">{formatCar(car)}</p>
               </div>
             ))}
@@ -150,7 +222,23 @@ function InfoCard({ title, rows }) {
 
 function formatCar(car) {
   const parts = [car.carTypeId?.name, car.brandId?.name, car.modelId?.name, car.modelName, car.fuelTypeId?.name, car.vehicleNumber].filter(Boolean);
-  return parts.join(' � ') || 'Car';
+  return parts.join(' ◆ ') || 'Car';
+}
+
+function formatPhoneNumber(phone) {
+  if (!phone) return 'Not added';
+  // If already has +91, return as is
+  if (phone.startsWith('+91')) return phone;
+  // If 10 digits, add +91
+  if (phone.length === 10) return `+91 ${phone}`;
+  // Otherwise return as is
+  return phone;
+}
+
+function maskEmail(email) {
+  if (!email || !email.includes('@')) return 'No email';
+  // Don't mask, show full email as per screenshot
+  return email;
 }
 
 export default UserProfilePage;

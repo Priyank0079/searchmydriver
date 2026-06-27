@@ -25,10 +25,26 @@ const navItems = [
   { path: '/admin/drivers', label: 'Drivers', icon: Car, permission: STAFF_PERMISSIONS.DRIVERS },
   { path: '/admin/drivers/live', label: 'Live Map', icon: Navigation, permission: STAFF_PERMISSIONS.LIVE_MAP },
   { path: '/admin/kit-orders', label: 'Kit Orders', icon: Package, permission: STAFF_PERMISSIONS.KIT_ORDERS },
-  // Ads management — admin + sub_admin can publish promotional images
-  // and short videos that surface on the user home screen.
-  { path: '/admin/banners', label: 'Top Banners', icon: LayoutTemplate, roles: ['admin', 'sub_admin'], permission: STAFF_PERMISSIONS.BANNERS },
-  { path: '/admin/ads', label: 'Ads', icon: Megaphone, roles: ['admin', 'sub_admin'], permission: STAFF_PERMISSIONS.ADS },
+  // User App Control — manage banners and ads on the customer app
+  {
+    label: 'User App Control',
+    icon: Monitor,
+    roles: ['admin', 'sub_admin'],
+    children: [
+      { path: '/admin/banners', label: 'Banners Control', icon: LayoutTemplate, roles: ['admin', 'sub_admin'], permission: STAFF_PERMISSIONS.BANNERS },
+      { path: '/admin/ads', label: 'Ads Control', icon: Megaphone, roles: ['admin', 'sub_admin'], permission: STAFF_PERMISSIONS.ADS },
+    ],
+  },
+  // Web Control — manage banners and tickets raised from the public website
+  {
+    label: 'Web Control',
+    icon: Monitor,
+    roles: ['admin', 'sub_admin'],
+    children: [
+      { path: '/admin/web-banners', label: 'Web Banners', icon: LayoutTemplate, roles: ['admin', 'sub_admin'], permission: STAFF_PERMISSIONS.BANNERS },
+      { path: '/admin/web-tickets', label: 'Web Tickets', icon: Headset, roles: ['admin', 'sub_admin'], permission: STAFF_PERMISSIONS.SUPPORT || 'SUPPORT' },
+    ],
+  },
   {
     label: 'Bookings',
     icon: CalendarCheck,

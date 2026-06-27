@@ -2,8 +2,8 @@ import Banner from '../models/banner.model.js';
 import { ApiError } from '../utils/apiError.js';
 import { deleteFromCloudinary } from '../utils/cloudinary.js';
 
-export const listBannersService = async ({ onlyActive = true } = {}) => {
-  const filter = onlyActive ? { isActive: true } : {};
+export const listBannersService = async ({ onlyActive = true, type = 'user' } = {}) => {
+  const filter = onlyActive ? { isActive: true, type } : { type };
   return await Banner.find(filter)
     .sort({ sortOrder: 1, createdAt: -1 })
     .lean();
