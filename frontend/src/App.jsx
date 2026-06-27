@@ -180,6 +180,7 @@ const ManageBanners = lazy(() => import('./features/admin/pages/ManageBanners'))
 const ManageAds = lazy(() => import('./features/admin/pages/ManageAds'));
 const ManageWebBanners = lazy(() => import('./features/admin/pages/ManageWebBanners'));
 const ManageWebTickets = lazy(() => import('./features/admin/pages/ManageWebTickets'));
+const ManageWebCities = lazy(() => import('./features/admin/pages/ManageWebCities'));
 const IncomingRegistrations = lazy(() => import('./features/admin/pages/IncomingRegistrations'));
 const DriverWallet = lazy(() => import('./features/admin/pages/DriverWallet'));
 const HelpDesk = lazy(() => import('./features/admin/pages/HelpDesk'));
@@ -385,6 +386,7 @@ function App() {
             <Route path="/admin/ads" element={<ManageAds />} />
             <Route path="/admin/web-banners" element={<ManageWebBanners />} />
             <Route path="/admin/web-tickets" element={<ManageWebTickets />} />
+            <Route path="/admin/web-cities" element={<ManageWebCities />} />
             <Route path="/admin/bookings" element={<ManageBookings />} />
             <Route
               path="/admin/bookings/scheduled-jobs"

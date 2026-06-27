@@ -24,6 +24,7 @@ const routeTitles = {
   '/admin/ads': 'User App Ads',
   '/admin/web-banners': 'Website Banners Control',
   '/admin/web-tickets': 'Website Support Tickets',
+  '/admin/web-cities': 'Website Cities Control',
 };
 
 const AdminLayout = () => {

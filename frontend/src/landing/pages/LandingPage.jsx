@@ -7,6 +7,21 @@ const LandingPage = () => {
   const navigate = useNavigate();
   const [banners, setBanners] = useState([]);
   const [currentSlide, setCurrentSlide] = useState(0);
+  const [cities, setCities] = useState([]);
+
+  useEffect(() => {
+    const fetchCities = async () => {
+      try {
+        const res = await api.get('/web-cities/common');
+        if (res.data?.data) {
+          setCities(res.data.data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch cities:', err);
+      }
+    };
+    fetchCities();
+  }, []);
 
   useEffect(() => {
     const fetchBanners = async () => {
@@ -223,6 +238,37 @@ const LandingPage = () => {
                   </button>
                 </>
               )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Cities We Cater Section */}
+      {cities.length > 0 && (
+        <section className="py-16 bg-slate-50 border-t border-slate-200">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-12">
+            <div className="space-y-3">
+              <h2 className="text-3xl font-extrabold text-slate-950">Cities We Cater</h2>
+              <p className="text-sm text-slate-500 font-medium max-w-lg mx-auto">
+                We are committed to providing the best possible services in all cities.
+              </p>
+            </div>
+            
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-8 justify-center items-center">
+              {cities.map((city) => (
+                <div key={city._id} className="flex flex-col items-center gap-3 group">
+                  <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center justify-center transition-all group-hover:scale-105 group-hover:shadow-md">
+                    <img 
+                      src={city.imageUrl} 
+                      alt={city.name} 
+                      className="w-10 h-10 object-contain"
+                    />
+                  </div>
+                  <span className="text-sm font-semibold text-slate-800 capitalize transition-colors group-hover:text-amber-600">
+                    {city.name}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         </section>

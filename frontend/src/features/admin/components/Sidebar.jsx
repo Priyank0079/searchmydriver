@@ -43,6 +43,7 @@ const navItems = [
     children: [
       { path: '/admin/web-banners', label: 'Web Banners', icon: LayoutTemplate, roles: ['admin', 'sub_admin'], permission: STAFF_PERMISSIONS.BANNERS },
       { path: '/admin/web-tickets', label: 'Web Tickets', icon: Headset, roles: ['admin', 'sub_admin'], permission: STAFF_PERMISSIONS.SUPPORT || 'SUPPORT' },
+      { path: '/admin/web-cities', label: 'Web Cities', icon: MapPin, roles: ['admin', 'sub_admin'], permission: STAFF_PERMISSIONS.ZONES },
     ],
   },
   {
