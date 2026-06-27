@@ -135,7 +135,7 @@ const LandingPage = () => {
             {/* Floating Sedan Image */}
             <div className="absolute bottom-4 left-6 sm:left-12 lg:left-16 w-[75%] sm:w-[50%] lg:w-[70%] z-20 animate-float-car">
               <img
-                src="/images/hero-car-yellow.png"
+                src="/Gemini_Generated_Image_2jf3zt2jf3zt2jf3-removebg-preview.png"
                 alt="Yellow Luxury Sedan"
                 className="w-full h-auto drop-shadow-[0_20px_35px_rgba(0,0,0,0.25)] object-contain"
               />
