@@ -124,7 +124,7 @@ const ManageWebCities = () => {
                 <img
                   src={city.imageUrl}
                   alt={city.name}
-                  className="w-10 h-10 object-contain"
+                  className="w-full h-full object-cover rounded-full"
                 />
               </div>
               <div>

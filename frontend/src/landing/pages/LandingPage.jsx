@@ -257,11 +257,11 @@ const LandingPage = () => {
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-8 justify-center items-center">
               {cities.map((city) => (
                 <div key={city._id} className="flex flex-col items-center gap-3 group">
-                  <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center justify-center transition-all group-hover:scale-105 group-hover:shadow-md">
+                  <div className="w-24 h-24 rounded-full bg-white border border-slate-200 shadow-sm overflow-hidden flex items-center justify-center transition-all group-hover:scale-105 group-hover:shadow-md">
                     <img 
                       src={city.imageUrl} 
                       alt={city.name} 
-                      className="w-10 h-10 object-contain"
+                      className="w-full h-full object-cover rounded-full"
                     />
                   </div>
                   <span className="text-sm font-semibold text-slate-800 capitalize transition-colors group-hover:text-amber-600">
