@@ -21,7 +21,7 @@ import useNotificationStore from './useNotificationStore';
  *   3. `disconnect()` is called when all auth stores are cleared (logout).
  */
 
-const RAW_API_URL = import.meta.env.VITE_API_URL || 'http://localhost:9000/api/v1';
+const RAW_API_URL = import.meta.env.VITE_API_URL || 'https://searchmydrivers.com/api/v1';
 
 /** Strip the `/api/v1` suffix so we connect to the socket root. */
 function deriveSocketUrl() {
@@ -146,8 +146,8 @@ const useSocketStore = create((set, get) => ({
 function anyoneAuthenticated() {
   return Boolean(
     useDriverAuthStore.getState().isAuthenticated ||
-      useUserAuthStore.getState().isAuthenticated ||
-      useAdminAuthStore.getState().isAuthenticated,
+    useUserAuthStore.getState().isAuthenticated ||
+    useAdminAuthStore.getState().isAuthenticated,
   );
 }
 
