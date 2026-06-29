@@ -1,6 +1,8 @@
 import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
+import { useFcm } from './hooks/useFcm';
+import TestNotificationWidget from './components/TestNotificationWidget';
 
 // Layouts + guards stay eager — they're small, used on every route, and
 // keeping them out of the Suspense boundary avoids a double spinner on every
@@ -199,6 +201,8 @@ function PageLoader() {
 }
 
 function App() {
+  useFcm();
+
   return (
     <Suspense fallback={<PageLoader />}>
       <Routes>
@@ -431,6 +435,7 @@ function App() {
           </Route>
         </Route>
       </Routes>
+      <TestNotificationWidget />
     </Suspense>
   );
 }

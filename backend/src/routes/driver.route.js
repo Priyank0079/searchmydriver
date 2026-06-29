@@ -14,6 +14,8 @@ import {
   updateOutstationAvailability,
   updateMonthlyAvailability,
   deleteMyAccount,
+  updateDriverFcmToken,
+  triggerDriverTestPush,
 } from '../controllers/driver.controller.js';
 import { uploadVideo as uploadVideoMiddleware } from '../middlewares/multer.js';
 import {
@@ -21,6 +23,7 @@ import {
   linkGoogleDriverPhone,
 } from '../controllers/googleAuth.controller.js';
 import { protectDriver } from '../middlewares/authMiddleware.js';
+import { authLimiter } from '../middlewares/rateLimiter.js';
 import { getMandatoryKit, getAvailableKits } from '../controllers/kit.controller.js';
 import {
   createKitOrder,
@@ -68,10 +71,10 @@ const router = express.Router();
 
 router.post('/support/ticket', protectDriver, createSupportTicket);
 router.post('/support/public-ticket', createPublicSupportTicket);
-router.post('/auth/send-otp', sendOtp);
-router.post('/auth/verify-otp', verifyOtpAndRegister);
-router.post('/auth/login', loginDriver);
-router.post('/auth/google', googleSignInDriver);
+router.post('/auth/send-otp', authLimiter, sendOtp);
+router.post('/auth/verify-otp', authLimiter, verifyOtpAndRegister);
+router.post('/auth/login', authLimiter, loginDriver);
+router.post('/auth/google', authLimiter, googleSignInDriver);
 
 router.put('/onboarding/step', protectDriver, updateOnboardingStep);
 router.use('/notifications', protectDriver, notificationRouter);
@@ -148,5 +151,9 @@ router.post(
 // Post-trip rating — driver rates the customer they just drove.
 // Once-only; a duplicate submit hits 409 from the service.
 router.post('/bookings/:id/rate-customer', protectDriver, rateCustomerByDriver);
+
+// FCM Push Notifications
+router.post('/fcm-token', protectDriver, updateDriverFcmToken);
+router.post('/test-push', protectDriver, triggerDriverTestPush);
 
 export default router;

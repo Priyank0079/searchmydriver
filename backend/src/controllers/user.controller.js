@@ -2,6 +2,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiResponse } from '../utils/apiResponse.js';
 import { setAuthCookies, clearAuthCookies } from '../utils/cookie.util.js';
 import * as userService from '../services/user.service.js';
+import { sendFcmNotification } from '../config/firebase.js';
 
 export const sendUserOtp = asyncHandler(async (req, res) => {
   const result = await userService.sendUserOtpService(req.body.phone);
@@ -78,4 +79,29 @@ export const deleteMyAccount = asyncHandler(async (req, res) => {
   const result = await userService.deleteUserAccountService(req.user._id);
   clearAuthCookies(res);
   return res.status(200).json(new ApiResponse(200, result, 'Account deleted successfully'));
+});
+
+export const updateUserFcmToken = asyncHandler(async (req, res) => {
+  const { token } = req.body;
+  req.user.fcmToken = token || '';
+  await req.user.save();
+  return res.status(200).json(new ApiResponse(200, null, 'FCM token updated successfully'));
+});
+
+export const triggerUserTestPush = asyncHandler(async (req, res) => {
+  if (!req.user.fcmToken) {
+    return res.status(400).json(new ApiResponse(400, null, 'No FCM token registered for this user'));
+  }
+  
+  const success = await sendFcmNotification(req.user.fcmToken, {
+    title: 'Test Notification',
+    body: `Hello ${req.user.name}, this is a test push notification from SearchMyDriver!`,
+    data: { type: 'test', timestamp: Date.now() },
+  });
+
+  if (success) {
+    return res.status(200).json(new ApiResponse(200, null, 'Test push notification sent successfully'));
+  } else {
+    return res.status(500).json(new ApiResponse(500, null, 'Failed to send test push notification'));
+  }
 });

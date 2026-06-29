@@ -15,6 +15,8 @@ import {
   addSavedLocation,
   deleteSavedLocation,
   deleteMyAccount,
+  updateUserFcmToken,
+  triggerUserTestPush,
 } from '../controllers/user.controller.js';
 import {
   googleSignInUser,
@@ -51,17 +53,18 @@ import {
 } from '../controllers/wallet.controller.js';
 import { createSupportTicket, createPublicSupportTicket } from '../controllers/support.controller.js';
 import { protectUser, protectProfileViewer } from '../middlewares/authMiddleware.js';
+import { authLimiter } from '../middlewares/rateLimiter.js';
 
 const router = express.Router();
 
 // Auth Public
 router.post('/support/ticket', protectUser, createSupportTicket);
 router.post('/support/public-ticket', createPublicSupportTicket);
-router.post('/send-otp', sendUserOtp);
-router.post('/verify-otp', verifyUserOtpAndRegister);
-router.post('/login', loginUser);
-router.post('/google', googleSignInUser);
-router.post('/google/link-phone/otp', sendGoogleLinkPhoneOtp);
+router.post('/send-otp', authLimiter, sendUserOtp);
+router.post('/verify-otp', authLimiter, verifyUserOtpAndRegister);
+router.post('/login', authLimiter, loginUser);
+router.post('/google', authLimiter, googleSignInUser);
+router.post('/google/link-phone/otp', authLimiter, sendGoogleLinkPhoneOtp);
 router.post('/refresh-token', refreshAccessToken);
 router.post('/logout', logout);
 router.delete('/account', protectUser, deleteMyAccount);
@@ -126,5 +129,9 @@ router.delete('/saved-locations/:id', deleteSavedLocation);
 
 // Nearby drivers (home screen widget + future surfaces)
 router.get('/drivers/nearby', getNearbyDriversForUser);
+
+// FCM Push Notifications
+router.post('/fcm-token', updateUserFcmToken);
+router.post('/test-push', triggerUserTestPush);
 
 export default router;

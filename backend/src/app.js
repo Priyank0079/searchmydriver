@@ -3,7 +3,7 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
-import rateLimit from 'express-rate-limit';
+import { globalLimiter } from './middlewares/rateLimiter.js';
 import { getCorsOptions } from './config/cors.config.js';
 
 import commonRoutes from './routes/common.route.js';
@@ -30,20 +30,7 @@ app.set('trust proxy', 1);
 app.use(helmet());
 app.use(compression());
 
-const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 200,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { status: 429, message: 'Too many requests, please try again later.' }
-});
 app.use(globalLimiter);
-
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'development' ? 1000 : 20,
-  message: { status: 429, message: 'Too many login attempts, please try again later.' }
-});
 
 app.use(cors(getCorsOptions()));
 app.use(cookieParser());
@@ -51,7 +38,7 @@ app.use('/api/v1/webhooks', webhookRoutes);
 app.use(express.json({ limit: '16kb' }));
 app.use(express.urlencoded({ extended: true, limit: '16kb' }));
 
-app.use('/api/v1/auth', authLimiter, authRoutes);
+app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/common', commonRoutes);
 app.use('/api/v1/driver', driverRoutes);
 app.use('/api/v1/admin', adminRoutes);

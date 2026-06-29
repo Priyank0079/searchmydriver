@@ -7,6 +7,9 @@ import {
 } from '../config/socket.js';
 import { S2C_EVENTS } from '../constants/socketEvents.js';
 import { Notification } from '../models/notification.model.js';
+import User from '../models/user.model.js';
+import { Driver } from '../models/driverModels/driver.model.js';
+import { sendFcmNotification } from '../config/firebase.js';
 
 /**
  * Thin wrappers around `io.to(room).emit(...)` so feature code never imports
@@ -115,6 +118,24 @@ export async function emitNotification(target, notification) {
         data: payload.data,
       });
       payload._id = doc._id;
+
+      // Fetch user/driver fcmToken to send push notification
+      let fcmToken = '';
+      if (recipientModel === 'User') {
+        const user = await User.findById(recipientId).select('fcmToken').lean();
+        fcmToken = user?.fcmToken;
+      } else if (recipientModel === 'Driver') {
+        const driver = await Driver.findById(recipientId).select('fcmToken').lean();
+        fcmToken = driver?.fcmToken;
+      }
+
+      if (fcmToken) {
+        sendFcmNotification(fcmToken, {
+          title: payload.title,
+          body: payload.body,
+          data: payload.data,
+        }).catch(err => console.error('[FCM] Async send failed:', err));
+      }
     }
   } catch (err) {
     console.error('[Notification] Failed to save to DB:', err);

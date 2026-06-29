@@ -69,6 +69,10 @@ export async function initializeFirebase() {
   let serviceAccount;
   try {
     serviceAccount = JSON.parse(jsonStr);
+    if (serviceAccount.private_key) {
+      // Fix double escaped newlines in env variables
+      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+    }
   } catch (err) {
     warnOnce(`Could not parse FIREBASE_SERVICE_ACCOUNT_JSON: ${err.message}`);
     return null;
@@ -115,4 +119,45 @@ export function getRtdb() {
  */
 export function isFirebaseReady() {
   return Boolean(initializedApp);
+}
+
+/**
+ * Sends a push notification to a specific token.
+ * Returns true if sent successfully, false otherwise.
+ */
+export async function sendFcmNotification(token, payload) {
+  const admin = getFirebaseAdmin();
+  if (!admin) {
+    console.warn('[firebase] FCM not sent: Firebase admin not initialized.');
+    return false;
+  }
+  
+  if (!token) return false;
+
+  try {
+    const response = await admin.messaging().send({
+      token,
+      notification: {
+        title: payload.title || 'SearchMyDriver Notification',
+        body: payload.body || '',
+      },
+      data: payload.data ? Object.fromEntries(
+        Object.entries(payload.data).map(([k, v]) => [k, String(v)])
+      ) : {},
+      webpush: {
+        headers: {
+          Urgency: 'high',
+        },
+        notification: {
+          icon: '/logo.png',
+          badge: '/logo.png',
+        }
+      }
+    });
+    console.log('[firebase] FCM notification sent successfully:', response);
+    return true;
+  } catch (err) {
+    console.error('[firebase] FCM send failed:', err.message);
+    return false;
+  }
 }

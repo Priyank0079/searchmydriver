@@ -1,5 +1,6 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getDatabase } from 'firebase/database';
+import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 
 /**
  * Lazy Firebase JS SDK initializer.
@@ -16,6 +17,7 @@ import { getDatabase } from 'firebase/database';
  *   VITE_FIREBASE_STORAGE_BUCKET
  *   VITE_FIREBASE_MESSAGING_SENDER_ID
  *   VITE_FIREBASE_APP_ID
+ *   VITE_FIREBASE_VAPID_KEY      ← Optional: Public VAPID key from Cloud Messaging tab
  */
 
 const env = import.meta.env;
@@ -38,6 +40,7 @@ function buildFirebaseConfig() {
 
 let appInstance = null;
 let dbInstance = null;
+let messagingInstance = null;
 let warned = false;
 
 function warnOnce(message) {
@@ -82,7 +85,82 @@ export function getRealtimeDb() {
   return dbInstance;
 }
 
+/**
+ * Returns the singleton FCM Messaging instance, or null.
+ */
+export function getFcmMessaging() {
+  if (messagingInstance) return messagingInstance;
+  const app = getFirebaseApp();
+  if (!app) return null;
+  try {
+    messagingInstance = getMessaging(app);
+    return messagingInstance;
+  } catch (err) {
+    console.warn('[firebase] FCM not supported in this browser:', err.message);
+    return null;
+  }
+}
+
 /** True when Firebase is fully wired. Use for feature flagging UI. */
 export function isFirebaseConfigured() {
   return getFirebaseApp() !== null;
+}
+
+/**
+ * Requests FCM notification permissions and returns the FCM Device Registration Token.
+ * Registers the background service worker with search parameters.
+ */
+export async function requestFcmToken() {
+  const app = getFirebaseApp();
+  if (!app) return null;
+
+  const { config } = buildFirebaseConfig();
+  const qs = new URLSearchParams({
+    apiKey: config.apiKey || '',
+    authDomain: config.authDomain || '',
+    databaseURL: config.databaseURL || '',
+    projectId: config.projectId || '',
+    storageBucket: config.storageBucket || '',
+    messagingSenderId: config.messagingSenderId || '',
+    appId: config.appId || '',
+  }).toString();
+
+  try {
+    if ('serviceWorker' in navigator) {
+      const registration = await navigator.serviceWorker.register(
+        `/firebase-messaging-sw.js?${qs}`,
+        { scope: '/' }
+      );
+      
+      const messaging = getFcmMessaging();
+      if (!messaging) return null;
+
+      // Request permission
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        console.warn('[firebase] Notification permission not granted');
+        return null;
+      }
+
+      const tokenOptions = { serviceWorkerRegistration: registration };
+      if (env.VITE_FIREBASE_VAPID_KEY) {
+        tokenOptions.vapidKey = env.VITE_FIREBASE_VAPID_KEY;
+      }
+
+      const token = await getToken(messaging, tokenOptions);
+      return token;
+    }
+  } catch (err) {
+    console.error('[firebase] Error retrieving FCM Token:', err);
+  }
+  return null;
+}
+
+/**
+ * Expose onMessage listener for foreground messages.
+ */
+export function onFcmMessage(callback) {
+  const messaging = getFcmMessaging();
+  if (!messaging) return () => {};
+  return onMessage(messaging, callback);
 }
