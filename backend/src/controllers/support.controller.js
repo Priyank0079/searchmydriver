@@ -1,5 +1,5 @@
 import SupportTicket from '../models/supportTicket.model.js';
-import { ApiError } from '../utils/ApiError.js';
+import { ApiError } from '../utils/apiError.js';
 import { emitToAdmins, emitNotification } from '../utils/socketEmitters.js';
 import { S2C_EVENTS } from '../constants/socketEvents.js';
 
