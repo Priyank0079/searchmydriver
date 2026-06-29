@@ -38,9 +38,16 @@ export function useFcm() {
     // Setup foreground message listener
     const unsubscribe = onFcmMessage((payload) => {
       console.log('[FCM] Received message in foreground:', payload);
-      // You can trigger custom visual notification/toast alerts here
       if (payload.notification) {
-        alert(`[Push Notification] ${payload.notification.title}: ${payload.notification.body}`);
+        // Trigger a proper native system push notification instead of an alert dialog
+        if (Notification.permission === 'granted') {
+          new Notification(payload.notification.title, {
+            body: payload.notification.body,
+            icon: '/favicon.svg',
+          });
+        } else {
+          console.warn('[FCM] Notification permission is not granted; cannot display foreground push.');
+        }
       }
     });
 
