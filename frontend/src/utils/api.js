@@ -3,7 +3,7 @@ import useDriverAuthStore from '../store/useDriverAuthStore';
 import useAdminAuthStore from '../store/useAdminAuthStore';
 import useUserAuthStore from '../store/useUserAuthStore';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://searchmydrivers.com/api/v1';
+const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
 const api = axios.create({
   baseURL: API_URL,
