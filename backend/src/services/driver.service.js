@@ -90,13 +90,13 @@ export const verifyOtpAndRegisterService = async (data) => {
       referralCode: myReferralCode,
     });
     await driver.save();
-    
+
     // Handle incoming referral code
     if (referralCode) {
       const code = referralCode.trim().toUpperCase();
       let referrer = await Driver.findOne({ referralCode: code });
       let referrerType = 'Driver';
-      
+
       if (!referrer) {
         // We import User dynamically to avoid circular dependencies if any
         const User = (await import('../models/user.model.js')).default;
@@ -111,7 +111,7 @@ export const verifyOtpAndRegisterService = async (data) => {
 
         const settings = await PlatformSettings.findOne();
         const driverSettings = settings?.referral?.driver || {};
-        
+
         if (driverSettings.enabled) {
           await Referral.create({
             referrerId: referrer._id,

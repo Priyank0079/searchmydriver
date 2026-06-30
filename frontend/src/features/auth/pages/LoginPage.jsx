@@ -51,67 +51,86 @@ const LoginPage = () => {
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-white min-h-dvh">
-      <div className="px-4 pt-4">
-        <button type="button" onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-xl hover:bg-gray-100">
-          <ArrowLeft className="w-5 h-5 text-text" />
+    <div className="flex-1 flex flex-col bg-gradient-to-b from-[#FFFDF5] via-[#FFFBF0] to-[#FFF8E7] min-h-dvh justify-between">
+      {/* Top Header Row */}
+      <div className="px-4 pt-4 flex items-center justify-between">
+        <button type="button" onClick={() => navigate(-1)} className="p-2.5 rounded-full bg-white/80 border border-amber-100/50 shadow-sm hover:bg-amber-50 text-slate-700 hover:text-slate-900 transition-colors">
+          <ArrowLeft className="w-4 h-4" />
         </button>
+        <span className="text-xs font-black uppercase tracking-widest text-slate-500">Security Access</span>
       </div>
 
-      <div className="flex-1 flex flex-col px-6 pt-6">
-        <div className="mb-8 animate-fade-in-up">
-          <h1 className="text-2xl font-bold text-text mb-1">Welcome Back!</h1>
-          <p className="text-text-secondary text-sm">Login to continue</p>
-        </div>
+      {/* Centered Floating Card */}
+      <div className="flex-1 flex flex-col justify-center px-4 py-8">
+        <div className="w-full max-w-[390px] mx-auto bg-white rounded-[28px] border border-amber-100/80 p-6 sm:p-7 shadow-xl shadow-amber-900/5 animate-fade-in-up">
+          {/* Logo */}
+          <div className="flex justify-center mb-5">
+            <img src="/images/logo-smd.png" alt="SearchMyDrivers Logo" className="h-9 w-auto object-contain" />
+          </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
-          <div>
-            <label className="text-sm font-medium text-text mb-1.5 block">Phone Number</label>
-            <div className="flex gap-2">
-              <div className="h-12 px-3 bg-gray-50 border border-border rounded-xl flex items-center text-sm text-text-secondary font-medium shrink-0">
-                +91
+          {/* Heading */}
+          <div className="text-center mb-6">
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-none">Welcome Back!</h1>
+            <p className="text-slate-500 text-[11px] sm:text-xs font-bold uppercase tracking-wider mt-1.5">Login to continue</p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="text-xs font-extrabold text-slate-800 mb-1.5 block uppercase tracking-wider">Phone Number</label>
+              <div className="flex gap-2">
+                <div className="h-11 px-3 bg-amber-50/50 border border-amber-150 rounded-xl flex items-center text-sm text-amber-900 font-extrabold shrink-0 shadow-inner">
+                  +91
+                </div>
+                <Input
+                  type="tel"
+                  placeholder="10-digit number"
+                  value={formData.phone}
+                  onChange={handleChange('phone')}
+                  error={errors.phone}
+                  icon={Phone}
+                  maxLength={10}
+                />
               </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-extrabold text-slate-800 mb-1.5 block uppercase tracking-wider">Password</label>
               <Input
-                type="tel"
-                placeholder="10-digit number"
-                value={formData.phone}
-                onChange={handleChange('phone')}
-                error={errors.phone}
-                icon={Phone}
-                maxLength={10}
+                type="password"
+                placeholder="Enter your password"
+                value={formData.password}
+                onChange={handleChange('password')}
+                error={errors.password}
+                icon={Lock}
               />
             </div>
-          </div>
 
-          <Input
-            label="Password"
-            type="password"
-            placeholder="Enter your password"
-            value={formData.password}
-            onChange={handleChange('password')}
-            error={errors.password}
-            icon={Lock}
-          />
+            <div className="flex justify-end pt-1">
+              <Link to="/forgot-password" className="text-xs text-amber-600 font-bold hover:text-amber-700 hover:underline">
+                Forgot Password?
+              </Link>
+            </div>
 
-          <div className="flex justify-end">
-            <Link to="/forgot-password" className="text-sm text-primary font-medium hover:underline">
-              Forgot Password?
+            <Button type="submit" variant="dark" fullWidth loading={loading} className="rounded-full py-3 text-sm font-bold shadow-lg shadow-slate-950/15 mt-2">
+              Login
+            </Button>
+          </form>
+
+          <p className="text-center text-xs text-slate-500 mt-6 font-semibold">
+            Don&apos;t have an account?{' '}
+            <Link to="/register" className="text-amber-600 font-bold hover:text-amber-700 hover:underline">
+              Sign Up
             </Link>
-          </div>
+          </p>
+        </div>
+      </div>
 
-          <Button type="submit" fullWidth loading={loading} className="rounded-full py-4 text-base font-bold shadow-lg shadow-primary/20">
-            Login
-          </Button>
-        </form>
-
-        <p className="text-center text-sm text-text-secondary mt-8 mb-6 animate-fade-in-up" style={{ animationDelay: '0.4s' }}>
-          Don&apos;t have an account?{' '}
-          <Link to="/register" className="text-primary font-semibold hover:underline">
-            Sign Up
-          </Link>
-        </p>
+      {/* Footer copyright space to balance visually */}
+      <div className="py-4 text-center">
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">© SearchMyDriver Security</p>
       </div>
     </div>
+
   );
 };
 

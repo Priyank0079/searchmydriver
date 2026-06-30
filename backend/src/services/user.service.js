@@ -80,7 +80,7 @@ export const verifyUserOtpAndRegisterService = async ({ name, phone, password, o
     const code = referralCode.trim().toUpperCase();
     let referrer = await User.findOne({ referralCode: code });
     let referrerType = 'User';
-    
+
     if (!referrer) {
       referrer = await Driver.findOne({ referralCode: code });
       referrerType = 'Driver';
@@ -89,7 +89,7 @@ export const verifyUserOtpAndRegisterService = async ({ name, phone, password, o
     if (referrer) {
       const settings = await PlatformSettings.findOne();
       const userSettings = settings?.referral?.user || {};
-      
+
       if (userSettings.enabled) {
         await Referral.create({
           referrerId: referrer._id,

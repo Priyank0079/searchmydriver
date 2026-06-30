@@ -107,27 +107,27 @@ const UserHomePage = () => {
   return (
     <div className="flex-1 flex flex-col bg-bg relative">
       {/* ====== Sticky Header ====== */}
-      <div className="sticky top-0 z-30 bg-dark px-4 pt-4 pb-4 rounded-b-3xl shadow-lg">
+      <div className="sticky top-0 z-30 bg-gradient-to-b from-[#FFF5D6] to-[#FFEAA8] border-b border-[#F5D169] px-4 pt-4 pb-4 rounded-b-3xl shadow-md">
         <div className="flex items-center justify-between mb-3">
           <div className="min-w-0 max-w-[75%]">
-            <p className="text-white/60 text-xs">Your location</p>
+            <p className="text-slate-600 text-xs font-bold uppercase tracking-wide opacity-80">Your location</p>
             <div className="flex items-center gap-1 mt-0.5 min-w-0">
-              <MapPin className="w-4 h-4 text-primary shrink-0" />
+              <MapPin className="w-4 h-4 text-amber-700 shrink-0" />
               <span
-                className="text-white text-sm font-medium truncate"
+                className="text-slate-900 text-sm font-extrabold truncate"
                 title={currentLocation?.address || locationLine}
               >
                 {locationLine}
               </span>
               {locationLoading && (
-                <Loader2 className="w-3.5 h-3.5 text-white/60 animate-spin shrink-0" />
+                <Loader2 className="w-3.5 h-3.5 text-slate-500 animate-spin shrink-0" />
               )}
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => setIsHelpDeskOpen(true)}
-              className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+              className="p-2 text-slate-700 hover:text-slate-950 hover:bg-amber-500/10 rounded-full transition-colors"
             >
               <Headset className="w-5 h-5" />
             </button>

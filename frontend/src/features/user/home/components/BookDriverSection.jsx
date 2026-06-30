@@ -69,11 +69,14 @@ const BookDriverSection = () => {
 
   return (
     <section className="animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
-      <header className="flex items-baseline justify-between mb-3">
-        <div>
-          <h2 className="text-base font-extrabold text-text leading-tight">Book a driver</h2>
-          <p className="text-xs text-text-muted mt-0.5">Choose what fits your day.</p>
-        </div>
+      <header className="flex flex-col items-center text-center mb-4 mt-1">
+        <h2 className="text-base sm:text-lg font-black text-slate-900 leading-tight relative inline-block">
+          Book a driver
+          <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-6 h-[3px] bg-primary rounded-full" />
+        </h2>
+        <p className="text-[11px] sm:text-xs text-text-secondary mt-1.5 font-bold uppercase tracking-wider opacity-90">
+          Choose what fits your day.
+        </p>
       </header>
 
       <div className="grid grid-cols-2 gap-3">
@@ -82,6 +85,7 @@ const BookDriverSection = () => {
           return (
             <ServiceCard
               key={catalog.key}
+              serviceKey={catalog.key}
               title={catalog.title}
               tagline={catalog.tagline}
               priceLabel={catalog.priceLabel(pricing)}
@@ -94,6 +98,7 @@ const BookDriverSection = () => {
               onClick={() => handleServiceTap(catalog.key)}
               style={{ animationDelay: `${0.1 + idx * 0.05}s` }}
             />
+
           );
         })}
       </div>

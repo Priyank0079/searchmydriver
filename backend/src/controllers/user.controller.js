@@ -92,7 +92,7 @@ export const triggerUserTestPush = asyncHandler(async (req, res) => {
   if (!req.user.fcmToken) {
     return res.status(400).json(new ApiResponse(400, null, 'No FCM token registered for this user'));
   }
-  
+
   const success = await sendFcmNotification(req.user.fcmToken, {
     title: 'Test Notification',
     body: `Hello ${req.user.name}, this is a test push notification from SearchMyDriver!`,
