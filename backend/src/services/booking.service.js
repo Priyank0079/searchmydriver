@@ -237,6 +237,9 @@ export function sanitizeBookingForDriver(booking) {
   }
   // Driver doesn't need to see the customer's chosen payment timing or
   // running balance — those are user-side concerns.
+  if (obj.paymentMethod === 'cash') {
+    obj.cashDueRupees = Number(obj.fareSnapshot?.total || 0);
+  }
   if ('paymentMode' in obj) delete obj.paymentMode;
   if ('paymentStatus' in obj) delete obj.paymentStatus;
   if ('payment' in obj) delete obj.payment;
@@ -1103,10 +1106,7 @@ export async function createBookingService(userId, body) {
       // team_member) picks a driver from the outstation-assignment
       // queue. Hourly bookings (instant + immediate-tier scheduled)
       // continue to start in SEARCHING and let the dispatcher take over.
-      status:
-        serviceType === SERVICE_TYPES.OUTSTATION
-          ? BOOKING_STATUS.PENDING_ASSIGNMENT
-          : BOOKING_STATUS.SEARCHING,
+      status: BOOKING_STATUS.SEARCHING,
     });
   } catch (err) {
     // Compensating credit if booking creation fails after we've already
@@ -1147,22 +1147,22 @@ export async function createBookingService(userId, body) {
     }
   }
 
-  // Scheduled hourly bookings branch through the scheduled-ride
-  // dispatcher: short-window + morning rides search immediately (just
-  // like instant), longer-lead rides sit in PENDING_ASSIGNMENT until
-  // the BullMQ `assign` job fires. The emergency-pool `escalate` job
-  // is enqueued for every scheduled booking either way.
+  // Scheduled bookings branch through the scheduled-ride dispatcher:
+  // short-window + morning rides search immediately (just like instant),
+  // longer-lead rides sit in PENDING_ASSIGNMENT until the BullMQ
+  // `assign` job fires. The emergency-pool `escalate` job is enqueued for
+  // every scheduled booking either way.
   //
-  // Outstation bookings are always manually assigned (no auto-dispatch).
-  // The booking lives in PENDING_ASSIGNMENT until an admin picks a
-  // driver from the outstation-assignment queue.
+  // Outstation scheduled bookings now follow the same auto-dispatch
+  // flow as hourly scheduled rides. If no driver is found before the
+  // emergency cutoff, the booking falls back to manual assignment.
   // Online payments: hold dispatch until Razorpay payment is verified.
-  let shouldDispatchNow = !isOnline && serviceType !== SERVICE_TYPES.OUTSTATION;
+  let shouldDispatchNow = !isOnline;
   if (
     !isOnline &&
     bookingType === BOOKING_TYPE.SCHEDULED &&
-    serviceType === SERVICE_TYPES.HOURLY &&
-    booking.hourly?.scheduledStartAt
+    (serviceType === SERVICE_TYPES.HOURLY || serviceType === SERVICE_TYPES.OUTSTATION) &&
+    (booking.hourly?.scheduledStartAt || booking.outstation?.pickupAt || booking.outstation?.startDate)
   ) {
     try {
       const decision = await setupScheduledBooking(booking);

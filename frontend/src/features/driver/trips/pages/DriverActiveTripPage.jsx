@@ -245,6 +245,8 @@ const DriverActiveTripPage = () => {
   // driver lands back on the dashboard for their next offer.
   const status = booking?.status;
   const cancellationReason = booking?.cancellation?.reason;
+  const isCashBooking = booking?.paymentMethod === 'cash';
+  const cashDueRupees = Number(booking?.cashDueRupees || 0);
   useEffect(() => {
     if (!status) return;
     if (status === BOOKING_STATUS.COMPLETED) {
@@ -288,6 +290,7 @@ const DriverActiveTripPage = () => {
   // ARRIVED. We keep it page-local rather than baking it into the store
   // because it's purely a UI concern.
   const [otpOpen, setOtpOpen] = useState(false);
+  const [completeConfirmOpen, setCompleteConfirmOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
@@ -402,6 +405,10 @@ const DriverActiveTripPage = () => {
       setOtpOpen(true);
       return;
     }
+    if (action === 'completeTrip' && isCashBooking && cashDueRupees > 0) {
+      setCompleteConfirmOpen(true);
+      return;
+    }
     if (action === 'markArrived') {
       if (!driverPoint) {
         toast.error('We need your location to confirm arrival. Enable GPS and try again.');
@@ -461,6 +468,15 @@ const DriverActiveTripPage = () => {
   // Live cancellation preview — recomputes every render (cheap pure
   // function) so the wall-clock heartbeat above drives the copy.
   const cancelPreview = previewDriverCancellation(booking);
+
+  const handleCompleteConfirm = useCallback(async () => {
+    setCompleteConfirmOpen(false);
+    try {
+      await useDriverActiveTripStore.getState().completeTrip();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || err?.message || 'Could not complete trip');
+    }
+  }, []);
 
   const handleCancelConfirm = useCallback(async () => {
     setCancelling(true);
@@ -826,6 +842,24 @@ const DriverActiveTripPage = () => {
           </p>
         )}
 
+        {status === BOOKING_STATUS.STARTED && isCashBooking && cashDueRupees > 0 && (
+          <Card className="border border-amber-200 bg-amber-50">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                <WalletIcon className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-amber-900">
+                  Collect cash before completing
+                </p>
+                <p className="text-[12px] text-amber-800 mt-1 leading-snug">
+                  Please collect ₹{cashDueRupees.toLocaleString('en-IN')} from the customer before tapping Complete trip.
+                </p>
+              </div>
+            </div>
+          </Card>
+        )}
+
         {isEnRoute && (
           <div
             className={`rounded-2xl border p-3 flex items-start gap-3 ${arrivalReady
@@ -949,6 +983,17 @@ const DriverActiveTripPage = () => {
         )}
       </div>
 
+      <ConfirmDialog
+        open={completeConfirmOpen}
+        onClose={() => setCompleteConfirmOpen(false)}
+        onConfirm={handleCompleteConfirm}
+        title="Collect cash before completing"
+        description={`Please collect ₹${cashDueRupees.toLocaleString('en-IN')} from the customer in cash before marking the trip complete.`}
+        confirmLabel="I have collected cash"
+        cancelLabel="Wait"
+        variant="warning"
+        loading={busy === 'complete'}
+      />
       <ConfirmDialog
         open={cancelOpen}
         onClose={() => !cancelling && setCancelOpen(false)}

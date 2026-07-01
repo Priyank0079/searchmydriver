@@ -137,35 +137,38 @@ export async function requestFcmToken() {
     appId: config.appId || '',
   }).toString();
 
+  if (typeof window === 'undefined') return null;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+    console.warn('[firebase] FCM not supported in this browser environment.');
+    return null;
+  }
+
   try {
-    if ('serviceWorker' in navigator) {
-      const registration = await navigator.serviceWorker.register(
-        `/firebase-messaging-sw.js?${qs}`,
-        { scope: '/' }
-      );
-      
-      const messaging = getFcmMessaging();
-      if (!messaging) return null;
+    const registration = await navigator.serviceWorker.register(
+      `/firebase-messaging-sw.js?${qs}`,
+      { scope: '/' }
+    );
 
-      // Request permission
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') {
-        console.warn('[firebase] Notification permission not granted');
-        return null;
-      }
+    const messaging = getFcmMessaging();
+    if (!messaging) return null;
 
-      const tokenOptions = { serviceWorkerRegistration: registration };
-      if (env.VITE_FIREBASE_VAPID_KEY) {
-        tokenOptions.vapidKey = env.VITE_FIREBASE_VAPID_KEY;
-      }
-
-      const token = await getToken(messaging, tokenOptions);
-      return token;
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      console.warn('[firebase] Notification permission not granted');
+      return null;
     }
+
+    const tokenOptions = { serviceWorkerRegistration: registration };
+    if (env.VITE_FIREBASE_VAPID_KEY) {
+      tokenOptions.vapidKey = env.VITE_FIREBASE_VAPID_KEY;
+    }
+
+    const token = await getToken(messaging, tokenOptions);
+    return token;
   } catch (err) {
     console.error('[firebase] Error retrieving FCM Token:', err);
+    return null;
   }
-  return null;
 }
 
 /**
