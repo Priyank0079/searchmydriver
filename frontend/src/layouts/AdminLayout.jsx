@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import Sidebar from '../features/admin/components/Sidebar';
 import AdminHeader from '../features/admin/components/AdminHeader';
 import { useSocketEvent } from '../hooks/useSocket';
+import { useNotificationSound } from '../hooks/useNotificationSound';
 import { S2C_EVENTS } from '../constants/socketEvents';
 
 const routeTitles = {
@@ -31,11 +32,11 @@ const routeTitles = {
 const AdminLayout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
+  const { play: playAlertSound } = useNotificationSound('/audio/alert_.mp3', { volume: 0.8 });
 
   useSocketEvent(S2C_EVENTS.ADMIN_ALERT, (payload) => {
-    toast.success(payload.message || 'New Help Desk Ticket', { duration: 5000 });
-    const audio = new Audio('/audio/alert_.mp3');
-    audio.play().catch(console.error);
+    toast.success(payload.message || 'New Alert', { duration: 5000 });
+    playAlertSound();
   });
 
   const pageTitle =

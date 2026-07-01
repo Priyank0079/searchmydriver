@@ -429,18 +429,27 @@ export const submitApplicationService = async (driverId) => {
     throw new ApiError(400, 'Please complete the safety declaration first');
   }
 
-  // Training validation removed as per user request to make videos non-mandatory
-  // const trainingComplete = await isDriverTrainingComplete(driver);
-  // if (!trainingComplete) {
-  //   throw new ApiError(400, 'Please complete all required training videos before submitting');
-  // }
-
   driver.approvalStatus = 'under_review';
   driver.onboardingStep = DRIVER_ONBOARDING_STEP.SUBMITTED;
   await driver.save();
 
   const { upsertDriverReviewTask } = await import('./adminTask.service.js');
   await upsertDriverReviewTask(driver);
+
+  const { emitToAdmins, emitNotification } = await import('../utils/socketEmitters.js');
+  const { S2C_EVENTS } = await import('../constants/socketEvents.js');
+
+  emitToAdmins(S2C_EVENTS.ADMIN_ALERT, {
+    type: 'driver_approval',
+    message: `New driver application submitted by ${driver.name}`,
+    driverId: driver._id,
+  });
+
+  emitNotification({ admin: true }, {
+    title: 'New Driver Application',
+    body: `${driver.name} has submitted their application for review.`,
+    severity: 'info'
+  });
 
   return driver;
 };
