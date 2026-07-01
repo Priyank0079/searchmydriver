@@ -92,6 +92,18 @@ export function getFcmMessaging() {
   if (messagingInstance) return messagingInstance;
   const app = getFirebaseApp();
   if (!app) return null;
+
+  const isMessagingSupported = 
+    typeof window !== 'undefined' &&
+    'serviceWorker' in navigator &&
+    'PushManager' in window &&
+    'Notification' in window;
+
+  if (!isMessagingSupported) {
+    warnOnce('FCM is not supported in this browser environment.');
+    return null;
+  }
+
   try {
     messagingInstance = getMessaging(app);
     return messagingInstance;

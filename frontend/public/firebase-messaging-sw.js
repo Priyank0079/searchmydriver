@@ -24,19 +24,23 @@ if (messagingSenderId && apiKey && projectId) {
     appId
   });
 
-  const messaging = firebase.messaging();
+  if (firebase.messaging.isSupported()) {
+    const messaging = firebase.messaging();
 
-  messaging.onBackgroundMessage((payload) => {
-    console.log('[firebase-messaging-sw.js] Received background message ', payload);
-    const notificationTitle = payload.notification?.title || 'SearchMyDriver';
-    const notificationOptions = {
-      body: payload.notification?.body || '',
-      icon: '/favicon.svg',
-      data: payload.data || {}
-    };
+    messaging.onBackgroundMessage((payload) => {
+      console.log('[firebase-messaging-sw.js] Received background message ', payload);
+      const notificationTitle = payload.notification?.title || 'SearchMyDriver';
+      const notificationOptions = {
+        body: payload.notification?.body || '',
+        icon: '/favicon.svg',
+        data: payload.data || {}
+      };
 
-    self.registration.showNotification(notificationTitle, notificationOptions);
-  });
+      self.registration.showNotification(notificationTitle, notificationOptions);
+    });
+  } else {
+    console.warn('[firebase-messaging-sw.js] Messaging is not supported in this environment');
+  }
 } else {
   console.warn('[firebase-messaging-sw.js] Incomplete config params passed to SW');
 }
