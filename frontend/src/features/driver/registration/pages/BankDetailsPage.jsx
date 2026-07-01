@@ -38,7 +38,15 @@ const BankDetailsPage = () => {
     fetchProfile();
   }, []);
 
-  const handleChange = (f) => (e) => setForm((p) => ({ ...p, [f]: e.target.value }));
+  const handleChange = (f) => (e) => {
+    let value = e.target.value;
+    if (f === 'account') {
+      value = value.replace(/\D/g, ''); // strict digits
+    } else if (f === 'ifsc') {
+      value = value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 11);
+    }
+    setForm((p) => ({ ...p, [f]: value }));
+  };
 
   const handleContinue = async () => {
     try {

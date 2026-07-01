@@ -10,7 +10,7 @@ import {
   RefreshCw,
   LayoutTemplate,
   X,
-  UploadCloud,
+  CloudUpload as UploadCloud,
 } from 'lucide-react';
 import Card from '../../../components/Card';
 import Button from '../../../components/Button';

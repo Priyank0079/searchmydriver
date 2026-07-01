@@ -174,8 +174,8 @@ const ManageWebCities = () => {
 
       <ConfirmDialog
         open={!!confirmDelete}
-        title="Delete Serviced City"
-        description={`Are you sure you want to delete "${confirmDelete.name}"? This will remove it from the public homepage.`}
+        title="Delete City"
+        description={`Are you sure you want to delete "${confirmDelete?.name}"? This will remove it from the public homepage.`}
         confirmLabel={deleting ? 'Deleting...' : 'Delete'}
         onConfirm={handleDelete}
         onClose={() => setConfirmDelete(null)}

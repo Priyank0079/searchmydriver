@@ -10,7 +10,7 @@ import {
   RefreshCw,
   LayoutTemplate,
   X,
-  UploadCloud,
+  CloudUpload as UploadCloud,
 } from 'lucide-react';
 import Card from '../../../components/Card';
 import Button from '../../../components/Button';
@@ -192,7 +192,7 @@ const ManageWebBanners = () => {
       <ConfirmDialog
         open={!!confirmDelete}
         title="Delete Web Banner"
-        description={`Are you sure you want to delete "${confirmDelete.title || 'this banner'}"? This action cannot be undone.`}
+        description={`Are you sure you want to delete "${confirmDelete?.title || 'this banner'}"? This action cannot be undone.`}
         confirmLabel={deleting ? 'Deleting...' : 'Delete'}
         onConfirm={handleDelete}
         onClose={() => setConfirmDelete(null)}

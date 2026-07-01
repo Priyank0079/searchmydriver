@@ -15,7 +15,10 @@ const SupportPage = () => {
   const [submittedTicket, setSubmittedTicket] = useState(null);
 
   const handleChange = (e) => {
-    const { name, value } = e.target;
+    let { name, value } = e.target;
+    if (name === 'contactPhone') {
+      value = value.replace(/\D/g, '').slice(0, 10);
+    }
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
@@ -23,6 +26,10 @@ const SupportPage = () => {
     e.preventDefault();
     if (!formData.contactName || !formData.contactPhone || !formData.subject || !formData.description) {
       toast.error('Please fill in all fields');
+      return;
+    }
+    if (!/^[0-9]{10}$/.test(formData.contactPhone)) {
+      toast.error('Please enter a valid 10-digit mobile number');
       return;
     }
 

@@ -24,7 +24,11 @@ const RegisterPage = () => {
   const [isHelpDeskOpen, setIsHelpDeskOpen] = useState(false);
 
   const handleChange = (field) => (e) => {
-    setFormData((prev) => ({ ...prev, [field]: e.target.value }));
+    let value = e.target.value;
+    if (field === 'phone') {
+      value = value.replace(/\D/g, ''); // strip non-digits
+    }
+    setFormData((prev) => ({ ...prev, [field]: value }));
     if (error) setError('');
   };
 
@@ -32,6 +36,10 @@ const RegisterPage = () => {
     if (e) e.preventDefault();
     if (!formData.name || !formData.phone || !formData.password) {
       setError('Please fill all required fields');
+      return;
+    }
+    if (!/^[0-9]{10}$/.test(formData.phone)) {
+      setError('Please enter a valid 10-digit mobile number');
       return;
     }
     
