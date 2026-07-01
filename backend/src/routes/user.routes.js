@@ -4,6 +4,8 @@ import notificationRouter from './notification.route.js';
 import {
   loginUser,
   sendUserOtp,
+  sendPasswordResetOtp,
+  resetPassword,
   verifyUserOtpAndRegister,
   updateUserOnboardingStep,
   getUserProfile,
@@ -62,6 +64,8 @@ router.post('/support/ticket', protectUser, createSupportTicket);
 router.post('/support/public-ticket', createPublicSupportTicket);
 router.post('/send-otp', authLimiter, sendUserOtp);
 router.post('/verify-otp', authLimiter, verifyUserOtpAndRegister);
+router.post('/forgot-password/send-otp', authLimiter, sendPasswordResetOtp);
+router.post('/forgot-password/reset', authLimiter, resetPassword);
 router.post('/login', authLimiter, loginUser);
 router.post('/google', authLimiter, googleSignInUser);
 router.post('/google/link-phone/otp', authLimiter, sendGoogleLinkPhoneOtp);

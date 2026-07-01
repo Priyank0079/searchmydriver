@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import api from '../../../../utils/api';
 import { ArrowLeft, Download, FileText } from 'lucide-react';
@@ -18,13 +18,28 @@ import { SERVICE_TYPE_LABELS } from '../../../../constants/serviceTypes';
  */
 const InvoicePage = () => {
   const navigate = useNavigate();
-  const booking = useUserActiveBookingStore((s) => s.booking);
-  const fetchActive = useUserActiveBookingStore((s) => s.fetchActive);
+  const { id: urlId } = useParams();
+  const activeBooking = useUserActiveBookingStore((s) => s.booking);
+  const [localBooking, setLocalBooking] = useState(null);
   const [downloading, setDownloading] = useState(false);
 
+  let booking = null;
+  if (urlId) {
+    booking = activeBooking?._id === urlId ? activeBooking : localBooking;
+  } else {
+    booking = activeBooking;
+  }
+
   useEffect(() => {
-    if (!booking) fetchActive().catch(() => {});
-  }, [booking, fetchActive]);
+    if (urlId) {
+      if (activeBooking && activeBooking._id === urlId) return;
+      api.get(`/auth/bookings/${urlId}`).then(res => {
+        if (res?.data?.data?.booking) setLocalBooking(res.data.data.booking);
+      }).catch(() => {});
+    } else {
+      if (!activeBooking) useUserActiveBookingStore.getState().fetchActive().catch(() => {});
+    }
+  }, [urlId, activeBooking]);
 
   const invoice = useMemo(() => {
     if (!booking) {
@@ -85,10 +100,22 @@ const InvoicePage = () => {
     if (!booking) return;
     try {
       setDownloading(true);
-      const res = await api.get(`/bookings/${booking._id}/invoice`, {
-        responseType: 'blob'
+
+      // First, trigger a silent token refresh so the cookie is fresh
+      await api.post('/auth/refresh-token', {}).catch(() => {});
+
+      const res = await api.get(`/auth/bookings/${booking._id}/invoice`, {
+        responseType: 'blob',
       });
-      
+
+      // Check if the response is actually JSON (an error) disguised as a blob
+      const contentType = res.headers['content-type'] || '';
+      if (contentType.includes('application/json')) {
+        const text = await res.data.text();
+        const json = JSON.parse(text);
+        throw new Error(json.message || 'Server error');
+      }
+
       const blob = new Blob([res.data], { type: 'application/pdf' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -98,11 +125,21 @@ const InvoicePage = () => {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-      
+
       toast.success('Invoice downloaded successfully');
     } catch (error) {
-      console.error('Failed to download invoice:', error);
-      toast.error('Failed to download invoice');
+      let message = 'Failed to download invoice';
+      if (error?.response?.data instanceof Blob) {
+        try {
+          const text = await error.response.data.text();
+          const json = JSON.parse(text);
+          message = json.message || message;
+        } catch (_) { /* ignore */ }
+      } else if (error?.message) {
+        message = error.message;
+      }
+      console.error('Invoice download error:', message);
+      toast.error(message);
     } finally {
       setDownloading(false);
     }

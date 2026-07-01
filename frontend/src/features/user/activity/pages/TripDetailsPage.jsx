@@ -841,7 +841,7 @@ function FareCard({
 
   const serviceCharge = Number(breakdown?.serviceCharge) || 0;
   if (serviceCharge > 0) {
-    lines.push({ label: 'Service charge', value: serviceCharge, muted: true });
+    lines.push({ label: 'Platform fee', value: serviceCharge, muted: true });
   }
   const gst = Number(breakdown?.gst) || 0;
   if (gst > 0) {

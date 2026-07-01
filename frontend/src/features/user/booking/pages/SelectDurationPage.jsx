@@ -510,7 +510,7 @@ function OutstationBranch({ pricing, draft, onPatch, onContinue }) {
                 highlight
               />
               <p className="text-[11px] text-text-muted">
-                Service charge and GST are added on the next screen.
+                Platform fee and GST are added on the next screen.
               </p>
             </div>
           </Card>

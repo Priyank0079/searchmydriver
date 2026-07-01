@@ -60,14 +60,14 @@ const RatePayPage = () => {
   const handleSubmit = async () => {
     if (!rating || submitting) return;
     if (alreadyRated) {
-      navigate('/user/tracking/invoice');
+      navigate(`/user/tracking/invoice/${booking._id}`);
       return;
     }
     setSubmitting(true);
     try {
       await rateDriver({ stars: rating, review: review.trim() });
       toast.success('Thanks for your feedback');
-      navigate('/user/tracking/invoice');
+      navigate(`/user/tracking/invoice/${booking._id}`);
     } catch (err) {
       const message =
         err?.response?.data?.message || err?.message || 'Could not submit rating';
@@ -75,7 +75,7 @@ const RatePayPage = () => {
       // A 409 means another submit already landed — treat as success
       // for the user's purposes and let them through.
       if (err?.response?.status === 409) {
-        navigate('/user/tracking/invoice');
+        navigate(`/user/tracking/invoice/${booking._id}`);
       }
     } finally {
       setSubmitting(false);

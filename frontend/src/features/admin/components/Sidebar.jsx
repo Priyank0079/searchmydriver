@@ -81,13 +81,6 @@ const navItems = [
         roles: ['admin', 'sub_admin', 'team_member'],
         permission: STAFF_PERMISSIONS.BOOKINGS_OUTSTATION,
       },
-      {
-        path: '/admin/bookings/subscription-requests',
-        label: 'Subscription Requests',
-        icon: Sparkles,
-        roles: ['admin', 'sub_admin', 'team_member'],
-        permission: STAFF_PERMISSIONS.BOOKINGS_SUBSCRIPTION,
-      },
     ],
   },
   {
@@ -101,13 +94,6 @@ const navItems = [
         icon: DollarSign,
         roles: ['admin'],
         permission: STAFF_PERMISSIONS.ACCOUNT_REVENUE,
-      },
-      {
-        path: '/admin/account/subscription-revenue',
-        label: 'Subscription Revenue',
-        icon: Sparkles,
-        roles: ['admin'],
-        permission: STAFF_PERMISSIONS.ACCOUNT_SUB_REVENUE,
       },
       {
         path: '/admin/account/refunds',

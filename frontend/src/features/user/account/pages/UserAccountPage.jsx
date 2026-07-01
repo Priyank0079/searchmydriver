@@ -18,7 +18,6 @@ import {
 } from 'lucide-react';
 import useUserAuthStore from '../../../../store/useUserAuthStore';
 import useUserWalletStore from '../../../../store/user/useUserWalletStore';
-import { useUserSubscriptionStore } from '../../../../store/user/useUserPricingStore';
 import { useUserProfileStore } from '../../../../store/user/useUserProfileStore';
 import ConfirmDialog from '../../../../components/ConfirmDialog';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
@@ -29,7 +28,7 @@ import toast from 'react-hot-toast';
 const menuItems = [
   { id: 'profile', icon: User, label: 'My Profile', path: '/user/account/profile' },
   { id: 'cars', icon: Car, label: 'My Cars', path: '/user/my-cars' },
-  { id: 'subscription', icon: Sparkles, label: 'My Subscription', path: '/user/account/subscription', dynamic: 'subscription' },
+
   { id: 'payments', icon: CreditCard, label: 'Payment Methods', path: '/user/account/payment-methods' },
   { id: 'wallet', icon: Wallet, label: 'My Wallet', path: '/user/wallet', dynamic: 'wallet' },
   { id: 'refer', icon: Users, label: 'Refer & Earn', path: '/user/refer' },
@@ -46,27 +45,18 @@ const UserAccountPage = () => {
   const fetchWallet = useUserWalletStore((s) => s.fetchWallet);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const mySubscription = useUserSubscriptionStore((s) => s.mySubscription);
-  const fetchMySubscription = useUserSubscriptionStore((s) => s.fetchMySubscription);
   const profileKey = buildCacheKey('user-profile', { userId: user?._id || '' });
   const { data: profile, refetch } = useCachedQuery(useUserProfileStore, profileKey, { userId: user?._id || '' });
 
   useEffect(() => {
     fetchWallet().catch(() => {});
-    fetchMySubscription().catch(() => {});
     refetch().catch(() => {});
-  }, [fetchWallet, fetchMySubscription, refetch]);
+  }, [fetchWallet, refetch]);
 
   useEffect(() => {
     if (!profile?.user) return;
     useUserAuthStore.getState().setAuth(profile.user);
   }, [profile]);
-
-  const subscriptionLabel = useMemo(() => {
-    if (!mySubscription?._id) return 'No active plan';
-    return mySubscription.planNameSnapshot || mySubscription.planId?.name || 'Active';
-  }, [mySubscription]);
-
   const walletLabel = useMemo(
     () =>
       `\u20B9${Number(wallet.balance || 0).toLocaleString('en-IN', {
@@ -124,9 +114,7 @@ const UserAccountPage = () => {
             const sub =
               item.dynamic === 'wallet'
                 ? walletLabel
-                : item.dynamic === 'subscription'
-                  ? subscriptionLabel
-                  : null;
+                : null;
             const Icon = item.icon;
             return (
               <button

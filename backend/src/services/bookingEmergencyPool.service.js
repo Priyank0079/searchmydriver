@@ -133,10 +133,12 @@ export async function escalateToEmergencyPool(bookingId) {
   };
   await booking.save();
 
+  const scheduledStartAt =
+    booking.hourly?.scheduledStartAt || booking.outstation?.pickupAt || booking.outstation?.startDate || null;
   const payload = {
     bookingId: String(booking._id),
     status: booking.status,
-    scheduledStartAt: booking.hourly?.scheduledStartAt || null,
+    scheduledStartAt,
   };
   emitToUser(booking.userId, S2C_EVENTS.BOOKING_UPDATED, payload);
   emitToBooking(booking._id, S2C_EVENTS.BOOKING_UPDATED, payload);
@@ -147,7 +149,7 @@ export async function escalateToEmergencyPool(bookingId) {
     message: `Booking ${booking.bookingNumber} needs manual driver assignment`,
     data: {
       bookingId: String(booking._id),
-      scheduledStartAt: booking.hourly?.scheduledStartAt || null,
+      scheduledStartAt,
       zoneIds: (booking.zoneIds || []).map(String),
     },
   });

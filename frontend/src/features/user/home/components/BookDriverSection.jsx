@@ -7,7 +7,6 @@ import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
 import {
   useUserServicePricingsStore,
-  useUserSubscriptionPlansStore,
 } from '../../../../store/user/useUserPricingStore';
 import useBookingDraftStore from '../../../../store/user/useBookingDraftStore';
 import { SERVICE_TYPES } from '../../../../constants/serviceTypes';
@@ -35,10 +34,6 @@ const BookDriverSection = () => {
     useUserServicePricingsStore,
     buildCacheKey('user-services-active'),
   );
-  const { data: planData } = useCachedQuery(
-    useUserSubscriptionPlansStore,
-    buildCacheKey('user-subscriptions-active'),
-  );
 
   // Map serviceType → pricing row for the "From ₹X" hint.
   const pricingByType = useMemo(() => {
@@ -49,13 +44,7 @@ const BookDriverSection = () => {
     }, {});
   }, [pricingData]);
 
-  const startingPlanPrice = useMemo(() => {
-    const list = Array.isArray(planData) ? planData : [];
-    if (!list.length) return null;
-    return list
-      .filter((p) => p?.isActive !== false && typeof p.price === 'number')
-      .reduce((min, p) => (min == null || p.price < min ? p.price : min), null);
-  }, [planData]);
+
 
   const handleServiceTap = (serviceType) => {
     setServiceType(serviceType);

@@ -1,0 +1,261 @@
+diff --git a/backend/src/services/booking.service.js b/backend/src/services/booking.service.js
+index f769764..36deece 100644
+--- a/backend/src/services/booking.service.js
++++ b/backend/src/services/booking.service.js
+@@ -237,6 +237,9 @@ export function sanitizeBookingForDriver(booking) {
+   }
+   // Driver doesn't need to see the customer's chosen payment timing or
+   // running balance GÇö those are user-side concerns.
++  if (obj.paymentMethod === 'cash') {
++    obj.cashDueRupees = Number(obj.fareSnapshot?.total || 0);
++  }
+   if ('paymentMode' in obj) delete obj.paymentMode;
+   if ('paymentStatus' in obj) delete obj.paymentStatus;
+   if ('payment' in obj) delete obj.payment;
+@@ -1103,10 +1106,7 @@ export async function createBookingService(userId, body) {
+       // team_member) picks a driver from the outstation-assignment
+       // queue. Hourly bookings (instant + immediate-tier scheduled)
+       // continue to start in SEARCHING and let the dispatcher take over.
+-      status:
+-        serviceType === SERVICE_TYPES.OUTSTATION
+-          ? BOOKING_STATUS.PENDING_ASSIGNMENT
+-          : BOOKING_STATUS.SEARCHING,
++      status: BOOKING_STATUS.SEARCHING,
+     });
+   } catch (err) {
+     // Compensating credit if booking creation fails after we've already
+@@ -1147,22 +1147,22 @@ export async function createBookingService(userId, body) {
+     }
+   }
+ 
+-  // Scheduled hourly bookings branch through the scheduled-ride
+-  // dispatcher: short-window + morning rides search immediately (just
+-  // like instant), longer-lead rides sit in PENDING_ASSIGNMENT until
+-  // the BullMQ `assign` job fires. The emergency-pool `escalate` job
+-  // is enqueued for every scheduled booking either way.
++  // Scheduled bookings branch through the scheduled-ride dispatcher:
++  // short-window + morning rides search immediately (just like instant),
++  // longer-lead rides sit in PENDING_ASSIGNMENT until the BullMQ
++  // `assign` job fires. The emergency-pool `escalate` job is enqueued for
++  // every scheduled booking either way.
+   //
+-  // Outstation bookings are always manually assigned (no auto-dispatch).
+-  // The booking lives in PENDING_ASSIGNMENT until an admin picks a
+-  // driver from the outstation-assignment queue.
++  // Outstation scheduled bookings now follow the same auto-dispatch
++  // flow as hourly scheduled rides. If no driver is found before the
++  // emergency cutoff, the booking falls back to manual assignment.
+   // Online payments: hold dispatch until Razorpay payment is verified.
+-  let shouldDispatchNow = !isOnline && serviceType !== SERVICE_TYPES.OUTSTATION;
++  let shouldDispatchNow = !isOnline;
+   if (
+     !isOnline &&
+     bookingType === BOOKING_TYPE.SCHEDULED &&
+-    serviceType === SERVICE_TYPES.HOURLY &&
+-    booking.hourly?.scheduledStartAt
++    (serviceType === SERVICE_TYPES.HOURLY || serviceType === SERVICE_TYPES.OUTSTATION) &&
++    (booking.hourly?.scheduledStartAt || booking.outstation?.pickupAt || booking.outstation?.startDate)
+   ) {
+     try {
+       const decision = await setupScheduledBooking(booking);
+diff --git a/frontend/src/config/firebase.js b/frontend/src/config/firebase.js
+index 62b6599..8acace7 100644
+--- a/frontend/src/config/firebase.js
++++ b/frontend/src/config/firebase.js
+@@ -137,35 +137,38 @@ export async function requestFcmToken() {
+     appId: config.appId || '',
+   }).toString();
+ 
++  if (typeof window === 'undefined') return null;
++  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
++    console.warn('[firebase] FCM not supported in this browser environment.');
++    return null;
++  }
++
+   try {
+-    if ('serviceWorker' in navigator) {
+-      const registration = await navigator.serviceWorker.register(
+-        `/firebase-messaging-sw.js?${qs}`,
+-        { scope: '/' }
+-      );
+-      
+-      const messaging = getFcmMessaging();
+-      if (!messaging) return null;
+-
+-      // Request permission
+-      const permission = await Notification.requestPermission();
+-      if (permission !== 'granted') {
+-        console.warn('[firebase] Notification permission not granted');
+-        return null;
+-      }
+-
+-      const tokenOptions = { serviceWorkerRegistration: registration };
+-      if (env.VITE_FIREBASE_VAPID_KEY) {
+-        tokenOptions.vapidKey = env.VITE_FIREBASE_VAPID_KEY;
+-      }
+-
+-      const token = await getToken(messaging, tokenOptions);
+-      return token;
++    const registration = await navigator.serviceWorker.register(
++      `/firebase-messaging-sw.js?${qs}`,
++      { scope: '/' }
++    );
++
++    const messaging = getFcmMessaging();
++    if (!messaging) return null;
++
++    const permission = await Notification.requestPermission();
++    if (permission !== 'granted') {
++      console.warn('[firebase] Notification permission not granted');
++      return null;
++    }
++
++    const tokenOptions = { serviceWorkerRegistration: registration };
++    if (env.VITE_FIREBASE_VAPID_KEY) {
++      tokenOptions.vapidKey = env.VITE_FIREBASE_VAPID_KEY;
+     }
++
++    const token = await getToken(messaging, tokenOptions);
++    return token;
+   } catch (err) {
+     console.error('[firebase] Error retrieving FCM Token:', err);
++    return null;
+   }
+-  return null;
+ }
+ 
+ /**
+diff --git a/frontend/src/features/driver/trips/pages/DriverActiveTripPage.jsx b/frontend/src/features/driver/trips/pages/DriverActiveTripPage.jsx
+index bb7d7e0..e554831 100644
+--- a/frontend/src/features/driver/trips/pages/DriverActiveTripPage.jsx
++++ b/frontend/src/features/driver/trips/pages/DriverActiveTripPage.jsx
+@@ -245,6 +245,8 @@ const DriverActiveTripPage = () => {
+   // driver lands back on the dashboard for their next offer.
+   const status = booking?.status;
+   const cancellationReason = booking?.cancellation?.reason;
++  const isCashBooking = booking?.paymentMethod === 'cash';
++  const cashDueRupees = Number(booking?.cashDueRupees || 0);
+   useEffect(() => {
+     if (!status) return;
+     if (status === BOOKING_STATUS.COMPLETED) {
+@@ -288,6 +290,7 @@ const DriverActiveTripPage = () => {
+   // ARRIVED. We keep it page-local rather than baking it into the store
+   // because it's purely a UI concern.
+   const [otpOpen, setOtpOpen] = useState(false);
++  const [completeConfirmOpen, setCompleteConfirmOpen] = useState(false);
+   const [cancelOpen, setCancelOpen] = useState(false);
+   const [cancelling, setCancelling] = useState(false);
+ 
+@@ -402,6 +405,10 @@ const DriverActiveTripPage = () => {
+       setOtpOpen(true);
+       return;
+     }
++    if (action === 'completeTrip' && isCashBooking && cashDueRupees > 0) {
++      setCompleteConfirmOpen(true);
++      return;
++    }
+     if (action === 'markArrived') {
+       if (!driverPoint) {
+         toast.error('We need your location to confirm arrival. Enable GPS and try again.');
+@@ -462,6 +469,15 @@ const DriverActiveTripPage = () => {
+   // function) so the wall-clock heartbeat above drives the copy.
+   const cancelPreview = previewDriverCancellation(booking);
+ 
++  const handleCompleteConfirm = useCallback(async () => {
++    setCompleteConfirmOpen(false);
++    try {
++      await useDriverActiveTripStore.getState().completeTrip();
++    } catch (err) {
++      toast.error(err?.response?.data?.message || err?.message || 'Could not complete trip');
++    }
++  }, []);
++
+   const handleCancelConfirm = useCallback(async () => {
+     setCancelling(true);
+     const penalty = Number(cancelPreview.driverPenalty) || 0;
+@@ -826,6 +842,24 @@ const DriverActiveTripPage = () => {
+           </p>
+         )}
+ 
++        {status === BOOKING_STATUS.STARTED && isCashBooking && cashDueRupees > 0 && (
++          <Card className="border border-amber-200 bg-amber-50">
++            <div className="flex items-start gap-3">
++              <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
++                <WalletIcon className="w-4 h-4" />
++              </div>
++              <div className="min-w-0">
++                <p className="text-sm font-semibold text-amber-900">
++                  Collect cash before completing
++                </p>
++                <p className="text-[12px] text-amber-800 mt-1 leading-snug">
++                  Please collect Gé¦{cashDueRupees.toLocaleString('en-IN')} from the customer before tapping Complete trip.
++                </p>
++              </div>
++            </div>
++          </Card>
++        )}
++
+         {isEnRoute && (
+           <div
+             className={`rounded-2xl border p-3 flex items-start gap-3 ${arrivalReady
+@@ -949,6 +983,17 @@ const DriverActiveTripPage = () => {
+         )}
+       </div>
+ 
++      <ConfirmDialog
++        open={completeConfirmOpen}
++        onClose={() => setCompleteConfirmOpen(false)}
++        onConfirm={handleCompleteConfirm}
++        title="Collect cash before completing"
++        description={`Please collect Gé¦${cashDueRupees.toLocaleString('en-IN')} from the customer in cash before marking the trip complete.`}
++        confirmLabel="I have collected cash"
++        cancelLabel="Wait"
++        variant="warning"
++        loading={busy === 'complete'}
++      />
+       <ConfirmDialog
+         open={cancelOpen}
+         onClose={() => !cancelling && setCancelOpen(false)}
+diff --git a/frontend/src/features/user/booking/pages/SelectServicePage.jsx b/frontend/src/features/user/booking/pages/SelectServicePage.jsx
+index 55057f7..01e7d46 100644
+--- a/frontend/src/features/user/booking/pages/SelectServicePage.jsx
++++ b/frontend/src/features/user/booking/pages/SelectServicePage.jsx
+@@ -6,10 +6,7 @@ import SubscriptionBanner from '../../home/components/SubscriptionBanner';
+ import { SERVICE_CATALOG } from '../../home/constants/serviceCatalog';
+ import { useCachedQuery } from '../../../../hooks/useCachedQuery';
+ import { buildCacheKey } from '../../../../store/lib/buildCacheKey';
+-import {
+-  useUserServicePricingsStore,
+-  useUserSubscriptionPlansStore,
+-} from '../../../../store/user/useUserPricingStore';
++import { useUserServicePricingsStore } from '../../../../store/user/useUserPricingStore';
+ import useBookingDraftStore from '../../../../store/user/useBookingDraftStore';
+ import { SERVICE_TYPES } from '../../../../constants/serviceTypes';
+ 
+@@ -24,18 +21,7 @@ const SelectServicePage = () => {
+   );
+   const services = Array.isArray(data) ? data : [];
+ 
+-  const { data: planData } = useCachedQuery(
+-    useUserSubscriptionPlansStore,
+-    buildCacheKey('user-subscriptions-active'),
+-  );
+ 
+-  const startingPlanPrice = useMemo(() => {
+-    const list = Array.isArray(planData) ? planData : [];
+-    if (!list.length) return null;
+-    return list
+-      .filter((p) => p?.isActive !== false && typeof p.price === 'number')
+-      .reduce((min, p) => (min == null || p.price < min ? p.price : min), null);
+-  }, [planData]);
+ 
+   // Users with multiple cars are allowed to spin up parallel bookings,
+   // so we DON'T redirect into an existing active booking here anymore.
+@@ -109,7 +95,6 @@ const SelectServicePage = () => {
+ 
+         <div className="mt-4">
+           <SubscriptionBanner
+-            startingPrice={startingPlanPrice}
+             onClick={() => navigate('/user/subscriptions')}
+           />
+         </div>

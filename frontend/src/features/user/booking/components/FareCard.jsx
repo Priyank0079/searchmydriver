@@ -164,7 +164,7 @@ const FareCard = ({ estimate, estimating = false, error = null, dense = false, f
           {serviceCharge > 0 && (
             <div className="flex items-center justify-between">
               <span className="text-sm text-text-secondary">
-                Service charge
+                Platform fee
                 {breakdown.serviceChargePercent > 0 && (
                   <span className="ml-1 text-[10px] text-text-muted">
                     ({breakdown.serviceChargePercent}%)

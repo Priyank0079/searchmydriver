@@ -349,8 +349,6 @@ export async function listAvailableDriversForOutstationService(
   const match = {
     approvalStatus: 'approved',
     isDeleted: { $ne: true },
-    // Drivers must have explicitly opted in to outstation.
-    availableForOutstation: true,
   };
 
   // Zone filter — only show drivers who opted into at least one of the
@@ -484,13 +482,6 @@ export async function adminAssignDriverToOutstationService(
     approvalStatus: 'approved',
   });
   if (!driver) throw new ApiError(404, 'Driver not found or not approved');
-  if (!driver.availableForOutstation) {
-    throw new ApiError(
-      409,
-      'This driver has opted out of outstation assignments. Pick another driver.',
-    );
-  }
-
   // 3. Vehicle conflict (excluding this booking).
   const vehicleConflicts = await getVehicleConflicts({
     carId: bookingDoc.carId,

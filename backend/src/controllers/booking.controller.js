@@ -393,12 +393,12 @@ export const getAdminBookingById = asyncHandler(async (req, res) => {
  */
 export const downloadBookingInvoice = asyncHandler(async (req, res) => {
   // We can use getBookingByIdService to ensure they have permission to access it
-  const bookingData = await getBookingByIdService(req.params.id, req.user);
-  if (!bookingData || !bookingData.booking) {
+  const booking = await getBookingByIdService(req.params.id, { userId: req.user._id });
+  if (!booking) {
     throw new ApiError(404, 'Booking not found');
   }
-  
-  await buildBookingInvoicePdf(bookingData.booking._id, { res });
+
+  await buildBookingInvoicePdf(booking._id, { res });
 });
 
 /* ------------------------------------------------------------------ */

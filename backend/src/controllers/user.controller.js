@@ -9,6 +9,21 @@ export const sendUserOtp = asyncHandler(async (req, res) => {
   return res.status(200).json(new ApiResponse(200, result, 'OTP sent successfully'));
 });
 
+export const sendPasswordResetOtp = asyncHandler(async (req, res) => {
+  const result = await userService.sendPasswordResetOtpService(req.body.phone, req.body.role);
+  return res.status(200).json(new ApiResponse(200, result, 'Password reset OTP sent'));
+});
+
+export const resetPassword = asyncHandler(async (req, res) => {
+  const result = await userService.resetPasswordService(
+    req.body.phone,
+    req.body.otp,
+    req.body.newPassword,
+    req.body.role
+  );
+  return res.status(200).json(new ApiResponse(200, result, 'Password reset successfully'));
+});
+
 export const verifyUserOtpAndRegister = asyncHandler(async (req, res) => {
   const result = await userService.verifyUserOtpAndRegisterService(req.body);
   setAuthCookies(res, {

@@ -293,6 +293,10 @@ export async function settleWaitingBuffer(booking) {
         bypassHeld: true,
       });
       booking.waiting.bufferRefundTxId = tx._id;
+      booking.payment = booking.payment || {};
+      booking.payment.amountPaidRupees = round2(
+        Number(booking.payment.amountPaidRupees || 0) + cappedCharge,
+      );
       userDebitOk = true;
     } catch (err) {
       console.warn(

@@ -67,6 +67,7 @@ function shapeDriverHit(raw) {
     lng,
     lastLocationAt: raw.lastLocationAt || null,
     distanceMeters: Math.round(raw.distanceMeters || 0),
+    fcmToken: raw.fcmToken || null,
   };
 }
 
@@ -163,6 +164,7 @@ export async function findDriversWithinRadius({
         distanceMeters: 1,
         carTypes: 1,
         experienceYears: 1,
+        fcmToken: 1,
       },
     },
   ];

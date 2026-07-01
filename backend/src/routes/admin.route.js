@@ -17,6 +17,7 @@ import {
   getDriverWalletHistory,
   adjustDriverWallet,
 } from '../controllers/admin.controller.js';
+
 import { protectStaff, restrictTo } from '../middlewares/authMiddleware.js';
 import { ROUTE_ROLES } from '../constants/staffPermissions.js';
 import {
@@ -360,6 +361,8 @@ router.get('/pricing/services', protectStaff, restrictTo(...OPERATIONS), adminLi
 router.post('/pricing/services', protectStaff, restrictTo(...OPERATIONS), adminUpsertServicePricing);
 router.put('/pricing/services/:id', protectStaff, restrictTo(...OPERATIONS), adminUpdateServicePricing);
 router.delete('/pricing/services/:id', protectStaff, restrictTo(...OPERATIONS), adminDeleteServicePricing);
+
+
 
 
 

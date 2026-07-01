@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Referral from '../models/referral.model.js';
 import PlatformSettings from '../models/platformSettings.model.js';
 import { Driver } from '../models/driverModels/driver.model.js';
@@ -101,7 +102,7 @@ export const handleDriverTripCompleted = async (driverId) => {
 
     // Calculate completed trips
     // We could count Bookings where driverId matches and status is COMPLETED
-    import mongoose from 'mongoose';
+
     const Booking = mongoose.model('Booking');
     
     const completedTripsCount = await Booking.countDocuments({

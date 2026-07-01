@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Flag,
   Headset,
+  ShieldAlert,
 } from 'lucide-react';
 import NotificationBell from '../../../../components/common/NotificationBell';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
@@ -125,32 +126,29 @@ const DriverHomePage = () => {
 
   return (
     <div className="flex-1 flex flex-col bg-bg">
-      <div className="bg-dark px-4 pt-4 pb-6 rounded-b-3xl">
+      <div className="bg-gradient-to-b from-[#FFF5D6] to-[#FFEAA8] border-b border-[#F5D169] px-4 pt-4 pb-6 rounded-b-3xl shadow-md">
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-lg font-bold text-white">Home</h1>
+          <h1 className="text-lg font-extrabold text-slate-900">Home</h1>
           <div className="flex items-center gap-3">
             <button
               onClick={() => setIsHelpDeskOpen(true)}
-              className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+              className="p-2 text-slate-700 hover:text-slate-950 hover:bg-amber-500/10 rounded-full transition-colors"
             >
               <Headset className="w-5 h-5" />
             </button>
             <NotificationBell prefix="/driver" />
           </div>
         </div>
-        <Card className="!bg-white/10 backdrop-blur-sm !shadow-none">
+        <Card className="!bg-white/60 backdrop-blur-sm border border-amber-200/50 shadow-sm !shadow-amber-900/5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div
                 className={`w-3 h-3 rounded-full ${isOnline ? 'bg-success animate-pulse' : 'bg-gray-400'}`}
               />
               <div>
-                <span className="text-white text-sm font-medium block">
+                <span className="text-slate-900 text-sm font-extrabold block">
                   {isOnline ? 'You are Online' : 'You are Offline'}
                 </span>
-                {!isOnline && primaryReason && (
-                  <span className="text-white/60 text-[10px]">{primaryReason}</span>
-                )}
               </div>
             </div>
             <Toggle checked={isOnline} onChange={handleToggle} disabled={toggling} />

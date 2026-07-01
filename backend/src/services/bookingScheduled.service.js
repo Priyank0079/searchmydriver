@@ -76,6 +76,15 @@ export async function loadScheduledDispatchConfig(serviceType) {
   }
 }
 
+function getScheduledStartAt(booking) {
+  if (!booking) return null;
+  const start =
+    booking.hourly?.scheduledStartAt ||
+    booking.outstation?.pickupAt ||
+    booking.outstation?.startDate;
+  return start ? new Date(start) : null;
+}
+
 /**
  * Pure decision: should this scheduled ride search for a driver
  * immediately, or sit in PENDING_ASSIGNMENT until the assign-job fires?
@@ -167,15 +176,12 @@ export function decideScheduleTier(scheduledStartAt, now, config) {
  * Returns the merged `decision` object so the caller can react.
  */
 export async function setupScheduledBooking(booking) {
-  if (!booking?.hourly?.scheduledStartAt) {
-    throw new ApiError(400, 'Scheduled booking requires hourly.scheduledStartAt');
+  const scheduledStartAt = getScheduledStartAt(booking);
+  if (!scheduledStartAt) {
+    throw new ApiError(400, 'Scheduled booking requires a pickup datetime');
   }
   const config = await loadScheduledDispatchConfig(booking.serviceType);
-  const decision = decideScheduleTier(
-    booking.hourly.scheduledStartAt,
-    new Date(),
-    config,
-  );
+  const decision = decideScheduleTier(scheduledStartAt, new Date(), config);
 
   booking.scheduled = {
     ...(booking.scheduled?.toObject?.() || booking.scheduled || {}),
@@ -267,7 +273,8 @@ export async function sendScheduledReminder(bookingId, minutesAhead) {
     bookingId: String(booking._id),
     bookingNumber: booking.bookingNumber,
     minutesAhead: Number(minutesAhead) || 0,
-    scheduledStartAt: booking.hourly?.scheduledStartAt || null,
+    scheduledStartAt:
+      booking.hourly?.scheduledStartAt || booking.outstation?.pickupAt || booking.outstation?.startDate || null,
   };
   emitToUser(booking.userId, S2C_EVENTS.NOTIFICATION, {
     title: 'Scheduled ride reminder',
@@ -363,9 +370,7 @@ export async function scheduleAssignmentRetryOrEscalate(bookingId) {
   const retryDelayMs =
     Math.max(1, Number(config.RETRY_DELAY_MINUTES) || SCHEDULED_BOOKING.RETRY_DELAY_MINUTES) *
     60_000;
-  const start = booking?.hourly?.scheduledStartAt
-    ? new Date(booking.hourly.scheduledStartAt).getTime()
-    : 0;
+  const start = getScheduledStartAt(booking)?.getTime() || 0;
   const escalateCutoff = start
     ? start - (Number(config.EMERGENCY_POOL_MINUTES) || SCHEDULED_BOOKING.EMERGENCY_POOL_MINUTES) *
       60_000
@@ -398,7 +403,7 @@ export async function scheduleAssignmentRetryOrEscalate(bookingId) {
   const queued = await enqueueAssignmentRetry(booking._id, {
     delayMs: retryDelayMs,
     attemptNumber: nextAttempt,
-    scheduledStartAt: booking.hourly?.scheduledStartAt || null,
+    scheduledStartAt: getScheduledStartAt(booking)?.toISOString() || null,
   });
 
   if (!queued) {

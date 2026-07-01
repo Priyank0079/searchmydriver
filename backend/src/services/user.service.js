@@ -284,6 +284,68 @@ export const updateUserOnboardingStepService = async (userId, data) => {
   return sanitizeUser(user);
 };
 
+export const sendPasswordResetOtpService = async (phone, role = 'user') => {
+  if (!phone || phone.length !== 10) {
+    throw new ApiError(400, 'Valid 10-digit phone number required');
+  }
+
+  let account;
+  if (role === 'driver') {
+    account = await Driver.findOne({ phone_no: phone });
+  } else {
+    account = await User.findOne({ phone_no: phone });
+  }
+
+  if (!account) {
+    throw new ApiError(404, 'No account found with this phone number');
+  }
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+  await OTP.findOneAndUpdate({ phone }, { otp, expiresAt }, { upsert: true, new: true });
+
+  await sendSmsOtp(phone, otp);
+  return { message: 'Password reset OTP sent successfully' };
+};
+
+export const resetPasswordService = async (phone, otp, newPassword, role = 'user') => {
+  if (!phone || !otp || !newPassword) {
+    throw new ApiError(400, 'Phone, OTP, and new password are required');
+  }
+  if (newPassword.length < 6) {
+    throw new ApiError(400, 'Password must be at least 6 characters');
+  }
+
+  // Development bypass: allow '123456' locally so you don't need a real SMS gateway to test
+  if (process.env.NODE_ENV !== 'production' && otp === '123456') {
+    // skip DB check
+  } else {
+    const otpRecord = await OTP.findOne({ phone, otp });
+    if (!otpRecord) {
+      throw new ApiError(400, 'Invalid or expired OTP');
+    }
+    await OTP.deleteOne({ _id: otpRecord._id });
+  }
+
+  const salt = await bcrypt.genSalt(10);
+  const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+  if (role === 'driver') {
+    const driver = await Driver.findOne({ phone_no: phone });
+    if (!driver) throw new ApiError(404, 'Driver not found');
+    driver.password = hashedPassword;
+    await driver.save();
+  } else {
+    const user = await User.findOne({ phone_no: phone });
+    if (!user) throw new ApiError(404, 'User not found');
+    user.password = hashedPassword;
+    await user.save();
+  }
+
+  return { message: 'Password has been reset successfully' };
+};
+
 export const addCarService = async (userId, carData) => {
   const { carTypeId, brandId, modelId, modelName, fuelTypeId, vehicleNumber, transmission, image } =
     carData;

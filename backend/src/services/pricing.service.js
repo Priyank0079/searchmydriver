@@ -917,6 +917,22 @@ export const estimateFareService = async ({
 };
 
 /**
+ * Normalize a subscription document for user-facing responses.
+ * Safe to call with null/undefined.
+ */
+function serializeSubscriptionForUser(subscription) {
+  if (!subscription) return null;
+  return {
+    id: subscription._id || subscription.id || null,
+    name: subscription.name || null,
+    // expiry key may vary across models
+    validUntil: subscription.validUntil || subscription.expiresAt || null,
+    // discount shape may vary; default to 0
+    discountPercent: Number(subscription.discountPercent || subscription.discount || 0),
+  };
+}
+
+/**
  * Compact preview of the waiting-buffer policy for the customer UI.
  * Surfaces what we'll pre-collect at booking creation, why, and how
  * the unused portion is refunded — used by `FareCard` to render the

@@ -254,7 +254,7 @@ const PaymentPage = () => {
           <ul className="space-y-2 text-xs text-text-secondary">
             <li>• Secure Razorpay checkout (UPI, cards, wallets, netbanking)</li>
             <li>• Free cancellation any time before you pay</li>
-            <li>• Full refund (minus platform charge) if the driver cancels</li>
+            <li>• Full refund (minus the platform fee) if the driver cancels</li>
           </ul>
         </Card>
       </div>

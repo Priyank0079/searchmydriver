@@ -116,6 +116,15 @@ async function loadDispatchConfig(serviceType) {
   return { ...SCHEDULED_BOOKING };
 }
 
+function getScheduledStartAt(booking) {
+  if (!booking) return null;
+  const start =
+    booking.hourly?.scheduledStartAt ||
+    booking.outstation?.pickupAt ||
+    booking.outstation?.startDate;
+  return start ? new Date(start) : null;
+}
+
 /**
  * Enqueue the assignment kickoff + escalation jobs for a scheduled
  * booking. Idempotent — re-calling for the same booking ID is safe
@@ -126,16 +135,14 @@ async function loadDispatchConfig(serviceType) {
  * `enqueueReminderJobsForBooking`. This keeps Redis clean of reminders
  * for bookings that fizzle (no driver found / cancelled before assign).
  *
- * @param {{ _id: any, serviceType: string, hourly?: { scheduledStartAt: Date|string|null } }} booking
+ * @param {{ _id: any, serviceType: string, hourly?: { scheduledStartAt: Date|string|null }, outstation?: { pickupAt?: Date|string, startDate?: Date|string } }} booking
  * @returns {Promise<boolean>} true if at least one job was enqueued
  */
 export async function enqueueScheduledBookingJobs(booking) {
   const queue = await getScheduledBookingQueue();
   if (!queue) return false;
   const bookingId = String(booking?._id || '');
-  const start = booking?.hourly?.scheduledStartAt
-    ? new Date(booking.hourly.scheduledStartAt).getTime()
-    : 0;
+  const start = getScheduledStartAt(booking)?.getTime() || 0;
   if (!bookingId || !start) return false;
   const now = Date.now();
 
@@ -244,16 +251,14 @@ export async function enqueueAssignmentRetry(bookingId, opts = {}) {
  * 60-min reminder is already in the past) are skipped silently. Returns
  * true when at least one reminder was queued.
  *
- * @param {{ _id: any, serviceType?: string, hourly?: { scheduledStartAt: Date|string|null } }} booking
+ * @param {{ _id: any, serviceType?: string, hourly?: { scheduledStartAt: Date|string|null }, outstation?: { pickupAt?: Date|string, startDate?: Date|string } }} booking
  * @returns {Promise<boolean>}
  */
 export async function enqueueReminderJobsForBooking(booking) {
   const queue = await getScheduledBookingQueue();
   if (!queue) return false;
   const bookingId = String(booking?._id || '');
-  const start = booking?.hourly?.scheduledStartAt
-    ? new Date(booking.hourly.scheduledStartAt).getTime()
-    : 0;
+  const start = getScheduledStartAt(booking)?.getTime() || 0;
   if (!bookingId || !start) return false;
   const now = Date.now();
 

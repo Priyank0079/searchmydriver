@@ -115,6 +115,12 @@ const DriverLoginPage = () => {
                 icon={Lock}
               />
             </div>
+            
+            <div className="flex justify-end mt-1">
+              <Link to="/driver/forgot-password" className="text-xs text-amber-600 font-bold hover:text-amber-700 hover:underline">
+                Forgot Password?
+              </Link>
+            </div>
 
             <Button
               type="submit"

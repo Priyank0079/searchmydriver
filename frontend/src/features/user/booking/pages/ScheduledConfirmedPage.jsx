@@ -530,7 +530,7 @@ function FareSummaryCard({ booking }) {
     }
   }
   if (Number(breakdown.serviceCharge) > 0) {
-    rows.push({ label: 'Service charge', value: breakdown.serviceCharge });
+    rows.push({ label: 'Platform fee', value: breakdown.serviceCharge });
   }
   if (Number(breakdown.gst) > 0) {
     rows.push({ label: 'GST', value: breakdown.gst });

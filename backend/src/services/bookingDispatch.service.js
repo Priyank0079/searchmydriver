@@ -34,6 +34,7 @@ import {
   emitToAdmins,
   emitToBooking,
 } from '../utils/socketEmitters.js';
+import { sendFcmNotification } from '../config/firebase.js';
 
 /**
  * Wave-broadcast booking dispatcher.
@@ -425,6 +426,15 @@ export async function dispatchNextDriverService(bookingId) {
       S2C_EVENTS.BOOKING_OFFERED,
       buildOfferPayload(booking, driver, { customer, car, upcomingScheduledTripStartMs }),
     );
+
+    // Push notification to wake the driver's phone
+    if (driver.fcmToken) {
+      sendFcmNotification(driver.fcmToken, {
+        title: 'New Ride Request',
+        body: `A passenger requested a ${booking.serviceType} ride near you. Tap to view.`,
+        data: { type: 'BOOKING_OFFERED', bookingId: String(booking._id) },
+      }).catch(err => console.error('[FCM] Dispatch notification failed:', err?.message));
+    }
   }
   emitUserDispatchUpdate(booking);
 
@@ -455,7 +465,10 @@ async function failBookingNoDrivers(bookingId) {
   const peek = await Booking.findById(bookingId).select(
     'bookingType bookingNumber userId',
   );
-  if (peek?.bookingType === BOOKING_TYPE.SCHEDULED) {
+  const retryableBooking =
+    peek?.bookingType === BOOKING_TYPE.SCHEDULED ||
+    peek?.bookingType === BOOKING_TYPE.OUTSTATION;
+  if (retryableBooking) {
     const { scheduleAssignmentRetryOrEscalate } = await import(
       './bookingScheduled.service.js'
     );
@@ -525,7 +538,8 @@ async function shouldImmediatelyLockDriver(booking) {
   if (!booking) return true;
   if (booking.bookingType !== BOOKING_TYPE.SCHEDULED) return true;
 
-  const scheduledAt = booking?.hourly?.scheduledStartAt;
+  const scheduledAt =
+    booking?.hourly?.scheduledStartAt || booking?.outstation?.pickupAt || booking?.outstation?.startDate;
   if (!scheduledAt) return true;
   const startMs = new Date(scheduledAt).getTime();
   if (!Number.isFinite(startMs)) return true;
@@ -584,11 +598,18 @@ export async function acceptBookingService(bookingId, driverId) {
   // is cleared so the UI doesn't keep showing the old popup.
   const alreadyPaid =
     booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID;
+  const isCash = booking.paymentMethod === 'cash' || booking.paymentMode === PAYMENT_MODE.POST_RIDE;
 
-  if (alreadyPaid) {
+  if (alreadyPaid || isCash) {
     booking.status = BOOKING_STATUS.DRIVER_ASSIGNED;
     booking.timeline.paymentDeadlineAt = null;
     booking.cancellation = null;
+    if (isCash) {
+      // Cash bookings do not require an upfront customer payment
+      // before the driver starts heading to pickup.
+      booking.paymentMode = PAYMENT_MODE.POST_RIDE;
+      booking.paymentStatus = BOOKING_PAYMENT_STATUS.NOT_DUE_YET;
+    }
   } else {
     // Standard "first acceptance" flow: lock in PRE_RIDE, set the 60s
     // payment deadline, and arm the auto-cancel timer.

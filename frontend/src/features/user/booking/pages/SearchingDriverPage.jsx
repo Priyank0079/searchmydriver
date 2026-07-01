@@ -270,7 +270,7 @@ function DriverReassigningModal({ onClose }) {
               No worries — we&apos;re assigning a new driver right now.
               Your payment is safe and will be applied to the new ride.
               If we can&apos;t find a driver, we&apos;ll automatically
-              refund you (minus the platform charge).
+              refund you (minus the platform fee).
             </p>
           </div>
         </div>
