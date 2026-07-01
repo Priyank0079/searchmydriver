@@ -129,10 +129,10 @@ export async function sendFcmNotification(token, payload) {
   const admin = getFirebaseAdmin();
   if (!admin) {
     console.warn('[firebase] FCM not sent: Firebase admin not initialized.');
-    return false;
+    return { success: false, error: 'Firebase admin not initialized' };
   }
   
-  if (!token) return false;
+  if (!token) return { success: false, error: 'Token is missing' };
 
   try {
     const response = await admin.messaging().send({
@@ -155,9 +155,9 @@ export async function sendFcmNotification(token, payload) {
       }
     });
     console.log('[firebase] FCM notification sent successfully:', response);
-    return true;
+    return { success: true };
   } catch (err) {
     console.error('[firebase] FCM send failed:', err.message);
-    return false;
+    return { success: false, error: err.message };
   }
 }

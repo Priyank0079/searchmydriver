@@ -93,15 +93,15 @@ export const triggerUserTestPush = asyncHandler(async (req, res) => {
     return res.status(400).json(new ApiResponse(400, null, 'No FCM token registered for this user'));
   }
 
-  const success = await sendFcmNotification(req.user.fcmToken, {
+  const result = await sendFcmNotification(req.user.fcmToken, {
     title: 'Test Notification',
     body: `Hello ${req.user.name}, this is a test push notification from SearchMyDriver!`,
     data: { type: 'test', timestamp: Date.now() },
   });
 
-  if (success) {
+  if (result.success) {
     return res.status(200).json(new ApiResponse(200, null, 'Test push notification sent successfully'));
   } else {
-    return res.status(500).json(new ApiResponse(500, null, 'Failed to send test push notification'));
+    return res.status(500).json(new ApiResponse(500, null, `Failed to send test push notification: ${result.error}`));
   }
 });
