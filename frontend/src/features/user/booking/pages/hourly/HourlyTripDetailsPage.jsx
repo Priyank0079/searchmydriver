@@ -141,12 +141,16 @@ const HourlyTripDetailsPage = () => {
       ? { lat: draftPickup.lat, lng: draftPickup.lng }
       : DEFAULT_MAP_CENTER;
 
-    const map = new maps.Map(mapRef.current, {
+    const mapOptions = {
       ...RAPIDO_MAP_OPTIONS,
       center,
       zoom: draftPickup ? 16 : DEFAULT_MAP_ZOOM,
       mapId: GOOGLE_MAP_ID,
-    });
+    };
+    if (mapOptions.mapId) {
+      delete mapOptions.styles;
+    }
+    const map = new maps.Map(mapRef.current, mapOptions);
     mapInstanceRef.current = map;
     setMapInstance(map);
     geocoderRef.current = new maps.Geocoder();

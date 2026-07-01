@@ -55,12 +55,16 @@ const NearbyDriversMap = ({
     // recenter effect below. Intentionally not in deps to keep map init
     // a one-shot.
     const initialCenter = center || { lat: 0, lng: 0 };
-    mapInstanceRef.current = new maps.Map(mapRef.current, {
+    const mapOptions = {
       ...RAPIDO_MAP_OPTIONS,
       center: initialCenter,
       zoom: 15,
       mapId: GOOGLE_MAP_ID,
-    });
+    };
+    if (mapOptions.mapId) {
+      delete mapOptions.styles;
+    }
+    mapInstanceRef.current = new maps.Map(mapRef.current, mapOptions);
     setMapInstance(mapInstanceRef.current);
 
     userMarkerRef.current = new AdvancedMarkerElement({

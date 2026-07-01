@@ -78,11 +78,17 @@ const MapView = forwardRef(function MapView(
   // the mapId so any AdvancedMarkers attached via legacy imperative code
   // continue to render correctly.
   const mergedOptions = useMemo(
-    () => ({
-      ...DEFAULT_OPTIONS,
-      mapId: GOOGLE_MAP_ID,
-      ...(options || {}),
-    }),
+    () => {
+      const opts = {
+        ...DEFAULT_OPTIONS,
+        mapId: GOOGLE_MAP_ID,
+        ...(options || {}),
+      };
+      if (opts.mapId) {
+        delete opts.styles;
+      }
+      return opts;
+    },
     [options],
   );
 

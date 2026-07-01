@@ -196,13 +196,17 @@ const SelectPickupPage = () => {
     if (!ready || !mapRef.current || mapInstanceRef.current) return;
 
     const center = pickup ? { lat: pickup.lat, lng: pickup.lng } : DEFAULT_MAP_CENTER;
-    const map = new maps.Map(mapRef.current, {
+    const mapOptions = {
       ...RAPIDO_MAP_OPTIONS,
       center,
       zoom: pickup ? 15 : DEFAULT_MAP_ZOOM,
       mapId: GOOGLE_MAP_ID,
       zoomControl: true,
-    });
+    };
+    if (mapOptions.mapId) {
+      delete mapOptions.styles;
+    }
+    const map = new maps.Map(mapRef.current, mapOptions);
     mapInstanceRef.current = map;
     setMapInstance(map);
     geocoderRef.current = new maps.Geocoder();
