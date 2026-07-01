@@ -75,74 +75,78 @@ const HelpDeskModal = ({ isOpen, onClose, userType, isPublic = false }) => {
 
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title="Help Desk">
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="p-5 sm:p-6 space-y-4">
         {isPublic && (
-          <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">
                 Your Name
               </label>
               <input
                 type="text"
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-lg text-sm shadow-sm placeholder-slate-400 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all"
                 placeholder="John Doe"
                 value={contactName}
                 onChange={(e) => setContactName(e.target.value)}
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">
                 Phone Number
               </label>
               <input
                 type="tel"
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-                placeholder="10-digit phone number"
+                className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-lg text-sm shadow-sm placeholder-slate-400 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all"
+                placeholder="Mobile number"
                 value={contactPhone}
                 onChange={(e) => setContactPhone(e.target.value)}
               />
             </div>
-          </>
+          </div>
         )}
         <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-            Subject
+          <label className="block text-sm font-medium text-slate-700 mb-1.5">
+            How can we help?
           </label>
           <input
             type="text"
-            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-            placeholder="What do you need help with?"
+            className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-lg text-sm shadow-sm placeholder-slate-400 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all"
+            placeholder="e.g., Issue with a recent ride, Payment question"
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
           />
         </div>
         <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-            Description
+          <label className="block text-sm font-medium text-slate-700 mb-1.5">
+            Details
           </label>
           <textarea
             rows={4}
-            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none"
-            placeholder="Please describe your issue in detail..."
+            className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-lg text-sm shadow-sm placeholder-slate-400 focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all resize-none"
+            placeholder="Please provide as much information as possible so we can assist you better..."
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
         </div>
 
         {error && (
-          <div className="text-sm text-rose-600 bg-rose-50 p-3 rounded-lg border border-rose-100">
-            {error}
+          <div className="text-sm text-rose-600 bg-rose-50 px-4 py-3 rounded-lg border border-rose-100 flex items-start gap-2">
+            <span className="shrink-0 mt-0.5">⚠️</span>
+            <span>{error}</span>
           </div>
         )}
 
-        <Button
-          type="submit"
-          fullWidth
-          loading={loading}
-          icon={Send}
-        >
-          Submit Ticket
-        </Button>
+        <div className="pt-2">
+          <Button
+            type="submit"
+            fullWidth
+            loading={loading}
+            icon={Send}
+            className="shadow-sm font-medium"
+          >
+            Send Message
+          </Button>
+        </div>
       </form>
     </Modal>
   );

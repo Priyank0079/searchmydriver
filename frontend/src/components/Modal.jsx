@@ -42,10 +42,10 @@ const Modal = ({
       {/* Content */}
       <div className={`relative bg-white rounded-2xl shadow-2xl w-full ${sizes[size]} animate-bounce-in overflow-hidden ${className}`}>
         {(title || showClose) && (
-          <div className="flex items-center justify-between p-4 border-b border-gray-50">
-            {title && <h3 className="text-lg font-semibold text-text">{title}</h3>}
+          <div className="flex items-center justify-between px-5 py-4 sm:px-6 border-b border-slate-100 bg-white">
+            {title && <h3 className="text-lg font-bold text-slate-800">{title}</h3>}
             {showClose && (
-              <button onClick={onClose} className="p-1.5 rounded-full hover:bg-gray-100 text-text-secondary transition-colors">
+              <button onClick={onClose} className="p-2 -mr-2 rounded-full hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors">
                 <X className="w-5 h-5" />
               </button>
             )}
